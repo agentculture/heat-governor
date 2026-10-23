@@ -245,7 +245,7 @@ def parse_when(text: str | None, *, now: float | None = None) -> float | None:
 
 
 def _is_temp(name: str) -> bool:
-    return name.startswith("zone:") or name in ("gpu:temp_c", "gpu:limit_c")
+    return name.startswith("zone:") or name == "gpu:temp_c"  # limit_c is a limit, not a reading
 
 
 def sensor_stats(
