@@ -245,6 +245,8 @@ def parse_when(text: str | None, *, now: float | None = None) -> float | None:
 
 
 def _is_temp(name: str) -> bool:
+    if name.startswith("nvme:"):
+        return not name.endswith(("_max_c", "_crit_c"))  # the drive's limits are not readings
     return name.startswith("zone:") or name == "gpu:temp_c"  # limit_c is a limit, not a reading
 
 

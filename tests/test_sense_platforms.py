@@ -169,3 +169,31 @@ def test_system_probe_cpu_memory_pressure_disks(tmp_path: Path) -> None:
     assert second["disk:nvme0n1:busy_pct"] == 50.0
     assert not any(k.startswith(("disk:nvme0n1p1", "disk:loop")) for k in second)
     assert second["cpu:mhz_max"] == 2400 and second["cpu:load1"] == 5.7
+
+
+def test_nvme_every_sensor_and_limits(tmp_path: Path) -> None:
+    import os
+
+    from heat_governor.recorder import _is_temp
+    from heat_governor.sense import SystemProbe
+
+    sysr = tmp_path / "sys"
+    dev = sysr / "devices" / "nvme0"
+    dev.mkdir(parents=True)
+    hw = sysr / "class" / "hwmon" / "hwmon1"
+    hw.mkdir(parents=True)
+    (hw / "name").write_text("nvme\n")
+    os.symlink(dev, hw / "device")
+    for i, (label, temp, mx, crit) in enumerate(
+        [("Composite", 58850, 82850, 84850), ("Sensor 1", 62850, 65261850, None)], start=1
+    ):
+        (hw / f"temp{i}_input").write_text(f"{temp}\n")
+        (hw / f"temp{i}_label").write_text(label + "\n")
+        (hw / f"temp{i}_max").write_text(f"{mx}\n")
+        if crit:
+            (hw / f"temp{i}_crit").write_text(f"{crit}\n")
+    out = SystemProbe(tmp_path / "proc", sysr).read()
+    assert out["nvme:nvme0:composite"] == 58.85 and out["nvme:nvme0:sensor_1"] == 62.85
+    assert out["nvme:nvme0:composite_crit_c"] == 84.85
+    assert "nvme:nvme0:sensor_1_max_c" not in out  # placeholder limit dropped
+    assert _is_temp("nvme:nvme0:sensor_1") and not _is_temp("nvme:nvme0:composite_crit_c")

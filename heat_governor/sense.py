@@ -199,12 +199,38 @@ class SystemProbe:
                 out[f"disk:{dev}:busy_pct"] = round(min(100.0, (busy_ms - prev[2]) / (dt * 10)), 1)
         self._disk_prev = seen
 
+    def _nvme(self, out: dict) -> None:
+        """Every NVMe temperature sensor from hwmon (no subprocess, no root):
+        ``nvme:<dev>:composite`` plus ``sensor_1``/``sensor_2``... where the drive
+        has them -- Composite is not necessarily the hottest spot (on the Sparks
+        Sensor 1 reads 4-6 C above it). The drive's own warning/critical limits are
+        kept as ``..._max_c``/``..._crit_c`` (limits, not readings); placeholder
+        limits (above 150 C) are dropped."""
+        for hw in sorted((self.sys / "class" / "hwmon").glob("hwmon*")):
+            if _read(hw / "name") != "nvme":
+                continue
+            try:
+                dev = os.path.basename(os.path.realpath(hw / "device")) or hw.name
+            except OSError:
+                dev = hw.name
+            for t in sorted(hw.glob("temp*_input")):
+                base = t.name[: -len("_input")]
+                label = (_read(hw / f"{base}_label") or base).strip().lower().replace(" ", "_")
+                value = _millideg(_read(t))
+                if value is not None:
+                    out[f"nvme:{dev}:{label}"] = value
+                for limit in ("max", "crit"):
+                    lim = _millideg(_read(hw / f"{base}_{limit}"))
+                    if lim is not None:
+                        out[f"nvme:{dev}:{label}_{limit}_c"] = lim
+
     def read(self) -> dict:
         out: dict = {}
         now = self._clock()
         self._cpu(out)
         self._mem(out)
         self._disks(out, now)
+        self._nvme(out)
         self._at = now
         return {k: v for k, v in out.items() if v is not None}
 
