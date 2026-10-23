@@ -158,7 +158,7 @@ prerequisites on PATH: `devex` (`cicd` delegates to `devex pr`), `agtag`
   (for example, a tuning result and why it held). Inside this repo the
   wrapper defaults to `--scope heat-governor --visibility public`, which
   writes to the **committed** `./.eidetic/memory`. The vendored SKILL.md
-  descriptions say "private / `~/.eidetic`", but they're stale; the script
+  descriptions say records go to a private home-directory store, but they're stale; the script
   is what runs. Pass `--visibility private` to keep a note out of git.
 - Keep docs grounded in what is on disk. Mark anything ahead of the code as
   `(planned)`.
