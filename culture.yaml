@@ -1,5 +1,5 @@
 agents:
-- suffix: culture-agent-template
+- suffix: heat-governor
   backend: claude
 gate:
   setup:
