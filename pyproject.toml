@@ -1,6 +1,6 @@
 [project]
 name = "heat-governor"
-version = "0.10.0"
+version = "0.10.1"
 description = "Governs CPU clock speed, fan speed and active cores to keep machines thermally balanced without resets, and records each run so the next one is tuned better."
 readme = "README.md"
 license = "Apache-2.0"
