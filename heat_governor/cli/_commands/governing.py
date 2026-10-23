@@ -161,6 +161,9 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     cli_set: set[str] = set()
     apply = True if args.apply else bool(dcfg.get("apply", False))
+    if args.once:
+        # one tick cannot also undo what it did on exit, so --once never acts
+        apply = False
     if args.apply:
         cli_set.add("apply")
     data_s = pick("data_dir", "data_dir", None)
@@ -395,7 +398,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="Change containers / GPU clocks (default: the config's daemon.apply, "
         "else report only).",
     )
-    p.add_argument("--once", action="store_true", help="One tick, then exit.")
+    p.add_argument("--once", action="store_true", help="One tick, then exit (always a dry run).")
     p.add_argument("--poll", type=float, help="Seconds between ticks (default 1).")
     p.add_argument("--batch", action="append", metavar="NAME", help="Govern NAME as batch.")
     p.add_argument(

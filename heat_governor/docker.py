@@ -59,8 +59,8 @@ class Docker:
             conn.request(method, path, body=data, headers=headers)
             resp = conn.getresponse()
             raw = resp.read()
-        except OSError as exc:
-            raise DockerError(f"docker socket {self.socket_path}: {exc}") from exc
+        except (OSError, http.client.HTTPException) as exc:
+            raise DockerError(f"docker socket {self.socket_path}: {exc!r}") from exc
         finally:
             conn.close()
         try:

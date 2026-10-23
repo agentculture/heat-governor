@@ -89,21 +89,27 @@ class Ledger:
         if docker is None:
             self.save()
             return
+        # drop an entry only once its action is undone (or the container is gone):
+        # a failed restore keeps the original limit on record for the next try
         for cid in sorted(self.paused):
             try:
                 if docker.inspect(cid).state == "paused":
                     docker.unpause(cid)
                     log(f"recover: unpaused {cid[:12]} (a pause a previous run made)")
+                self.paused.discard(cid)
             except DockerError as exc:
+                if "404" in str(exc):
+                    self.paused.discard(cid)
                 log(f"recover: {cid[:12]}: {exc}")
-        self.paused.clear()
         for cid, nano in sorted(self.nano_cpus.items()):
             try:
                 docker.set_nano_cpus(cid, restore_value(nano))
                 log(f"recover: restored {cid[:12]} NanoCpus={nano}")
+                del self.nano_cpus[cid]
             except DockerError as exc:
-                log(f"recover: {cid[:12]}: {exc}")
-        self.nano_cpus.clear()
+                if "404" in str(exc):
+                    del self.nano_cpus[cid]
+                log(f"recover: {cid[:12]}: {exc} (kept on record)")
         self.save()
 
 
@@ -169,7 +175,14 @@ class DutyCycler:
     A frozen process issues no new GPU kernels (an LLM decode step is 10-30 ms),
     so the heat it makes falls roughly in proportion to the duty. ``duty`` >=
     0.98 holds the containers paused; <= 0.02 keeps them running. Runs in its
-    own thread so the rhythm is not tied to the 1 Hz sensing loop."""
+    own thread so the rhythm is not tied to the 1 Hz sensing loop.
+
+    Two records of "ours": ``held`` is what this process has paused right now;
+    the ledger lists every container it is cycling, written once when cycling
+    starts and once when it ends (not on every pause), so a crash anywhere in a
+    cycle leaves a ledger entry that the next start's recover can act on --
+    recover unpauses only an entry still paused. All pause/unpause work holds
+    one lock, and a pause never starts once stop() has begun."""
 
     def __init__(
         self,
@@ -180,20 +193,24 @@ class DutyCycler:
         apply: bool,
         period_s: float = 2.0,
         sleep: Callable[[float], None] | None = None,
+        join_s: float = 30.0,
     ) -> None:
         self.docker = docker
         self.ledger = ledger
         self.log = log
         self.apply = apply
         self.period_s = period_s
+        self.join_s = join_s  # longer than one docker call can block
         self.duty = 0.0
         self.targets: dict[str, Container] = {}
+        self.held: set[str] = set()
         self.foreign: set[str] = set()
         self.cycles = 0
         self.paused_s = 0.0
         self._stop = threading.Event()
         self._sleep = sleep or self._stop.wait
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # duty / targets
+        self._act = threading.RLock()  # every pause / unpause / ledger change
         self._thread: threading.Thread | None = None
         self._last_logged_duty = -1.0
 
@@ -212,46 +229,67 @@ class DutyCycler:
 
     # -- primitives (own-pause rule)
     def _pause(self, c: Container) -> None:
-        if c.id in self.ledger.paused or c.id in self.foreign:
-            return
-        if not self.apply:
-            self.ledger.paused.add(c.id)  # simulated, never saved
-            return
-        try:
-            state = self.docker.inspect(c.id).state
-        except DockerError:
-            return
-        if state == "paused":
-            self.foreign.add(c.id)
-            self.log(f"foreign pause on {c.name} (not ours): leaving it alone")
-            return
-        if state != "running":
-            return
-        self.ledger.paused.add(c.id)
-        self.ledger.save()  # record BEFORE acting
-        try:
-            self.docker.pause(c.id)
-        except DockerError as exc:
-            self.ledger.paused.discard(c.id)
-            self.ledger.save()
-            self.log(f"pause {c.name} failed: {exc}")
+        with self._act:
+            if self._stop.is_set() or c.id in self.held:
+                return
+            if not self.apply:
+                self.held.add(c.id)  # simulated
+                return
+            try:
+                state = self.docker.inspect(c.id).state
+            except DockerError:
+                return
+            if state == "paused":  # paused, and not by us (not in held)
+                if c.id not in self.foreign:
+                    self.foreign.add(c.id)
+                    self.log(f"foreign pause on {c.name} (not ours): leaving it alone")
+                return
+            if state != "running":
+                return
+            if c.id in self.foreign:
+                self.foreign.discard(c.id)
+                self.log(f"{c.name} was unpaused by its owner: governing it again")
+            if c.id not in self.ledger.paused:
+                self.ledger.paused.add(c.id)
+                self.ledger.save()  # record BEFORE acting
+            try:
+                self.docker.pause(c.id)
+                self.held.add(c.id)
+            except DockerError as exc:
+                self.log(f"pause {c.name} failed: {exc}")
 
     def _unpause(self, cid: str) -> None:
-        if cid not in self.ledger.paused:
-            return
-        if self.apply:
-            try:
-                self.docker.unpause(cid)
-            except DockerError as exc:
-                self.log(f"unpause {cid[:12]} failed: {exc}")
+        with self._act:
+            if cid not in self.held:
                 return
-        self.ledger.paused.discard(cid)
-        if self.apply:
-            self.ledger.save()
+            if self.apply:
+                try:
+                    self.docker.unpause(cid)
+                except DockerError as exc:
+                    self.log(f"unpause {cid[:12]} failed: {exc}")
+                    return
+            self.held.discard(cid)
 
     def unpause_all(self) -> None:
-        for cid in list(self.ledger.paused):
-            self._unpause(cid)
+        with self._act:
+            for cid in list(self.held):
+                self._unpause(cid)
+
+    def release(self, cids) -> None:
+        """Unpause and drop from the ledger: the container is no longer cycled."""
+        with self._act:
+            changed = False
+            for cid in list(cids):
+                self._unpause(cid)
+                if cid in self.ledger.paused and cid not in self.held:
+                    self.ledger.paused.discard(cid)
+                    changed = True
+            if changed and self.apply:
+                self.ledger.save()
+
+    def release_all(self) -> None:
+        with self._act:
+            self.release(set(self.held) | set(self.ledger.paused))
 
     # -- one period
     def cycle(self) -> None:
@@ -259,12 +297,12 @@ class DutyCycler:
             duty = self.duty
             targets = dict(self.targets)
         # a container that left the target set (or stopped) is released at once
-        for cid in list(self.ledger.paused):
-            if cid not in targets:
-                self._unpause(cid)
+        gone = (set(self.held) | set(self.ledger.paused)) - set(targets)
+        if gone:
+            self.release(gone)
         self.foreign &= set(targets)
         if not targets or duty <= 0.02:
-            self.unpause_all()
+            self.release_all()
             self._sleep(self.period_s)
             return
         if duty >= 0.98:
@@ -298,7 +336,9 @@ class DutyCycler:
         self._thread.start()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop.set()  # no new pause can start after this
         if self._thread is not None:
-            self._thread.join(timeout=self.period_s * 3)
-        self.unpause_all()
+            self._thread.join(timeout=self.join_s)
+            if self._thread.is_alive():
+                self.log("duty cycler did not stop in time; releasing under the lock")
+        self.release_all()  # waits for any in-flight pause (same lock)

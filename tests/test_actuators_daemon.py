@@ -120,6 +120,9 @@ def test_daemon_tick_publishes_and_records(tmp_path: Path) -> None:
     d.tick()
     st = read_state(tmp_path / "state.json")
     assert st["level"] == "cool" and st["admit"] is True and st["platform"] == "spark"
+    # the state is published BEFORE the actuators run: containers show from the next tick
+    d.tick()
+    st = read_state(tmp_path / "state.json")
     assert {c["name"] for c in st["containers"]} == {"job", "lane"}
     set_temp(sysr, 0, 92800)
     d.tick()

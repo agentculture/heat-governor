@@ -36,7 +36,7 @@ Run = Callable[[list[str]], "tuple[int, str]"]
 
 def _run(argv: list[str]) -> tuple[int, str]:  # pragma: no cover - thin shell
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=8, check=False)
     except (OSError, subprocess.SubprocessError) as exc:
         return 127, str(exc)
     return p.returncode, (p.stdout or p.stderr).strip()

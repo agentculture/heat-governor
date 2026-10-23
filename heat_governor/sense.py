@@ -141,6 +141,7 @@ def read_fans(sys_root: Path = Path("/sys")) -> dict[str, float]:
     return out
 
 
+_TLIMIT_OK: bool | None = None  # does this driver know temperature.gpu.tlimit?
 _GPU_KEYS = ("temp_c", "power_w", "sm_mhz", "util_pct", "events", "tlimit_c")
 
 
@@ -163,9 +164,16 @@ def read_gpu_nvidia_smi(timeout: float = 3.0) -> dict[str, object]:
     driver reports it -- ``tlimit_c``: degrees of headroom left before the GPU's
     own thermal limit (GB10: 21 C at 73 C, so a limit near 94 C). ``limit_c`` =
     temp + headroom. Older drivers without the field fall back to the rest."""
+    global _TLIMIT_OK
     if not shutil.which("nvidia-smi"):
         return {}
-    out = _smi((*GPU_FIELDS, "temperature.gpu.tlimit"), timeout) or _smi(GPU_FIELDS, timeout)
+    out = ""
+    if _TLIMIT_OK is not False:
+        out = _smi((*GPU_FIELDS, "temperature.gpu.tlimit"), timeout)
+        if _TLIMIT_OK is None:
+            _TLIMIT_OK = bool(out)  # remember: one probe, not two processes every tick
+    if not out:
+        out = _smi(GPU_FIELDS, timeout)
     vals = [v.strip() for v in out.splitlines()[0].split(",")] if out else []
     res: dict[str, object] = {}
     for key, raw in zip(_GPU_KEYS, vals):

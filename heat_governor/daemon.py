@@ -113,6 +113,7 @@ class Daemon:
             gpuclock if gpuclock is not None else (GpuClock() if opts.gpu_clock else None)
         )
         self._reload_at = 0.0
+        self._gpu_retry_at = 0.0
         self.config_error: str | None = None
 
     # -- logging: to the log sink and into the record
@@ -144,7 +145,11 @@ class Daemon:
             found[c.id] = Container(c.id, c.name, c.state, rule.role, cap, c.nano_cpus)
         gone = set(self.containers) - set(found)
         for cid in gone:
-            self._log(f"container {self.containers[cid].name} left the governed set")
+            old = self.containers[cid]
+            self._log(f"container {old.name} left the governed set")
+            if self.capper and (cid in self.ledger.nano_cpus or self.capper.current.get(cid)):
+                self._fenced(f"release {old.name}", lambda old=old: self.capper.set(old, None))
+                self.capper.current.pop(cid, None)
         for cid in set(found) - set(self.containers):
             c = found[cid]
             capped = "yes" if c.cpu_cap or c.role == "batch" else "no"
@@ -181,17 +186,24 @@ class Daemon:
             cfg.mtime = new.mtime
             return
         changes = config_diff(cfg.data, new.data)
+        later = self._restart_only_changes(cfg.daemon, new.daemon)
         self.apply_config(new, profile)
         self.config_error = None
         self._log(
             f"config reloaded from {new.path}: " + ("; ".join(changes) or "no effective change")
         )
+        if later:
+            self._log(
+                "these [daemon] keys take effect only after a restart "
+                f"(systemctl --user restart heat-governor): {', '.join(later)}"
+            )
 
     def apply_config(self, cfg: Config, profile: Profile) -> None:
         self.opts.config = cfg
         self.profile = profile
         self.ctrl.set_profile(profile)
         self.sensor.watched = profile.zones
+        self.sensor.gpu = profile.gpu
         if self.cycler:
             self.cycler.period_s = profile.duty_period_s
         d = cfg.daemon
@@ -202,6 +214,11 @@ class Daemon:
             self.set_gpu_clock(bool(d["gpu_clock"]))
         self.opts.containers = tuple(cfg.containers)
         self._discovered_at = 0.0  # re-discover on the next tick
+
+    RESTART_ONLY = ("apply", "listen", "state", "data_dir", "record", "fsync", "reload")
+
+    def _restart_only_changes(self, old: dict, new: dict) -> list[str]:
+        return [k for k in self.RESTART_ONLY if old.get(k) != new.get(k)]
 
     def set_gpu_clock(self, on: bool) -> None:
         if on == self.opts.gpu_clock:
@@ -215,9 +232,13 @@ class Daemon:
             self._release_gpu("gpu clock control off")
 
     # -- GPU clock ceiling
-    def _gpu(self, want: int | None) -> None:
+    GPU_RETRY_S = 30.0  # after a failed helper call, wait before trying again
+
+    def _gpu(self, want: int | None, now: float = 0.0) -> None:
         g = self.gpuclock
         if not (self.opts.gpu_clock and g and g.available) or want == g.ceiling_mhz:
+            return
+        if now < self._gpu_retry_at:
             return
         if not self.opts.apply:
             if want != getattr(self, "_gpu_would", "unset"):
@@ -229,11 +250,15 @@ class Daemon:
             if ok:
                 self.ledger.gpu_locked = False
                 self.ledger.save()
+            else:
+                self._gpu_retry_at = now + self.GPU_RETRY_S
             self._log("gpu ceiling removed" if ok else f"gpu reset FAILED: {out}")
             return
         self.ledger.gpu_locked = True
         self.ledger.save()  # record BEFORE acting
         ok, out = g.lock(want)
+        if not ok:
+            self._gpu_retry_at = now + self.GPU_RETRY_S
         self._log(f"gpu ceiling {want} MHz" if ok else f"gpu lock {want} FAILED: {out}")
 
     def _release_gpu(self, why: str) -> None:
@@ -247,12 +272,11 @@ class Daemon:
 
     # -- one tick
     def tick(self) -> Decision:
+        """Sense, decide and PUBLISH first; only then touch docker or the GPU
+        helper. A slow or failing actuator can delay its own action, never the
+        admission signal clients depend on."""
         now = self.clock()
         self.maybe_reload(now)
-        if self.docker and now - self._discovered_at >= self.opts.discover_every_s:
-            self._observed_at = time.time()
-            self.discover()
-            self._discovered_at = now
         reading = self.sensor.read()
         d = self.ctrl.step(reading.temp_c, now, reading.gpu_temp_c)
         if self.last is None or d.level != self.last.level:
@@ -261,20 +285,12 @@ class Daemon:
                 f"temp={d.temp_c} eff={d.effective_c} source={d.source} ({d.reason})"
             )
         self.last = d
-        if self.cycler:
-            self.cycler.set(d.duty, self.batch())
-        if self.capper:
-            for c in self.capped():
-                try:
-                    self.capper.set(c, d.cpus, observed_at=self._observed_at)
-                except DockerError as exc:
-                    self._log(f"cap {c.name}: {exc}")
-        self._gpu(d.gpu_mhz)
         doc = self.state_doc(d, reading, now)
         if self.opts.state_path:
             write_state(self.opts.state_path, doc)
         if self.server:
             self.server.doc = doc
+        self._act(d, now)
         if self.recorder:
             self.recorder.write(
                 {
@@ -294,6 +310,28 @@ class Daemon:
                 }
             )
         return d
+
+    def _act(self, d: Decision, now: float) -> None:
+        """Every actuator fenced: one failure is logged and the rest still run."""
+        if self.docker and now - self._discovered_at >= self.opts.discover_every_s:
+            self._observed_at = time.time()
+            self._discovered_at = now
+            self._fenced("discover", self.discover)
+        if self.cycler:
+            self.cycler.set(d.duty, self.batch())
+        if self.capper:
+            for c in self.capped():
+                self._fenced(
+                    f"cap {c.name}",
+                    lambda c=c: self.capper.set(c, d.cpus, observed_at=self._observed_at),
+                )
+        self._fenced("gpu ceiling", lambda: self._gpu(d.gpu_mhz, now))
+
+    def _fenced(self, what: str, fn) -> None:
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001 - one actuator must not stop the loop
+            self._log(f"{what}: {exc!r}")
 
     def state_doc(self, d: Decision, reading: Reading, now: float) -> dict:
         lim = self.profile.limits
@@ -337,7 +375,7 @@ class Daemon:
                 {
                     "name": c.name,
                     "role": c.role,
-                    "paused_by_governor": c.id in self.ledger.paused,
+                    "paused_by_governor": bool(self.cycler and c.id in self.cycler.held),
                     "cpus": self.capper.current.get(c.id) if self.capper else None,
                 }
                 for c in self.containers.values()

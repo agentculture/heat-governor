@@ -43,6 +43,10 @@ directory (mount the directory, not the file: an atomic rename does not show thr
 | `applying` | bool | Whether the daemon changes containers (`--apply`) or only signals. |
 | `containers` | list | Governed containers: `name`, `role`, `paused_by_governor`, `cpus`. |
 
+The level, admission and temperatures are this tick's. Actuator results (`containers`, `gpu_ceiling_mhz`)
+are as of the previous tick: the daemon publishes before it touches docker or the GPU helper, so a slow or
+failing actuator can never delay the admission signal.
+
 ## Client rules
 
 1. **Missing or stale** (`now - at > stale_after_s`) means no governor is running there. The reference

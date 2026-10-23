@@ -112,7 +112,7 @@ class _Ramp:
     wanted level directly (the workload is already running at full speed)."""
 
     def __init__(self, levels: list[int]) -> None:
-        self.levels = sorted(levels)
+        self.levels = sorted(set(levels))
         self.cur: int | None = None
         self.at: float | None = None
         self.started = False
@@ -151,17 +151,14 @@ class Controller:
         self._below_since: float | None = None
         self.duty = 0.0
         self._duty_at: float | None = None
-        self.cpus: int | None = None
-        self._cpus_at: float | None = None
-        self._started = False
-        self._cpu_levels = sorted({c for _, c in profile.cpu_bands})
+        self._cpu = _Ramp([c for _, c in profile.cpu_bands])
         self._gpu = _Ramp([m for _, m in profile.gpu_clock_bands])
 
     def set_profile(self, profile: Profile) -> None:
         """Swap the profile in place (a config reload), keeping the history, the
         current level, duty and CPU cap, so a reload causes no jump."""
         self.profile = profile
-        self._cpu_levels = sorted({c for _, c in profile.cpu_bands})
+        self._cpu.levels = sorted({c for _, c in profile.cpu_bands})
         self._gpu.levels = sorted(m for _, m in profile.gpu_clock_bands)
 
     # -- pieces -------------------------------------------------------------
@@ -203,31 +200,6 @@ class Controller:
         self._duty_at = now
         return round(self.duty, 3)
 
-    def _cpus(self, want: int | None, now: float) -> int | None:
-        """Drops (a smaller cap) apply at once; rises one band per ramp_s.
-        ``None`` (no cap) is the top of the ladder."""
-        cur = self.cpus
-
-        def rank(c: int | None) -> float:
-            return float("inf") if c is None else float(c)
-
-        if not self._started:
-            # fresh start: the container is already running at its own limit, so
-            # apply the band the temperature asks for; the ramp governs later rises
-            self.cpus, self._cpus_at = want, now
-            return self.cpus
-        if rank(want) <= rank(cur):
-            if want != cur:
-                self.cpus, self._cpus_at = want, now
-            return self.cpus
-        if self._cpus_at is not None and now - self._cpus_at < self.profile.ramp_s:
-            return cur
-        higher = [c for c in self._cpu_levels if rank(c) > rank(cur)]
-        nxt: int | None = higher[0] if higher else None
-        self.cpus = want if rank(want) <= rank(nxt) else nxt
-        self._cpus_at = now
-        return self.cpus
-
     # -- the step -----------------------------------------------------------
     def step(self, temp: float | None, now: float, gpu_temp: float | None = None) -> Decision:
         p = self.profile
@@ -235,9 +207,7 @@ class Controller:
             self.level = "hot" if self.level != "critical" else "critical"
             self._below_since = None
             duty = self._duty(interp(p.duty_curve, p.limits.hot_c), now)
-            lowest = self._cpu_levels[0] if self._cpu_levels else None
-            self.cpus, self._cpus_at = lowest, now
-            self._started = True
+            lowest = self._cpu.force(self._cpu.levels[0] if self._cpu.levels else None, now)
             gpu_low = self._gpu.force(self._gpu.levels[0] if self._gpu.levels else None, now)
             return Decision(
                 self.level, False, 0.0, duty, lowest, None, None, 0.0, "sensor_lost", gpu_low
@@ -256,9 +226,8 @@ class Controller:
         if level == "critical":
             duty_target = 1.0
         duty = self._duty(duty_target, now)
-        cpus = self._cpus(band_cpus(eff, p), now)
+        cpus = self._cpu.step(band_cpus(eff, p), now, p.ramp_s)
         gpu_mhz = self._gpu.step(_band(eff, p.gpu_clock_bands), now, p.ramp_s)
-        self._started = True
         reason = "rising" if rate > 0.5 else "steady" if rate > -0.5 else "falling"
         return Decision(
             level,

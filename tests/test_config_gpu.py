@@ -198,7 +198,9 @@ def test_daemon_locks_records_first_and_resets_on_stop(tmp_path: Path) -> None:
     d.tick()
     assert gpu.calls == [("lock", 1800)]
     assert json.loads((tmp_path / "data" / "ledger.json").read_text())["gpu_locked"] is True
+    d.tick()  # the state reflects actuator results from the previous tick
     assert read_state(tmp_path / "state.json")["gpu_ceiling_mhz"] == 1800
+    assert gpu.calls == [("lock", 1800)]
     d.shutdown()
     assert gpu.calls[-1] == ("reset",)
     assert json.loads((tmp_path / "data" / "ledger.json").read_text())["gpu_locked"] is False
