@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-10-23
+
+### Changed
+
+- Re-initialized CLAUDE.md from the scaffold seed into a full heat-governor prompt (current-vs-planned state, commands, CLI architecture, harness invariants, conventions).
+- Rewrote README.md, QWEN.md, AGENTS.override.md and AGENTS.colleague.md to describe heat-governor instead of the culture-agent-template; thermal-governing capabilities are marked (planned).
+- .pi/SYSTEM.md: associate lane may read sensors but never actuate cpufreq, fan or CPU-hotplug controls.
+
 ## [0.10.0] - 2026-10-06
 
 ### Added

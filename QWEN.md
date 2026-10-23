@@ -2,128 +2,95 @@
 
 This file provides guidance to Qwen Code when working with code in this
 repository. Qwen Code's context loader reads exactly `QWEN.md` and `AGENTS.md`
-in a directory; this repo deliberately ships only `QWEN.md` — there is no
-`AGENTS.md` here (each harness gets its own file; see "Prompt files by
-harness" below), so this file is the sole source of project guidance for a
-Qwen Code session.
+in a directory. This repo deliberately ships only `QWEN.md` (there is no
+`AGENTS.md`; each harness gets its own file), so this file is the sole source
+of project guidance for a Qwen Code session.
 
 ## What this project is
 
-`heat-governor` is a **clonable template for AgentCulture mesh agents**.
-It is a working, minimal example of the sibling pattern every Culture agent
-follows: an agent-first CLI, a mesh identity, the canonical skill kit, and a
-buildable/deployable package baseline. Clone it, rename the package, edit
-`culture.yaml`, and you have a new agent that `steward doctor` recognizes.
+`heat-governor` is an AgentCulture mesh agent that **governs CPU clock speed,
+fan speed and active cores to keep machines thermally balanced without
+resets, and records each run so the next one is tuned better.**
 
-It is a sibling to [`guildmaster`](https://github.com/agentculture/guildmaster)
-(the **skills supplier**), [`steward`](https://github.com/agentculture/steward)
-(**alignment** — `steward doctor`, the sibling-pattern baseline), and
-[`teken`](https://github.com/agentculture/teken) (the **afi-cli** "Agent First
-Interface" scaffolder this CLI is cited from) within the Organic Development
-framework.
+It was scaffolded from `culture-agent-template`. Today the repo holds only the
+sibling-pattern baseline: an agent-first CLI, a mesh identity, the vendored
+guildmaster skill kit, and a CI/deploy pipeline. Thermal sensing, the
+clock/fan/core actuators, the control loop and per-run records are all
+**(planned)**. No domain code exists yet. The CLI's `learn` / `explain` text
+still calls the project "a clonable template".
+
+Actuating hardware (cpufreq, fan or CPU-hotplug controls) changes the live
+machine, not the repo. Don't run it without the operator's go-ahead, and keep
+tests off the real `/sys`.
 
 ## Prompt files by harness
 
-This repo's root carries one prompt file per agent harness, each read by
-exactly one of them — there is no shared base file for them to inherit from:
-
-- **Claude Code** → [`CLAUDE.md`](CLAUDE.md) (the fullest write-up; read it
-  first if you are new to the repo).
+- **Claude Code** → [`CLAUDE.md`](CLAUDE.md) (the fullest write-up).
 - **Pi / associate** → [`AGENTS.override.md`](AGENTS.override.md) for context,
   plus [`.pi/SYSTEM.md`](.pi/SYSTEM.md) for its system prompt.
 - **colleague** → [`AGENTS.colleague.md`](AGENTS.colleague.md).
 - **Qwen Code** → this file.
 
-## Identity
+`culture.yaml` declares `suffix: heat-governor`, `backend: claude`, so the
+mesh resident reads `CLAUDE.md`. A Qwen Code session here is a local tool
+session. It reads `QWEN.md` regardless of that declaration, and running Qwen
+Code neither requires nor changes it. Never add a root `AGENTS.md`.
 
-Declared in `culture.yaml`:
+## Commands
 
-```yaml
-agents:
-- suffix: heat-governor
-  backend: claude
+```bash
+uv sync
+uv run pytest -n auto                                # full suite
+uv run pytest tests/test_cli.py::test_whoami_json    # a single test
+uv run heat-governor whoami [--json]
+uv run black --check heat_governor tests && uv run isort --check-only heat_governor tests
+uv run flake8 heat_governor tests && uv run bandit -c pyproject.toml -r heat_governor
+uv run teken cli doctor . --strict                   # agent-first rubric gate
+uv run python scripts/harness-smoke.py --stage config
 ```
-
-`backend: claude` fixes the *mesh resident* prompt file to `CLAUDE.md` — the
-mesh runtime reads that file, not this one. A Qwen Code session working in a
-clone of this repo is a separate, local tool session; it reads `QWEN.md`
-regardless of what `culture.yaml` declares, and running Qwen Code here neither
-requires nor changes that declaration. The declaration and the resident prompt
-together satisfy the two invariants `steward doctor` verifies:
-**prompt-file-present** and **backend-consistency** (`claude` ↔ `CLAUDE.md`).
-
-## Cloning this template (re-initialization)
-
-When you start a new agent from this template:
-
-1. Rename the package directory `heat_governor/` → `<your_module>/`
-   and replace `heat_governor` (module) / `heat-governor`
-   (CLI and dist name) throughout `pyproject.toml`, the package, `tests/`,
-   `sonar-project.properties`, and `README.md`. The name is hard-coded in
-   ~100 places, so list every occurrence first rather than renaming by hand
-   (`git grep` is portable and skips `.git` / untracked `__pycache__`):
-
-   ```bash
-   git grep -nF -e 'heat-governor' -e 'heat_governor'
-   ```
-
-2. Set your `suffix` (and `backend`) in `culture.yaml`. `whoami` and `doctor`
-   then reflect the new identity with no further code change.
-3. Rewrite `CLAUDE.md` (and this file, and the other two harness files) to
-   describe your agent.
-4. Re-vendor the skill kit you need from guildmaster (see
-   `docs/skill-sources.md`) — keep only the skills your agent uses.
 
 ## The CLI
 
-The CLI is cited (cite-don't-import) from teken's `python-cli` reference
-(`teken cli cite`), so the runtime package has **no third-party dependencies**;
-`teken` (a.k.a. `afi-cli`) is a dev dependency only. Agent-first verbs:
+The CLI is cited from teken's `python-cli` reference, and the runtime package
+has **no third-party dependencies**. The verbs are `whoami`, `learn`,
+`explain <path>`, `overview`, `doctor` and `cli overview`.
 
-- `heat-governor whoami` — identity from `culture.yaml`.
-- `heat-governor learn` — structured self-teaching prompt.
-- `heat-governor explain <path>` — markdown docs for any noun/verb.
-- `heat-governor overview` — descriptive snapshot of the agent.
-- `heat-governor doctor` — check the agent-identity invariants.
-- `heat-governor cli overview` — describe the CLI surface itself.
+Contract: every command supports `--json`. Results go to stdout and errors to
+stderr, never mixed. Exit codes are `0` success, `1` user error, `2`
+environment error, `3+` reserved. Handlers raise `CliError` on failure.
 
-Conventions: every command supports `--json`; results go to stdout, errors and
-diagnostics to stderr (never mixed); exit codes are `0` success, `1` user
-error, `2` environment error, `3+` reserved. The agent-first rubric is
-enforced in CI by `teken cli doctor . --strict`.
-
-## Skills
-
-`.claude/skills/` vendors the **canonical guildmaster skill kit**
-(cite-don't-import). Provenance and the re-sync procedure live in
-`docs/skill-sources.md`. Do not reformat or edit vendored scripts — re-sync
-from guildmaster instead.
+To add a verb, create a `register(sub)` module in
+`heat_governor/cli/_commands/`, wire it in `_build_parser()`, and add an
+`explain` entry in `heat_governor/explain/catalog.py`. A noun with action
+verbs also needs an `overview` verb.
 
 ## Conventions
 
-- **Every PR bumps the version** — even docs/config/CI. Use the
-  `version-bump` skill; the `version-check` CI job blocks merge otherwise.
-- **Tests**: `uv run pytest -n auto`. **Lint**: black, isort, flake8 (line
-  length 100), bandit, markdownlint.
-- **Deploy**: pushing to `main` publishes to PyPI via Trusted Publishing
-  (`.github/workflows/publish.yml`); PRs do a TestPyPI dry-run.
+- **Every PR bumps the version** (`version-bump` skill). The `version-check`
+  CI job blocks merge otherwise.
+- **Lint:** black, isort, flake8 (line length 100), bandit, markdownlint.
+  Coverage must stay at least 60%.
+- **Deploy:** a push to `main` that touches the package publishes to PyPI via
+  Trusted Publishing. PRs publish a dry-run build to TestPyPI.
+- `.claude/skills/` is vendored **verbatim** from guildmaster
+  (`docs/skill-sources.md`). Never edit those files; re-sync from upstream
+  instead. `.qwen/skills` is a symlink onto that tree.
 
 ## Layout
 
 ```text
-heat_governor/   agent-first CLI (cited from teken's python-cli reference)
+heat_governor/            agent-first CLI (cited from teken's python-cli reference)
   cli/                    parser, error/output contract, _commands/ (verbs)
   explain/                markdown catalog for `explain`
-tests/                    pytest smoke + introspection tests
+tests/                    pytest: CLI, doctor, harness registries, smoke, secret scan
+scripts/                  harness-smoke.py, scan-secrets.py
 .claude/skills/           vendored guildmaster skill kit (cite-don't-import)
-docs/skill-sources.md     skill provenance ledger
-culture.yaml              mesh identity (suffix + backend)
+docs/                     harness selection/automation contract, skill provenance
+culture.yaml              mesh identity (suffix + backend) and `gate` commands
 .github/workflows/        tests + deploy (PyPI Trusted Publishing)
 ```
 
-This file describes the repository **as it exists on disk today**. When you
-edit, keep claims grounded in checked-in reality; if a section drifts ahead of
-reality, mark it `(planned)` or move it under a `## Roadmap` heading. For the
-full set of workflow conventions (worktree layout, memory discipline,
-`ask-colleague` usage), see [`CLAUDE.md`](CLAUDE.md) — those conventions apply
-to work in this repo regardless of which harness is doing it.
+This file describes the repository **as it exists on disk today**. Keep any
+edits grounded in what is checked in, and mark anything ahead of the code as
+`(planned)`. For workflow conventions (worktree layout, memory discipline,
+`ask-colleague` usage), see [`CLAUDE.md`](CLAUDE.md).
