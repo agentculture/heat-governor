@@ -307,6 +307,7 @@ class Daemon:
                     "zones": {z.key: z.temp_c for z in reading.zones},
                     "fans": reading.fans,
                     "gpu": reading.gpu,
+                    "system": reading.system,
                 }
             )
         return d

@@ -125,3 +125,47 @@ def test_zone_raising_eagain_reads_as_unreadable(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr("heat_governor.sense.os.read", fake_read)
     zones = read_zones(sysr)
     assert zones[1].temp_c is None and zones[0].temp_c == 83.8
+
+
+def test_system_probe_cpu_memory_pressure_disks(tmp_path: Path) -> None:
+    from heat_governor.sense import SystemProbe
+
+    proc, sysr = tmp_path / "proc", tmp_path / "sys"
+    (proc / "pressure").mkdir(parents=True)
+    (sysr / "devices/system/cpu/cpu0/cpufreq").mkdir(parents=True)
+    (sysr / "devices/system/cpu/online").write_text("0-19\n")
+    (sysr / "devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").write_text("2400000\n")
+    (proc / "loadavg").write_text("5.70 5.6 5.5 2/900 123\n")
+    (proc / "meminfo").write_text(
+        "MemTotal: 1000000 kB\nMemAvailable: 250000 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n"
+    )
+    (proc / "pressure/io").write_text(
+        "some avg10=62.70 avg60=61.16 avg300=56.55 total=1\n"
+        "full avg10=55.78 avg60=1 avg300=1 total=1\n"
+    )
+    clock = iter([0.0, 2.0])
+
+    def stat(user, idle, iowait):
+        return f"cpu  {user} 0 0 {idle} {iowait} 0 0 0 0 0\n"
+
+    def disks(rd, wr, busy):
+        return (
+            f" 259 0 nvme0n1 1 0 {rd} 0 1 0 {wr} 0 0 {busy} 0 0 0 0 0 0 0\n"
+            " 259 1 nvme0n1p1 1 0 999 0 1 0 999 0 0 999 0 0 0 0 0 0 0\n"
+            "   7 0 loop0 1 0 999 0 0 0 0 0 0 9 0 0 0 0 0 0 0\n"
+        )
+
+    (proc / "stat").write_text(stat(100, 100, 0))
+    (proc / "diskstats").write_text(disks(0, 0, 0))
+    probe = SystemProbe(proc, sysr, clock=lambda: next(clock))
+    first = probe.read()
+    assert "cpu:busy_pct" not in first and first["cpu:online"] == 20
+    assert first["mem:used_pct"] == 75.0 and first["psi:io_some_avg10"] == 62.7
+    (proc / "stat").write_text(stat(175, 100, 25))  # 75 busy + 25 iowait of 100 jiffies
+    (proc / "diskstats").write_text(disks(4_000_000, 2_000_000, 1000))
+    second = probe.read()
+    assert second["cpu:busy_pct"] == 75.0 and second["cpu:iowait_pct"] == 25.0
+    assert second["disk:nvme0n1:read_mbs"] == 1024.0  # 4e6 sectors * 512 B / 2 s
+    assert second["disk:nvme0n1:busy_pct"] == 50.0
+    assert not any(k.startswith(("disk:nvme0n1p1", "disk:loop")) for k in second)
+    assert second["cpu:mhz_max"] == 2400 and second["cpu:load1"] == 5.7

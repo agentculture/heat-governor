@@ -267,7 +267,8 @@ def sensor_stats(
             continue
         first = t if first is None else first
         last = t
-        for name, v in flat_sensors(rec.get("zones"), rec.get("gpu"), rec.get("fans")).items():
+        sensors = flat_sensors(rec.get("zones"), rec.get("gpu"), rec.get("fans"), rec.get("system"))
+        for name, v in sensors.items():
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 series.setdefault(name, []).append(float(v))
     out = {}

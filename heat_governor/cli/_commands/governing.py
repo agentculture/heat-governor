@@ -482,7 +482,10 @@ def register(sub: argparse._SubParsersAction) -> None:
         "sensors", help="Every sensor separately over a time window: min, mean, p95, max."
     )
     p.add_argument("--data-dir", help="Default $XDG_STATE_HOME/heat-governor.")
-    p.add_argument("--since", help="2026-10-23T16:00:00Z, 16:00 (today UTC), -30m or epoch.")
+    p.add_argument(
+        "--since",
+        help="2026-10-23T16:00:00Z, 16:00 (today UTC), epoch, or relative as --since=-30m.",
+    )
     p.add_argument("--until", help="Same forms as --since (default: now).")
     p.add_argument("--above", type=float, help="Also count seconds at or above this C.")
     p.add_argument("--match", help="Only sensors whose name contains this (text output).")

@@ -23,6 +23,9 @@ GPU_FIELDS = (
     "clocks.sm",
     "utilization.gpu",
     "clocks_event_reasons.active",
+    "clocks.gr",
+    "clocks.mem",
+    "utilization.memory",
 )
 
 
@@ -45,6 +48,7 @@ class Reading:
     watched: tuple[str, ...]
     fans: dict[str, float] = field(default_factory=dict)
     gpu: dict[str, object] = field(default_factory=dict)
+    system: dict[str, float] = field(default_factory=dict)
 
     def watched_zones(self) -> list[Zone]:
         return [z for z in self.zones if not self.watched or z.type in self.watched]
@@ -69,7 +73,10 @@ class Reading:
         """Every sensor under its own flat name -- ``zone:<index>:<type>``,
         ``gpu:<field>``, ``fan:<name>`` -- so results can be told apart per sensor."""
         return flat_sensors(
-            {z.key: z.temp_c for z in self.zones}, self.gpu, self.fans  # type: ignore[arg-type]
+            {z.key: z.temp_c for z in self.zones},
+            self.gpu,
+            self.fans,  # type: ignore[arg-type]
+            self.system,
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -85,11 +92,121 @@ class Reading:
         }
 
 
-def flat_sensors(zones: dict, gpu: dict, fans: dict) -> dict[str, float | str | None]:
+def flat_sensors(
+    zones: dict, gpu: dict, fans: dict, system: dict | None = None
+) -> dict[str, float | str | None]:
     out: dict[str, float | str | None] = {f"zone:{k}": v for k, v in (zones or {}).items()}
     out |= {f"gpu:{k}": v for k, v in (gpu or {}).items()}
     out |= {f"fan:{k}": v for k, v in (fans or {}).items()}
+    out |= dict(system or {})  # already named cpu:* / mem:* / psi:* / disk:<dev>:*
     return out
+
+
+_DISK_RE = ("nvme", "sd", "mmcblk", "vd")
+
+
+class SystemProbe:
+    """CPU, memory, pressure and per-disk I/O from /proc and /sys, once a tick.
+
+    Rates (CPU busy %, disk MB/s and % busy) are deltas against the previous
+    read, so the first read reports none of them. Every field is optional: a
+    kernel without /proc/pressure (the Orin) simply has no ``psi:*`` keys."""
+
+    def __init__(
+        self, proc_root: Path = Path("/proc"), sys_root: Path = Path("/sys"), clock=time.monotonic
+    ) -> None:
+        self.proc = proc_root
+        self.sys = sys_root
+        self._clock = clock
+        self._cpu_prev: tuple[float, float] | None = None
+        self._disk_prev: dict[str, tuple[float, float, float]] = {}
+        self._at: float | None = None
+
+    def _cpu(self, out: dict) -> None:
+        raw = _read(self.proc / "stat") or ""
+        line = raw.splitlines()[0].split() if raw else []
+        if len(line) > 5 and line[0] == "cpu":
+            vals = [float(x) for x in line[1:9]]
+            idle = vals[3] + vals[4]  # idle + iowait
+            total = sum(vals)
+            if self._cpu_prev is not None:
+                dt, di = total - self._cpu_prev[0], idle - self._cpu_prev[1]
+                if dt > 0:
+                    out["cpu:busy_pct"] = round(100.0 * (1 - di / dt), 1)
+                    out["cpu:iowait_pct"] = (
+                        round(100.0 * (vals[4] - self._cpu_prev[2]) / dt, 1)
+                        if len(self._cpu_prev) > 2
+                        else None
+                    )
+            self._cpu_prev = (total, idle, vals[4])
+        online = _read(self.sys / "devices/system/cpu/online")
+        if online:
+            n = 0
+            for part in online.split(","):
+                a, _, b = part.partition("-")
+                n += (int(b) - int(a) + 1) if b else 1
+            out["cpu:online"] = n
+        freqs = []
+        for f in self.sys.glob("devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq"):
+            raw = _read(f)
+            if raw and raw.isdigit():
+                freqs.append(int(raw) / 1000.0)
+        if freqs:
+            out["cpu:mhz_avg"] = round(sum(freqs) / len(freqs))
+            out["cpu:mhz_max"] = round(max(freqs))
+        load = (_read(self.proc / "loadavg") or "").split()
+        if load:
+            out["cpu:load1"] = float(load[0])
+
+    def _mem(self, out: dict) -> None:
+        info: dict[str, float] = {}
+        for line in (_read(self.proc / "meminfo") or "").splitlines():
+            k, _, v = line.partition(":")
+            try:
+                info[k] = float(v.split()[0]) / 1024.0  # MiB
+            except (ValueError, IndexError):
+                continue
+        if "MemTotal" in info and "MemAvailable" in info:
+            out["mem:avail_mib"] = round(info["MemAvailable"])
+            out["mem:used_pct"] = round(100.0 * (1 - info["MemAvailable"] / info["MemTotal"]), 1)
+        if "SwapTotal" in info and "SwapFree" in info:
+            out["mem:swap_used_mib"] = round(info["SwapTotal"] - info["SwapFree"])
+        for kind in ("memory", "io", "cpu"):
+            raw = _read(self.proc / "pressure" / kind)
+            for line in (raw or "").splitlines():
+                parts = line.split()
+                if parts and parts[0] in ("some", "full") and parts[1].startswith("avg10="):
+                    out[f"psi:{kind}_{parts[0]}_avg10"] = float(parts[1].split("=")[1])
+
+    def _disks(self, out: dict, now: float) -> None:
+        dt = (now - self._at) if self._at is not None else None
+        seen: dict[str, tuple[float, float, float]] = {}
+        for line in (_read(self.proc / "diskstats") or "").splitlines():
+            f = line.split()
+            if len(f) < 14:
+                continue
+            dev = f[2]
+            if not dev.startswith(_DISK_RE) or (dev[-1].isdigit() and "p" in dev[-3:]):
+                continue  # whole disks only (nvme0n1, sda, mmcblk0), not partitions
+            if dev.startswith("sd") and dev[-1].isdigit():
+                continue
+            rd, wr, busy_ms = float(f[5]), float(f[9]), float(f[12])  # sectors, sectors, ms
+            seen[dev] = (rd, wr, busy_ms)
+            prev = self._disk_prev.get(dev)
+            if prev and dt and dt > 0:
+                out[f"disk:{dev}:read_mbs"] = round((rd - prev[0]) * 512 / 1e6 / dt, 2)
+                out[f"disk:{dev}:write_mbs"] = round((wr - prev[1]) * 512 / 1e6 / dt, 2)
+                out[f"disk:{dev}:busy_pct"] = round(min(100.0, (busy_ms - prev[2]) / (dt * 10)), 1)
+        self._disk_prev = seen
+
+    def read(self) -> dict:
+        out: dict = {}
+        now = self._clock()
+        self._cpu(out)
+        self._mem(out)
+        self._disks(out, now)
+        self._at = now
+        return {k: v for k, v in out.items() if v is not None}
 
 
 def _read(path: Path) -> str | None:
@@ -156,7 +273,17 @@ def read_fans(sys_root: Path = Path("/sys")) -> dict[str, float]:
 
 
 _TLIMIT_OK: bool | None = None  # does this driver know temperature.gpu.tlimit?
-_GPU_KEYS = ("temp_c", "power_w", "sm_mhz", "util_pct", "events", "tlimit_c")
+_GPU_KEYS = (
+    "temp_c",
+    "power_w",
+    "sm_mhz",
+    "util_pct",
+    "events",
+    "gr_mhz",
+    "mem_mhz",
+    "mem_util_pct",
+    "tlimit_c",
+)
 
 
 def _smi(fields: tuple[str, ...], timeout: float) -> str:
@@ -197,7 +324,7 @@ def read_gpu_nvidia_smi(timeout: float = 3.0) -> dict[str, object]:
         try:
             res[key] = float(raw)
         except ValueError:
-            res[key] = None
+            res[key] = None  # e.g. "[N/A]" (GB10 reports no memory clock)
     t, head = res.get("temp_c"), res.get("tlimit_c")
     if isinstance(t, float) and isinstance(head, float):
         res["limit_c"] = t + head
@@ -236,6 +363,7 @@ class Sensor:
         self.gpu_every_s = gpu_every_s
         self._clock = clock
         self._gpu_cache: dict[str, object] = {}
+        self.system = SystemProbe(Path(sys_root).parent / "proc", Path(sys_root))
         self._gpu_at = 0.0
 
     def _gpu(self, now: float) -> dict[str, object]:
@@ -256,6 +384,7 @@ class Sensor:
             watched=self.watched,
             fans=read_fans(self.sys_root),
             gpu=self._gpu(now),
+            system=self.system.read(),
         )
 
 
