@@ -8,16 +8,9 @@ of project guidance for a Qwen Code session.
 
 ## What this project is
 
-`heat-governor` is an AgentCulture mesh agent that **governs CPU clock speed,
-fan speed and active cores to keep machines thermally balanced without
-resets, and records each run so the next one is tuned better.**
+`heat-governor` is an AgentCulture mesh agent that **keeps machines running heavy AI work without thermal resets: it senses the thermal zones, signals clients when to hold new work, duty-cycles and CPU-caps the containers that opt in, and records each run so the next one is tuned better.**
 
-It was scaffolded from `culture-agent-template`. Today the repo holds only the
-sibling-pattern baseline: an agent-first CLI, a mesh identity, the vendored
-guildmaster skill kit, and a CI/deploy pipeline. Thermal sensing, the
-clock/fan/core actuators, the control loop and per-run records are all
-**(planned)**. No domain code exists yet. The CLI's `learn` / `explain` text
-still calls the project "a clonable template".
+It was scaffolded from `culture-agent-template`. The governing core has landed: `sense`, `capabilities`, `run` (the daemon), `state`, `wait`, `report`, `replay` and `unit`, with built-in profiles for the DGX Spark (measured), Jetson AGX Thor and Orin (declared, unmeasured). Live validation of `run --apply` on a real batch window is **(planned)**. The agent verbs (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) remain.
 
 Actuating hardware (cpufreq, fan or CPU-hotplug controls) changes the live
 machine, not the repo. Don't run it without the operator's go-ahead, and keep

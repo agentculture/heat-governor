@@ -1,7 +1,7 @@
 [project]
 name = "heat-governor"
-version = "0.10.1"
-description = "Governs CPU clock speed, fan speed and active cores to keep machines thermally balanced without resets, and records each run so the next one is tuned better."
+version = "0.12.0"
+description = "Keeps machines running heavy AI work without thermal resets: senses thermal zones, signals admission, duty-cycles and CPU-caps opted-in containers, and records each run."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"
@@ -69,7 +69,7 @@ target-version = ["py312"]
 
 [tool.bandit]
 exclude_dirs = ["tests"]
-skips = ["B101", "B404", "B603"]
+skips = ["B101", "B404", "B603", "B607"]  # B607: fixed argv for nvidia-smi (on PATH by design)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,304 @@
+"""Actuators: CPU caps and duty-cycle pausing, under the own-pause rule.
+
+Rules every actuator here keeps:
+
+* **Own pauses only.** A container found paused by someone else is left alone
+  (and noted once). Only a pause this process issued is ever undone.
+* **Serving containers are never paused.** Only role ``batch`` is duty-cycled;
+  a ``serving`` container may at most get a CPU cap, and only when its
+  ``heat-governor.cpu-cap=true`` label (or the operator's flag) allows it.
+* **Crash safety.** Every pause and every first CPU change is written to a
+  ledger file *before* it is made. A restarted governor calls :meth:`Ledger.recover`
+  and undoes exactly what the ledger says it did: unpause its own pauses,
+  restore the original ``NanoCpus``.
+* **Dry run** (``apply=False``) logs what it would do and changes nothing.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Callable, Protocol
+
+from heat_governor.docker import Container, DockerError
+
+Log = Callable[[str], None]
+
+
+class DockerLike(Protocol):
+    def inspect(self, ref: str) -> Container: ...
+    def pause(self, ref: str) -> None: ...
+    def unpause(self, ref: str) -> None: ...
+    def set_nano_cpus(self, ref: str, nano: int) -> None: ...
+
+
+def restore_value(nano: int) -> int:
+    """The NanoCpus to write back for an original limit. Docker's update treats 0
+    as "leave unchanged", so an original of 0 (no limit) is restored as every
+    host CPU -- the same thing in effect (measured on the DGX Spark, 2026-10-23:
+    ``docker update --cpus 0`` left a 16-CPU cap in place)."""
+    return nano if nano > 0 else (os.cpu_count() or 1) * 1_000_000_000
+
+
+class Ledger:
+    """``{"paused": [ids], "nano_cpus": {id: original}}``, written atomically."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.paused: set[str] = set()
+        self.nano_cpus: dict[str, int] = {}
+        self.gpu_locked = False
+        self._lock = threading.Lock()
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            data = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            return
+        self.paused = set(data.get("paused", []))
+        self.nano_cpus = {k: int(v) for k, v in (data.get("nano_cpus") or {}).items()}
+        self.gpu_locked = bool(data.get("gpu_locked", False))
+
+    def save(self) -> None:
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(
+                    {
+                        "paused": sorted(self.paused),
+                        "nano_cpus": self.nano_cpus,
+                        "gpu_locked": self.gpu_locked,
+                    }
+                )
+            )
+            with open(tmp, "rb") as fh:
+                os.fsync(fh.fileno())
+            os.replace(tmp, self.path)
+
+    def recover(self, docker: DockerLike | None, log: Log, *, gpu=None) -> None:
+        """Undo what a previous (crashed) run left behind -- only its own actions."""
+        if self.gpu_locked and gpu is not None:
+            ok, out = gpu.reset()
+            log(f"recover: gpu ceiling {'removed' if ok else 'reset FAILED: ' + out}")
+            self.gpu_locked = not ok
+        if docker is None:
+            self.save()
+            return
+        for cid in sorted(self.paused):
+            try:
+                if docker.inspect(cid).state == "paused":
+                    docker.unpause(cid)
+                    log(f"recover: unpaused {cid[:12]} (a pause a previous run made)")
+            except DockerError as exc:
+                log(f"recover: {cid[:12]}: {exc}")
+        self.paused.clear()
+        for cid, nano in sorted(self.nano_cpus.items()):
+            try:
+                docker.set_nano_cpus(cid, restore_value(nano))
+                log(f"recover: restored {cid[:12]} NanoCpus={nano}")
+            except DockerError as exc:
+                log(f"recover: {cid[:12]}: {exc}")
+        self.nano_cpus.clear()
+        self.save()
+
+
+class CpuCapper:
+    def __init__(self, docker: DockerLike, ledger: Ledger, log: Log, *, apply: bool) -> None:
+        self.docker = docker
+        self.ledger = ledger
+        self.log = log
+        self.apply = apply
+        self.current: dict[str, int | None] = {}
+        self.set_at: dict[str, float] = {}
+
+    def set(self, c: Container, cpus: int | None, *, observed_at: float | None = None) -> None:
+        """``cpus=None`` restores the container's own limit. ``observed_at`` is
+        when ``c`` was inspected; only a snapshot newer than our own last change
+        can show that someone else changed the limit."""
+        if self.current.get(c.id, "unset") == cpus:
+            # someone else changed the limit while we hold a cap: put ours back
+            fresh = observed_at is not None and observed_at > self.set_at.get(c.id, float("inf"))
+            if cpus is not None and self.apply and fresh and c.nano_cpus != int(cpus * 1e9):
+                self.set_at[c.id] = time.time()
+                self.docker.set_nano_cpus(c.id, int(cpus * 1e9))
+                self.log(f"re-assert {c.name} cpus={cpus} (was changed outside the governor)")
+            return
+        if cpus is None and c.id not in self.ledger.nano_cpus:
+            self.current[c.id] = None
+            return
+        prefix = "" if self.apply else "dry-run would "
+        if cpus is None:
+            nano = self.ledger.nano_cpus[c.id]
+            if self.apply:
+                self.docker.set_nano_cpus(c.id, restore_value(nano))
+                self.ledger.nano_cpus.pop(c.id, None)
+                self.ledger.save()
+            shown = "unlimited" if nano == 0 else f"{nano / 1e9:g}"
+            self.log(f"{prefix}restore {c.name} cpus={shown}")
+        else:
+            if self.apply:
+                if c.id not in self.ledger.nano_cpus:
+                    self.ledger.nano_cpus[c.id] = c.nano_cpus
+                    self.ledger.save()
+                self.docker.set_nano_cpus(c.id, int(cpus * 1e9))
+            self.log(f"{prefix}cap {c.name} cpus={cpus}")
+        self.current[c.id] = cpus
+        self.set_at[c.id] = time.time()
+
+    def release_all(self, containers: dict[str, Container]) -> None:
+        for cid in list(self.ledger.nano_cpus):
+            c = containers.get(cid)
+            try:
+                if c is not None:
+                    self.set(c, None)
+                elif self.apply:
+                    self.docker.set_nano_cpus(cid, restore_value(self.ledger.nano_cpus.pop(cid)))
+                    self.ledger.save()
+            except DockerError as exc:
+                self.log(f"exit: restore {cid[:12]} failed: {exc}")
+
+
+class DutyCycler:
+    """Pause every batch container for ``duty`` x ``period_s`` of each period.
+
+    A frozen process issues no new GPU kernels (an LLM decode step is 10-30 ms),
+    so the heat it makes falls roughly in proportion to the duty. ``duty`` >=
+    0.98 holds the containers paused; <= 0.02 keeps them running. Runs in its
+    own thread so the rhythm is not tied to the 1 Hz sensing loop."""
+
+    def __init__(
+        self,
+        docker: DockerLike,
+        ledger: Ledger,
+        log: Log,
+        *,
+        apply: bool,
+        period_s: float = 2.0,
+        sleep: Callable[[float], None] | None = None,
+    ) -> None:
+        self.docker = docker
+        self.ledger = ledger
+        self.log = log
+        self.apply = apply
+        self.period_s = period_s
+        self.duty = 0.0
+        self.targets: dict[str, Container] = {}
+        self.foreign: set[str] = set()
+        self.cycles = 0
+        self.paused_s = 0.0
+        self._stop = threading.Event()
+        self._sleep = sleep or self._stop.wait
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._last_logged_duty = -1.0
+
+    # -- control from the main loop
+    def set(self, duty: float, targets: dict[str, Container]) -> None:
+        with self._lock:
+            self.duty = max(0.0, min(1.0, duty))
+            self.targets = dict(targets)
+        if abs(self.duty - self._last_logged_duty) >= 0.1 or (
+            self.duty in (0.0, 1.0) and self.duty != self._last_logged_duty
+        ):
+            self._last_logged_duty = self.duty
+            names = ",".join(c.name for c in targets.values()) or "-"
+            prefix = "" if self.apply else "dry-run would "
+            self.log(f"{prefix}duty={self.duty:.2f} on {names}")
+
+    # -- primitives (own-pause rule)
+    def _pause(self, c: Container) -> None:
+        if c.id in self.ledger.paused or c.id in self.foreign:
+            return
+        if not self.apply:
+            self.ledger.paused.add(c.id)  # simulated, never saved
+            return
+        try:
+            state = self.docker.inspect(c.id).state
+        except DockerError:
+            return
+        if state == "paused":
+            self.foreign.add(c.id)
+            self.log(f"foreign pause on {c.name} (not ours): leaving it alone")
+            return
+        if state != "running":
+            return
+        self.ledger.paused.add(c.id)
+        self.ledger.save()  # record BEFORE acting
+        try:
+            self.docker.pause(c.id)
+        except DockerError as exc:
+            self.ledger.paused.discard(c.id)
+            self.ledger.save()
+            self.log(f"pause {c.name} failed: {exc}")
+
+    def _unpause(self, cid: str) -> None:
+        if cid not in self.ledger.paused:
+            return
+        if self.apply:
+            try:
+                self.docker.unpause(cid)
+            except DockerError as exc:
+                self.log(f"unpause {cid[:12]} failed: {exc}")
+                return
+        self.ledger.paused.discard(cid)
+        if self.apply:
+            self.ledger.save()
+
+    def unpause_all(self) -> None:
+        for cid in list(self.ledger.paused):
+            self._unpause(cid)
+
+    # -- one period
+    def cycle(self) -> None:
+        with self._lock:
+            duty = self.duty
+            targets = dict(self.targets)
+        # a container that left the target set (or stopped) is released at once
+        for cid in list(self.ledger.paused):
+            if cid not in targets:
+                self._unpause(cid)
+        self.foreign &= set(targets)
+        if not targets or duty <= 0.02:
+            self.unpause_all()
+            self._sleep(self.period_s)
+            return
+        if duty >= 0.98:
+            for c in targets.values():
+                self._pause(c)
+            self.paused_s += self.period_s
+            self._sleep(self.period_s)
+            return
+        on = duty * self.period_s
+        t0 = time.monotonic()
+        for c in targets.values():
+            self._pause(c)
+        self._sleep(max(0.0, on - (time.monotonic() - t0)))
+        self.unpause_all()
+        self.paused_s += on
+        self.cycles += 1
+        self._sleep(max(0.0, self.period_s - on))
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.cycle()
+            except Exception as exc:  # noqa: BLE001 - never die holding a pause
+                self.log(f"duty cycle error: {exc}; releasing own pauses")
+                self.unpause_all()
+                self._stop.wait(self.period_s)
+        self.unpause_all()
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="duty-cycler", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.period_s * 3)
+        self.unpause_all()

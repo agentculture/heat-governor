@@ -4,9 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-`heat-governor` is an AgentCulture mesh agent that **governs CPU clock speed,
-fan speed and active cores to keep machines thermally balanced without
-resets, and records each run so the next one is tuned better.**
+`heat-governor` is an AgentCulture mesh agent that **keeps machines running heavy AI work without thermal resets: it senses the thermal zones, signals clients when to hold new work, duty-cycles and CPU-caps the containers that opt in, and records each run so the next one is tuned better.**
 
 It was scaffolded from `culture-agent-template`, so today the repo is the
 sibling-pattern baseline only: an agent-first CLI, a mesh identity
@@ -21,22 +19,26 @@ files, and a CI/deploy pipeline. It is a sibling to
 
 | Area | State |
 |------|-------|
-| Agent-first CLI (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) | Implemented (template verbs) |
+| Agent-first CLI (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) | Implemented |
 | Mesh identity, harness prompt files, skill kit, CI, PyPI publish | Implemented |
-| Thermal sensing (temperatures, fan RPM, clocks, online cores) | (planned) |
-| Actuators — CPU clock, fan speed, active cores | (planned) |
-| Control loop that keeps the machine balanced without resets | (planned) |
-| Per-run records, and tuning the next run from them | (planned) |
+| Sensing: thermal zones + trip points, fans, GPU (`sense.py`; `sense`, `capabilities`) | Implemented |
+| Platform profiles: Spark (measured), Thor + Orin (declared), generic (`platforms.py`) | Implemented |
+| Pure controller: levels, lookahead, hysteresis, duty, CPU ramp, sensor loss (`policy.py`) | Implemented |
+| Actuators: duty-cycle pause + CPU caps over the docker socket, own-pause ledger (`actuators.py`, `docker.py`) | Implemented, unit-tested; not yet run with `--apply` on a real window |
+| Admission signal: state file, `GET /state`, client `read`/`wait`/`Gate` (`state.py`, `client.py`) | Implemented |
+| Records, reboot report, trace replay (`recorder.py`; `report`, `replay`) | Implemented |
+| Live validation on a batch window (duty vs peak temperature vs throughput) | (planned) |
+| Configuration: one TOML file, strict validation, live reload, `config` verbs (`config.py`) | Implemented |
+| GPU clock ceiling via a root helper + narrow sudoers rule (`gpuclock.py`; `gpu-clock` verbs) | Implemented; helper installed on all four boxes 2026-10-23; `lock` at max accepted on GB10 and both Jetsons; effect of a lower ceiling unmeasured |
+| CPU clock, fan speed, active cores, nvpmodel | Not driven (root-only or firmware-owned) |
 
-The CLI's `learn` text, `explain` root entry and argparse `description`
-(`heat_governor/cli/_commands/learn.py`, `heat_governor/explain/catalog.py`,
-`heat_governor/cli/__init__.py`) still say "a clonable template". Update them
-when the first domain verbs land.
+Read `docs/HANDOFF-2026-10-23.md` (why, and what was measured), `docs/contracts/state.md` (the client
+contract) and `docs/integration.md` (how lobes, sparkrun and mjolnir use it) before changing behaviour.
 
 ### Working on the governing domain
 
-- Anything that actuates hardware (writing cpufreq / fan / CPU-hotplug
-  controls, changing governors) changes the **live machine**, not the repo.
+- `run --apply` pauses and CPU-caps real containers, and anything that writes
+  cpufreq / fan / CPU-hotplug controls changes the **live machine**, not the repo.
   Don't run it without the user's go-ahead, and keep tests off the real
   `/sys` (point code at a configurable root and use `tmp_path` fixtures).
 - The runtime package has **no third-party dependencies**

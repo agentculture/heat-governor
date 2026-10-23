@@ -28,15 +28,9 @@ update this section.
 
 ## What this project is
 
-`heat-governor` is an AgentCulture mesh agent that **governs CPU clock speed,
-fan speed and active cores to keep machines thermally balanced without
-resets, and records each run so the next one is tuned better.**
+`heat-governor` is an AgentCulture mesh agent that **keeps machines running heavy AI work without thermal resets: it senses the thermal zones, signals clients when to hold new work, duty-cycles and CPU-caps the containers that opt in, and records each run so the next one is tuned better.**
 
-It was scaffolded from `culture-agent-template`. Today it contains only the
-baseline: an agent-first CLI (`whoami`, `learn`, `explain`, `overview`,
-`doctor`, `cli overview`), a mesh identity, the vendored skill kit, and
-CI/deploy. Thermal sensing, the actuators, the control loop and per-run
-records are **(planned)**. `CLAUDE.md` is the fullest write-up of the repo's
+It was scaffolded from `culture-agent-template`. The governing core has landed: `sense`, `capabilities`, `run` (the daemon), `state`, `wait`, `report`, `replay` and `unit`, with built-in profiles for the DGX Spark (measured), Jetson AGX Thor and Orin (declared, unmeasured). Live validation of `run --apply` on a real batch window is **(planned)**. The agent verbs (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) remain. `CLAUDE.md` is the fullest write-up of the repo's
 conventions, covering the CLI architecture, worktree layout, memory discipline
 and the skill kit.
 

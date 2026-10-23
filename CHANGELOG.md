@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-10-23
+
+### Added
+
+- Configuration file (`$HEAT_GOVERNOR_CONFIG` or ~/.config/heat-governor/config.toml): every band, curve, CPU/GPU clock band, per-level client concurrency factor, poll interval and container rule; strict validation (unknown keys are errors); a running daemon re-reads it within ~2 s and keeps the last good settings when an edit is invalid. `config overview|path|show|init|check` verbs.
+- GPU clock ceiling: `gpu_clock_bands` per platform (declared, unmeasured), enabled by `daemon.gpu_clock` or `run --gpu-clock`; a root helper (`/usr/local/sbin/heat-governor-gpuclock`: lock/reset/status) behind a narrow sudoers rule; ledger-first, released on exit, on restart and when turned off. `gpu-clock overview|status|helper|lock|reset` verbs.
+- A CPU cap changed outside the governor is re-asserted on the next fresh discovery.
+- GPU temperature as a second input: the GPU's own reading with its own warm/hot/critical bands (DGX Spark 82/87/91 C, declared from the ~94 C limit the GB10 reports as T.Limit headroom), mapped onto the board's bands; whichever input is closer to its limit governs. `source`, `gpu_temp_c` and `gpu_limit_c` in the state; `profile.gpu_temp` in the config (false = off); `replay` feeds the trace's GPU column.
+
+### Changed
+
+- `admit` follows the configured concurrency factor (a factor above 0 admits), so holding at `hot` is a config choice.
+- `run` flags default to the config file's `[daemon]` values; command-line flags still win.
+
+## [0.11.0] - 2026-10-23
+
+### Added
+
+- The governing core: one daemon per host (`heat-governor run`) that senses the thermal zones about once a second, decides a level (cool / warm / hot / critical) with a rising-rate lookahead, hysteresis and dwell, publishes an admission signal (state file, optional `GET /state`), records every tick, and with `--apply` duty-cycle pauses `heat-governor.role=batch` containers and CPU-caps opted-in containers over the docker socket. Serving containers are never paused; only the daemon's own pauses are ever undone (crash-safe ledger).
+- Built-in profiles: DGX Spark (bands measured 2026-10-23, tuned by replay of that day's 1 s trace), Jetson AGX Thor and Orin (declared from their passive trip points, unmeasured), and a generic fallback from the lowest critical trip; TOML overrides via `--config`.
+- Read-only verbs `sense` and `capabilities`; client verbs `state` and `wait` (exit 3 on timeout while held); `report` (reboots seen in the records), `replay` (the controller over a recorded trace) and `unit` (a systemd user unit).
+- `heat_governor.client` (stdlib, self-contained): `read`, `wait` and `Gate` for benchmarks and batch jobs; contract in docs/contracts/state.md, integration guide for lobes, sparkrun and mjolnir in docs/integration.md.
+
+### Changed
+
+- Purpose statement in README, CLAUDE.md, QWEN.md, AGENTS.override.md, AGENTS.colleague.md and pyproject: the agent governs containers and admission, not CPU clocks, fans or cores (parked or firmware-owned).
+- bandit skips B607 (fixed argv for nvidia-smi).
+
 ## [0.10.1] - 2026-10-23
 
 ### Changed

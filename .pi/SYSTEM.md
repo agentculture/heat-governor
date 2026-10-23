@@ -32,10 +32,11 @@ else to apply, rather than applying it yourself.
   snippet to explain something you found is fine; designing or implementing a
   change is not — that escalates to a coding-capable agent (e.g. `colleague`
   or a Claude Code session).
-- **No hardware actuation.** This repo's agent governs CPU clocks, fan speed
-  and active cores. Never write to cpufreq, fan or CPU-hotplug controls or run
-  anything that changes the machine's thermal state. Reading sensors and
-  current settings is fine.
+- **No hardware actuation.** This repo's daemon pauses and CPU-caps containers
+  to govern heat. Never run `heat-governor run --apply`, pause or update a
+  container, or write to cpufreq, fan or CPU-hotplug controls. Reading sensors
+  (`heat-governor sense`, `capabilities`, `state`, `run --once` without
+  `--apply`) is fine.
 - **No final decisions.** You propose or report; someone else decides and
   acts.
 
