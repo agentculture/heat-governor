@@ -66,7 +66,8 @@ def test_run_once_is_always_a_dry_run(tmp_path: Path, capsys) -> None:
             str(tmp_path / "d"),
         ]
     )
-    assert rc == 0 and json.loads(capsys.readouterr().out)["dry_run"] is True
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["dry_run"] is True
 
 
 # 2. the state is published even when an actuator fails, and a failing GPU helper backs off
@@ -99,7 +100,8 @@ def test_state_is_published_before_and_despite_actuator_failures(tmp_path: Path)
     d.tick()
     d.tick()
     st = read_state(tmp_path / "state.json")
-    assert st["level"] in ("hot", "critical") and st["admit"] is False
+    assert st["level"] in ("hot", "critical")
+    assert st["admit"] is False
     assert any("cap lane" in m and "unexpected" in m for m in logs)
     assert gpu.calls == 1  # backed off instead of retrying every tick
 
@@ -124,7 +126,8 @@ def test_no_pause_after_stop(tmp_path: Path) -> None:
     cyc.set(1.0, {"b1": dk.c["b1"]})
     cyc.stop()
     cyc.cycle()
-    assert ("pause", "b1") not in dk.calls and dk.c["b1"].state == "running"
+    assert ("pause", "b1") not in dk.calls
+    assert dk.c["b1"].state == "running"
 
 
 # 5. a container leaving the governed set gets its CPU cap back
@@ -152,7 +155,9 @@ def test_foreign_mark_clears_when_the_owner_unpauses(tmp_path: Path) -> None:
     assert "b1" in cyc.foreign
     dk.unpause("b1")  # the owner releases it
     cyc.cycle()
-    assert "b1" not in cyc.foreign and dk.c["b1"].state == "paused" and "b1" in cyc.held
+    assert "b1" not in cyc.foreign
+    assert dk.c["b1"].state == "paused"
+    assert "b1" in cyc.held
 
 
 # 6b. the ledger is written when cycling starts and ends, not on every pause
@@ -165,10 +170,12 @@ def test_ledger_not_rewritten_every_period(tmp_path: Path) -> None:
     cyc.set(0.5, {"b1": dk.c["b1"]})
     for _ in range(5):
         cyc.cycle()
-    assert len(saves) == 1 and dk.calls.count(("pause", "b1")) == 5
+    assert len(saves) == 1
+    assert dk.calls.count(("pause", "b1")) == 5
     cyc.set(0.0, {"b1": dk.c["b1"]})
     cyc.cycle()
-    assert len(saves) == 2 and "b1" not in led.paused
+    assert len(saves) == 2
+    assert "b1" not in led.paused
 
 
 # 7. reload updates the GPU sensor and names restart-only keys
@@ -191,8 +198,9 @@ def test_http_protocol_errors_become_docker_errors(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(dmod._UnixConnection, "connect", lambda self: None)
     monkeypatch.setattr(dmod._UnixConnection, "request", lambda self, *a, **k: None)
     monkeypatch.setattr(dmod._UnixConnection, "getresponse", boom)
+    docker = Docker(str(tmp_path / "x.sock"))
     with pytest.raises(DockerError):
-        Docker(str(tmp_path / "x.sock")).inspect("c")
+        docker.inspect("c")
 
 
 # 9. a driver without tlimit is probed once, not twice per tick
@@ -216,5 +224,6 @@ def test_cpu_and_gpu_ramps_share_the_state_machine() -> None:
     from heat_governor.policy import Controller, _Ramp
 
     c = Controller(platforms.resolve("spark"))
-    assert isinstance(c._cpu, _Ramp) and isinstance(c._gpu, _Ramp)
+    assert isinstance(c._cpu, _Ramp)
+    assert isinstance(c._gpu, _Ramp)
     assert not hasattr(c, "_cpus_at")

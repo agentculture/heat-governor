@@ -118,34 +118,36 @@ class SystemProbe:
         self.proc = proc_root
         self.sys = sys_root
         self._clock = clock
-        self._cpu_prev: tuple[float, float] | None = None
+        self._cpu_prev: tuple[float, float, float] | None = None  # total, idle, iowait
         self._disk_prev: dict[str, tuple[float, float, float]] = {}
         self._at: float | None = None
 
-    def _cpu(self, out: dict) -> None:
+    def _cpu_busy(self, out: dict) -> None:
         raw = _read(self.proc / "stat") or ""
         line = raw.splitlines()[0].split() if raw else []
-        if len(line) > 5 and line[0] == "cpu":
-            vals = [float(x) for x in line[1:9]]
-            idle = vals[3] + vals[4]  # idle + iowait
-            total = sum(vals)
-            if self._cpu_prev is not None:
-                dt, di = total - self._cpu_prev[0], idle - self._cpu_prev[1]
-                if dt > 0:
-                    out["cpu:busy_pct"] = round(100.0 * (1 - di / dt), 1)
-                    out["cpu:iowait_pct"] = (
-                        round(100.0 * (vals[4] - self._cpu_prev[2]) / dt, 1)
-                        if len(self._cpu_prev) > 2
-                        else None
-                    )
-            self._cpu_prev = (total, idle, vals[4])
+        if len(line) <= 5 or line[0] != "cpu":
+            return
+        vals = [float(x) for x in line[1:9]]
+        idle = vals[3] + vals[4]  # idle + iowait
+        total = sum(vals)
+        prev = self._cpu_prev
+        if prev is not None and total - prev[0] > 0:
+            dt, di = total - prev[0], idle - prev[1]
+            out["cpu:busy_pct"] = round(100.0 * (1 - di / dt), 1)
+            out["cpu:iowait_pct"] = round(100.0 * (vals[4] - prev[2]) / dt, 1)
+        self._cpu_prev = (total, idle, vals[4])
+
+    def _cpu_online(self, out: dict) -> None:
         online = _read(self.sys / "devices/system/cpu/online")
-        if online:
-            n = 0
-            for part in online.split(","):
-                a, _, b = part.partition("-")
-                n += (int(b) - int(a) + 1) if b else 1
-            out["cpu:online"] = n
+        if not online:
+            return
+        n = 0
+        for part in online.split(","):
+            a, _, b = part.partition("-")
+            n += (int(b) - int(a) + 1) if b else 1
+        out["cpu:online"] = n
+
+    def _cpu_freq(self, out: dict) -> None:
         freqs = []
         for f in self.sys.glob("devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq"):
             raw = _read(f)
@@ -154,6 +156,11 @@ class SystemProbe:
         if freqs:
             out["cpu:mhz_avg"] = round(sum(freqs) / len(freqs))
             out["cpu:mhz_max"] = round(max(freqs))
+
+    def _cpu(self, out: dict) -> None:
+        self._cpu_busy(out)
+        self._cpu_online(out)
+        self._cpu_freq(out)
         load = (_read(self.proc / "loadavg") or "").split()
         if load:
             out["cpu:load1"] = float(load[0])
@@ -171,6 +178,9 @@ class SystemProbe:
             out["mem:used_pct"] = round(100.0 * (1 - info["MemAvailable"] / info["MemTotal"]), 1)
         if "SwapTotal" in info and "SwapFree" in info:
             out["mem:swap_used_mib"] = round(info["SwapTotal"] - info["SwapFree"])
+        self._psi(out)
+
+    def _psi(self, out: dict) -> None:
         for kind in ("memory", "io", "cpu"):
             raw = _read(self.proc / "pressure" / kind)
             for line in (raw or "").splitlines():
@@ -214,15 +224,7 @@ class SystemProbe:
             except OSError:
                 dev = hw.name
             for t in sorted(hw.glob("temp*_input")):
-                base = t.name[: -len("_input")]
-                label = (_read(hw / f"{base}_label") or base).strip().lower().replace(" ", "_")
-                value = _millideg(_read(t))
-                if value is not None:
-                    out[f"nvme:{dev}:{label}"] = value
-                for limit in ("max", "crit"):
-                    lim = _millideg(_read(hw / f"{base}_{limit}"))
-                    if lim is not None:
-                        out[f"nvme:{dev}:{label}_{limit}_c"] = lim
+                _nvme_sensor(hw, t, f"nvme:{dev}", out)
 
     def read(self) -> dict:
         out: dict = {}
@@ -233,6 +235,19 @@ class SystemProbe:
         self._nvme(out)
         self._at = now
         return {k: v for k, v in out.items() if v is not None}
+
+
+def _nvme_sensor(hw: Path, t: Path, prefix: str, out: dict) -> None:
+    """One hwmon ``temp<N>_input`` plus its ``_max``/``_crit`` limits."""
+    base = t.name[: -len("_input")]
+    label = (_read(hw / f"{base}_label") or base).strip().lower().replace(" ", "_")
+    value = _millideg(_read(t))
+    if value is not None:
+        out[f"{prefix}:{label}"] = value
+    for limit in ("max", "crit"):
+        lim = _millideg(_read(hw / f"{base}_{limit}"))
+        if lim is not None:
+            out[f"{prefix}:{label}_{limit}_c"] = lim
 
 
 def _read(path: Path) -> str | None:

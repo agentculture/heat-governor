@@ -151,69 +151,88 @@ def _pairs(name: str, value: object, problems: list[str], *, int_second: bool = 
         problems.append(f"profile.{name}: temperatures must ascend")
 
 
-def validate(data: dict) -> list[str]:
-    """Every problem in the document, not just the first."""
-    problems: list[str] = []
-    for k in data:
-        if k not in TOP_KEYS:
-            problems.append(f"unknown top-level key {k!r} (known: {', '.join(sorted(TOP_KEYS))})")
-    if "platform" in data and not isinstance(data["platform"], str):
-        problems.append("platform must be a string")
-    prof = data.get("profile", {})
-    if not isinstance(prof, dict):
-        problems.append("[profile] must be a table")
-        prof = {}
-    for k, v in prof.items():
-        if k not in PROFILE_KEYS:
-            problems.append(f"unknown key profile.{k!r}")
-        elif k in PROFILE_FLOATS and not _is_num(v):
-            problems.append(f"profile.{k} must be a number")
+def _table(data: dict, key: str, problems: list[str], message: str) -> dict:
+    """``data[key]`` as a dict, or ``{}`` after noting it isn't a table."""
+    value = data.get(key, {})
+    if isinstance(value, dict):
+        return value
+    problems.append(message)
+    return {}
+
+
+def _validate_profile_ranges(prof: dict, problems: list[str]) -> None:
     for k in ("dwell_s", "lookahead_s", "ramp_s", "duty_decay_per_s", "hysteresis_c"):
         if _is_num(prof.get(k)) and prof[k] < 0:
             problems.append(f"profile.{k} must be >= 0")
     for k in ("rate_window_s", "duty_period_s"):
         if _is_num(prof.get(k)) and prof[k] <= 0:
             problems.append(f"profile.{k} must be > 0")
+
+
+def _validate_profile_scalars(prof: dict, problems: list[str]) -> None:
+    for k, v in prof.items():
+        if k not in PROFILE_KEYS:
+            problems.append(f"unknown key profile.{k!r}")
+        elif k in PROFILE_FLOATS and not _is_num(v):
+            problems.append(f"profile.{k} must be a number")
+    _validate_profile_ranges(prof, problems)
     if "zones" in prof and not (
         isinstance(prof["zones"], list) and all(isinstance(z, str) for z in prof["zones"])
     ):
         problems.append("profile.zones must be a list of zone type names")
+
+
+def _validate_gpu_clock_bands(bands: object, problems: list[str]) -> None:
+    _pairs("gpu_clock_bands", bands, problems, int_second=True)
+    for item in bands if isinstance(bands, list) else []:
+        if (
+            isinstance(item, list)
+            and len(item) == 2
+            and _is_num(item[1])
+            and not 100 <= item[1] <= 5000
+        ):
+            problems.append(f"profile.gpu_clock_bands: {item[1]} MHz is outside 100-5000")
+
+
+def _validate_gpu_temp(g: object, problems: list[str]) -> None:
+    if g is not False and not (
+        isinstance(g, dict)
+        and set(g) <= {"warm_c", "hot_c", "crit_c"}
+        and all(_is_num(v) for v in g.values())
+    ):
+        problems.append(
+            "profile.gpu_temp must be false or a table of warm_c / hot_c / crit_c numbers"
+        )
+
+
+def _validate_concurrency(conc: object, problems: list[str]) -> None:
+    if not isinstance(conc, dict):
+        problems.append("profile.concurrency must be a table of level = factor")
+        return
+    for k, v in conc.items():
+        if k not in LEVELS:
+            problems.append(f"profile.concurrency: unknown level {k!r}")
+        elif not (_is_num(v) and 0.0 <= v <= 1.0):
+            problems.append(f"profile.concurrency.{k} must be between 0 and 1")
+
+
+def _validate_profile(prof: dict, problems: list[str]) -> None:
+    _validate_profile_scalars(prof, problems)
     if "duty_curve" in prof:
         _pairs("duty_curve", prof["duty_curve"], problems)
     if "cpu_bands" in prof:
         _pairs("cpu_bands", prof["cpu_bands"], problems, int_second=True)
     if "gpu_clock_bands" in prof:
-        _pairs("gpu_clock_bands", prof["gpu_clock_bands"], problems, int_second=True)
-        for item in prof["gpu_clock_bands"] if isinstance(prof["gpu_clock_bands"], list) else []:
-            if isinstance(item, list) and len(item) == 2 and _is_num(item[1]):
-                if not 100 <= item[1] <= 5000:
-                    problems.append(f"profile.gpu_clock_bands: {item[1]} MHz is outside 100-5000")
+        _validate_gpu_clock_bands(prof["gpu_clock_bands"], problems)
     if "gpu_temp" in prof:
-        g = prof["gpu_temp"]
-        if g is not False and not (
-            isinstance(g, dict)
-            and set(g) <= {"warm_c", "hot_c", "crit_c"}
-            and all(_is_num(v) for v in g.values())
-        ):
-            problems.append(
-                "profile.gpu_temp must be false or a table of warm_c / hot_c / crit_c numbers"
-            )
+        _validate_gpu_temp(prof["gpu_temp"], problems)
     if "gpu" in prof and prof["gpu"] not in ("nvidia-smi", "jetson", "none"):
         problems.append("profile.gpu must be nvidia-smi, jetson or none")
     if "concurrency" in prof:
-        conc = prof["concurrency"]
-        if not isinstance(conc, dict):
-            problems.append("profile.concurrency must be a table of level = factor")
-        else:
-            for k, v in conc.items():
-                if k not in LEVELS:
-                    problems.append(f"profile.concurrency: unknown level {k!r}")
-                elif not (_is_num(v) and 0.0 <= v <= 1.0):
-                    problems.append(f"profile.concurrency.{k} must be between 0 and 1")
-    dmn = data.get("daemon", {})
-    if not isinstance(dmn, dict):
-        problems.append("[daemon] must be a table")
-        dmn = {}
+        _validate_concurrency(prof["concurrency"], problems)
+
+
+def _validate_daemon(dmn: dict, problems: list[str]) -> None:
     for k, v in dmn.items():
         want = DAEMON_KEYS.get(k)
         if want is None:
@@ -224,28 +243,47 @@ def validate(data: dict) -> list[str]:
         problems.append("daemon.poll_s must be between 0.1 and 10 seconds")
     if isinstance(dmn.get("listen"), str) and ":" not in dmn["listen"]:
         problems.append("daemon.listen must be HOST:PORT")
-    conts = data.get("containers", [])
+
+
+def _validate_container(i: int, c: dict, seen: set[str], problems: list[str]) -> None:
+    for k in c:
+        if k not in CONTAINER_KEYS:
+            problems.append(f"containers[{i}]: unknown key {k!r}")
+    if not isinstance(c.get("name"), str) or not c.get("name"):
+        problems.append(f"containers[{i}]: name is required")
+    elif c["name"] in seen:
+        problems.append(f"containers[{i}]: {c['name']!r} is listed twice")
+    else:
+        seen.add(c["name"])
+    if c.get("role") not in ("batch", "serving"):
+        problems.append(f"containers[{i}]: role must be batch or serving")
+    if "cpu_cap" in c and not isinstance(c["cpu_cap"], bool):
+        problems.append(f"containers[{i}]: cpu_cap must be true or false")
+
+
+def _validate_containers(conts: object, problems: list[str]) -> None:
     if not isinstance(conts, list):
         problems.append("containers must be an array of tables ([[containers]])")
-        conts = []
+        return
     seen: set[str] = set()
     for i, c in enumerate(conts):
-        if not isinstance(c, dict):
-            problems.append(f"containers[{i}] must be a table")
-            continue
-        for k in c:
-            if k not in CONTAINER_KEYS:
-                problems.append(f"containers[{i}]: unknown key {k!r}")
-        if not isinstance(c.get("name"), str) or not c.get("name"):
-            problems.append(f"containers[{i}]: name is required")
-        elif c["name"] in seen:
-            problems.append(f"containers[{i}]: {c['name']!r} is listed twice")
+        if isinstance(c, dict):
+            _validate_container(i, c, seen, problems)
         else:
-            seen.add(c["name"])
-        if c.get("role") not in ("batch", "serving"):
-            problems.append(f"containers[{i}]: role must be batch or serving")
-        if "cpu_cap" in c and not isinstance(c["cpu_cap"], bool):
-            problems.append(f"containers[{i}]: cpu_cap must be true or false")
+            problems.append(f"containers[{i}] must be a table")
+
+
+def validate(data: dict) -> list[str]:
+    """Every problem in the document, not just the first."""
+    problems: list[str] = []
+    for k in data:
+        if k not in TOP_KEYS:
+            problems.append(f"unknown top-level key {k!r} (known: {', '.join(sorted(TOP_KEYS))})")
+    if "platform" in data and not isinstance(data["platform"], str):
+        problems.append("platform must be a string")
+    _validate_profile(_table(data, "profile", problems, "[profile] must be a table"), problems)
+    _validate_daemon(_table(data, "daemon", problems, "[daemon] must be a table"), problems)
+    _validate_containers(data.get("containers", []), problems)
     return problems
 
 

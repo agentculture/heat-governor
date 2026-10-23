@@ -87,7 +87,8 @@ def test_generic_profile_from_trip_points(tmp_path: Path) -> None:
 
 def test_resolve_with_overrides() -> None:
     p = platforms.resolve("spark", config={"profile": {"hot_c": 91.0, "duty_period_s": 1.0}})
-    assert p.limits.hot_c == 91.0 and p.duty_period_s == 1.0
+    assert p.limits.hot_c == 91.0
+    assert p.duty_period_s == 1.0
     assert "overridden" in p.provenance
 
 
@@ -124,7 +125,8 @@ def test_zone_raising_eagain_reads_as_unreadable(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr("heat_governor.sense.os.open", fake_open)
     monkeypatch.setattr("heat_governor.sense.os.read", fake_read)
     zones = read_zones(sysr)
-    assert zones[1].temp_c is None and zones[0].temp_c == 83.8
+    assert zones[1].temp_c is None
+    assert zones[0].temp_c == 83.8
 
 
 def test_system_probe_cpu_memory_pressure_disks(tmp_path: Path) -> None:
@@ -159,16 +161,20 @@ def test_system_probe_cpu_memory_pressure_disks(tmp_path: Path) -> None:
     (proc / "diskstats").write_text(disks(0, 0, 0))
     probe = SystemProbe(proc, sysr, clock=lambda: next(clock))
     first = probe.read()
-    assert "cpu:busy_pct" not in first and first["cpu:online"] == 20
-    assert first["mem:used_pct"] == 75.0 and first["psi:io_some_avg10"] == 62.7
+    assert "cpu:busy_pct" not in first
+    assert first["cpu:online"] == 20
+    assert first["mem:used_pct"] == 75.0
+    assert first["psi:io_some_avg10"] == 62.7
     (proc / "stat").write_text(stat(175, 100, 25))  # 75 busy + 25 iowait of 100 jiffies
     (proc / "diskstats").write_text(disks(4_000_000, 2_000_000, 1000))
     second = probe.read()
-    assert second["cpu:busy_pct"] == 75.0 and second["cpu:iowait_pct"] == 25.0
+    assert second["cpu:busy_pct"] == 75.0
+    assert second["cpu:iowait_pct"] == 25.0
     assert second["disk:nvme0n1:read_mbs"] == 1024.0  # 4e6 sectors * 512 B / 2 s
     assert second["disk:nvme0n1:busy_pct"] == 50.0
     assert not any(k.startswith(("disk:nvme0n1p1", "disk:loop")) for k in second)
-    assert second["cpu:mhz_max"] == 2400 and second["cpu:load1"] == 5.7
+    assert second["cpu:mhz_max"] == 2400
+    assert second["cpu:load1"] == 5.7
 
 
 def test_nvme_every_sensor_and_limits(tmp_path: Path) -> None:
@@ -193,7 +199,9 @@ def test_nvme_every_sensor_and_limits(tmp_path: Path) -> None:
         if crit:
             (hw / f"temp{i}_crit").write_text(f"{crit}\n")
     out = SystemProbe(tmp_path / "proc", sysr).read()
-    assert out["nvme:nvme0:composite"] == 58.85 and out["nvme:nvme0:sensor_1"] == 62.85
+    assert out["nvme:nvme0:composite"] == 58.85
+    assert out["nvme:nvme0:sensor_1"] == 62.85
     assert out["nvme:nvme0:composite_crit_c"] == 84.85
     assert "nvme:nvme0:sensor_1_max_c" not in out  # placeholder limit dropped
-    assert _is_temp("nvme:nvme0:sensor_1") and not _is_temp("nvme:nvme0:composite_crit_c")
+    assert _is_temp("nvme:nvme0:sensor_1")
+    assert not _is_temp("nvme:nvme0:composite_crit_c")

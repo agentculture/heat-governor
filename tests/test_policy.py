@@ -46,7 +46,9 @@ def test_warm_halves_concurrency_hot_holds() -> None:
     c = Controller(P)
     assert c.step(82.0, 0).concurrency_factor == 0.5
     d = c.step(86.0, 1)
-    assert d.level == "hot" and not d.admit and d.concurrency_factor == 0.0
+    assert d.level == "hot"
+    assert not d.admit
+    assert d.concurrency_factor == 0.0
 
 
 def test_level_falls_only_after_hysteresis_and_dwell() -> None:
@@ -73,7 +75,9 @@ def test_lookahead_raises_level_on_a_fast_rise() -> None:
     c = Controller(p)
     c.step(80.0, 0)
     d = c.step(83.0, 1)  # 3 C/s -> effective 87.5
-    assert d.effective_c == 87.5 and d.level == "hot" and not d.admit
+    assert d.effective_c == 87.5
+    assert d.level == "hot"
+    assert not d.admit
     assert d.temp_c == 83.0
 
 
@@ -95,7 +99,8 @@ def test_duty_rises_at_once_and_decays_slowly() -> None:
 
 def test_critical_forces_full_pause() -> None:
     d = Controller(P).step(90.0, 0)
-    assert d.level == "critical" and d.duty == 1.0
+    assert d.level == "critical"
+    assert d.duty == 1.0
 
 
 def test_band_cpus() -> None:
@@ -126,7 +131,8 @@ def test_sensor_loss_is_hot_never_cool() -> None:
     c.step(70.0, 0)
     d = c.step(None, 1)
     assert (d.level, d.admit, d.reason) == ("hot", False, "sensor_lost")
-    assert d.cpus == 4 and d.duty == 0.4
+    assert d.cpus == 4
+    assert d.duty == 0.4
 
 
 def test_sensor_loss_keeps_critical() -> None:

@@ -30,7 +30,8 @@ def test_replay_t1s(tmp_path: Path) -> None:
     p = tmp_path / "t1s.log"
     p.write_text(T1S)
     res = replay(p, SPARK)
-    assert res["samples"] == 6 and res["starts_in_trace"] == 2
+    assert res["samples"] == 6
+    assert res["starts_in_trace"] == 2
     assert res["max_temp_c"] == 93.5
     assert res["seconds_by_level"]["critical"] >= 1
     assert len(res["before_each_restart"]) == 1
@@ -49,7 +50,8 @@ def test_report_finds_the_reboot(tmp_path: Path) -> None:
         fh.write('{"t": 1, "temp')  # a torn line after a power loss is skipped
     rows = report(tmp_path)
     assert len(rows) == 1
-    assert rows[0]["max_temp_c"] == 94.0 and rows[0]["gap_s"] == pytest.approx(295, abs=1)
+    assert rows[0]["max_temp_c"] == 94.0
+    assert rows[0]["gap_s"] == pytest.approx(295, abs=1)
 
 
 def _run(capsys, *argv):
@@ -72,30 +74,37 @@ def test_cli_state_and_wait(tmp_path: Path, capsys) -> None:
         },
     )
     rc, out, _ = _run(capsys, "state", "--source", str(p), "--json")
-    assert rc == 0 and json.loads(out)["level"] == "hot"
+    assert rc == 0
+    assert json.loads(out)["level"] == "hot"
     rc, out, _ = _run(
         capsys, "wait", "--source", str(p), "--timeout", "0.1", "--poll", "0.05", "--json"
     )
-    assert rc == 3 and json.loads(out)["admit"] is False
+    assert rc == 3
+    assert json.loads(out)["admit"] is False
 
 
 def test_cli_replay_and_errors(tmp_path: Path, capsys) -> None:
     p = tmp_path / "t1s.log"
     p.write_text(T1S)
     rc, out, _ = _run(capsys, "replay", str(p), "--platform", "spark", "--json")
-    assert rc == 0 and json.loads(out)["profile"] == "spark"
+    assert rc == 0
+    assert json.loads(out)["profile"] == "spark"
     rc, _, err = _run(capsys, "replay", str(tmp_path / "nope"), "--platform", "spark")
-    assert rc == 1 and "hint:" in err
+    assert rc == 1
+    assert "hint:" in err
 
 
 def test_cli_report_empty(tmp_path: Path, capsys) -> None:
     rc, out, _ = _run(capsys, "report", "--data-dir", str(tmp_path), "--json")
-    assert rc == 0 and json.loads(out)["reboots"] == []
+    assert rc == 0
+    assert json.loads(out)["reboots"] == []
 
 
 def test_cli_unit(capsys) -> None:
     rc, out, _ = _run(capsys, "unit", "--", "--apply", "--listen", "127.0.0.1:9476")
-    assert rc == 0 and "--listen 127.0.0.1:9476" in out and "Restart=always" in out
+    assert rc == 0
+    assert "--listen 127.0.0.1:9476" in out
+    assert "Restart=always" in out
 
 
 def test_cli_run_once_without_docker(tmp_path: Path, capsys) -> None:
@@ -114,7 +123,8 @@ def test_cli_run_once_without_docker(tmp_path: Path, capsys) -> None:
     )
     assert rc == 0
     doc = json.loads(out)
-    assert doc["dry_run"] is True and doc["level"] in ("cool", "warm", "hot", "critical")
+    assert doc["dry_run"] is True
+    assert doc["level"] in ("cool", "warm", "hot", "critical")
 
 
 def test_cli_batch_without_docker_is_env_error(tmp_path: Path, capsys) -> None:
@@ -130,7 +140,8 @@ def test_cli_batch_without_docker_is_env_error(tmp_path: Path, capsys) -> None:
         "--data-dir",
         str(tmp_path),
     )
-    assert rc == 2 and "hint:" in err
+    assert rc == 2
+    assert "hint:" in err
 
 
 # -- every sensor separately ------------------------------------------------------
@@ -155,10 +166,13 @@ def test_sensor_stats_per_sensor_and_window(tmp_path: Path) -> None:
     rec.close()
     res = sensor_stats(tmp_path, since=t0 + 5, above_c=92)
     s = res["sensors"]
-    assert s["zone:0:acpitz"]["samples"] == 5 and s["zone:0:acpitz"]["max"] == 94.0
+    assert s["zone:0:acpitz"]["samples"] == 5
+    assert s["zone:0:acpitz"]["max"] == 94.0
     assert s["zone:0:acpitz"]["s_at_or_above"] == 3  # 92, 93, 94
-    assert s["zone:4:acpitz"]["max"] == 80.0 and s["zone:4:acpitz"]["s_at_or_above"] == 0
-    assert s["gpu:temp_c"]["mean"] == 77.0 and "s_at_or_above" not in s["gpu:power_w"]
+    assert s["zone:4:acpitz"]["max"] == 80.0
+    assert s["zone:4:acpitz"]["s_at_or_above"] == 0
+    assert s["gpu:temp_c"]["mean"] == 77.0
+    assert "s_at_or_above" not in s["gpu:power_w"]
     assert "gpu:events" not in s  # non-numeric
 
 
@@ -186,4 +200,5 @@ def test_cli_sensors_and_state_carries_every_sensor(tmp_path: Path, capsys) -> N
     st = read_state(tmp_path / "s.json")
     assert {f"zone:{i}:acpitz" for i in range(7)} <= set(st["sensors"])
     rc, out, _ = _run(capsys, "sensors", "--data-dir", str(tmp_path / "d"), "--json")
-    assert rc == 0 and "zone:0:acpitz" in json.loads(out)["sensors"]
+    assert rc == 0
+    assert "zone:0:acpitz" in json.loads(out)["sensors"]

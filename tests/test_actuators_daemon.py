@@ -24,7 +24,8 @@ def test_duty_cycle_pauses_then_releases(tmp_path: Path) -> None:
     cyc.set(0.5, {"b1": d.c["b1"]})
     cyc.cycle()
     assert d.calls == [("pause", "b1"), ("unpause", "b1")]
-    assert d.c["b1"].state == "running" and cyc.cycles == 1
+    assert d.c["b1"].state == "running"
+    assert cyc.cycles == 1
 
 
 def test_full_duty_holds_paused_and_records_before_acting(tmp_path: Path) -> None:
@@ -97,7 +98,8 @@ def test_cpu_cap_remembers_and_restores_the_original(tmp_path: Path) -> None:
     assert d.c["s1"].nano_cpus == 8_000_000_000
     assert led.nano_cpus == {"s1": 16_000_000_000}
     cap.set(d.c["s1"], None)
-    assert d.c["s1"].nano_cpus == 16_000_000_000 and led.nano_cpus == {}
+    assert d.c["s1"].nano_cpus == 16_000_000_000
+    assert led.nano_cpus == {}
 
 
 def _daemon(tmp_path: Path, docker: FakeDocker, *, apply: bool = True, **kw) -> tuple[Daemon, Path]:
@@ -119,7 +121,9 @@ def test_daemon_tick_publishes_and_records(tmp_path: Path) -> None:
     d.start()
     d.tick()
     st = read_state(tmp_path / "state.json")
-    assert st["level"] == "cool" and st["admit"] is True and st["platform"] == "spark"
+    assert st["level"] == "cool"
+    assert st["admit"] is True
+    assert st["platform"] == "spark"
     # the state is published BEFORE the actuators run: containers show from the next tick
     d.tick()
     st = read_state(tmp_path / "state.json")
@@ -127,7 +131,8 @@ def test_daemon_tick_publishes_and_records(tmp_path: Path) -> None:
     set_temp(sysr, 0, 92800)
     d.tick()
     st = read_state(tmp_path / "state.json")
-    assert st["level"] in ("hot", "critical") and st["admit"] is False
+    assert st["level"] in ("hot", "critical")
+    assert st["admit"] is False
     d.cycler.stop()
     recs = list(iter_records(tmp_path / "data" / "records"))
     assert recs[0]["event"] == "start"
@@ -141,7 +146,8 @@ def test_serving_container_is_never_paused_or_capped_without_opt_in(tmp_path: Pa
     d.discover()
     d.tick()
     d.cycler.cycle()
-    assert d.batch() == {} and d.capped() == []
+    assert d.batch() == {}
+    assert d.capped() == []
     assert dk.calls == []
 
 

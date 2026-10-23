@@ -93,7 +93,9 @@ def test_concurrency_override_changes_admission() -> None:
     p = platforms.resolve("spark", config={"profile": {"concurrency": {"hot": 0.25}}})
     c = Controller(p)
     d = c.step(92.0, 0)
-    assert d.level == "hot" and d.admit and d.concurrency_factor == 0.25
+    assert d.level == "hot"
+    assert d.admit
+    assert d.concurrency_factor == 0.25
 
 
 def test_default_path_env(tmp_path: Path) -> None:
@@ -229,7 +231,8 @@ def test_gpu_off_by_default(tmp_path: Path) -> None:
     d, sysr, _, _ = _daemon(tmp_path, "", gpu=gpu)
     set_temp(sysr, 0, 93500)
     d.tick()
-    assert gpu.calls == [] and read_state(tmp_path / "state.json")["gpu_clock"] == "off"
+    assert gpu.calls == []
+    assert read_state(tmp_path / "state.json")["gpu_clock"] == "off"
 
 
 def test_turning_gpu_clock_off_by_reload_releases_the_ceiling(tmp_path: Path) -> None:
@@ -280,16 +283,21 @@ def test_cli_config_init_check_show(tmp_path: Path, capsys) -> None:
     rc, out, _ = _run(
         capsys, "config", "init", "--platform", "spark", "--config", str(path), "--write", "--json"
     )
-    assert rc == 0 and json.loads(out)["written"] and path.exists()
+    assert rc == 0
+    assert json.loads(out)["written"]
+    assert path.exists()
     rc, _, err = _run(
         capsys, "config", "init", "--platform", "spark", "--config", str(path), "--write"
     )
-    assert rc == 1 and "hint:" in err
+    assert rc == 1
+    assert "hint:" in err
     rc, out, _ = _run(capsys, "config", "check", str(path), "--json")
-    assert rc == 0 and json.loads(out)["valid"]
+    assert rc == 0
+    assert json.loads(out)["valid"]
     path.write_text("[profile]\nhot_C = 1\n")
     rc, out, _ = _run(capsys, "config", "check", str(path), "--json")
-    assert rc == 1 and json.loads(out)["valid"] is False
+    assert rc == 1
+    assert json.loads(out)["valid"] is False
     path.write_text("[profile]\nhot_c = 91.0\n")
     rc, out, _ = _run(
         capsys, "config", "show", "--platform", "spark", "--config", str(path), "--json"
@@ -303,13 +311,16 @@ def test_cli_invalid_config_is_a_user_error(tmp_path: Path, capsys) -> None:
     path = tmp_path / "c.toml"
     path.write_text("[daemon]\npoll_s = 0\n")
     rc, _, err = _run(capsys, "sense", "--platform", "spark", "--config", str(path))
-    assert rc == 1 and "poll_s" in err and "hint:" in err
+    assert rc == 1
+    assert "poll_s" in err
+    assert "hint:" in err
 
 
 def test_cli_gpu_clock_helper_prints_script_and_sudoers(capsys) -> None:
     rc, out, _ = _run(capsys, "gpu-clock", "helper", "--json")
     doc = json.loads(out)
-    assert rc == 0 and doc["script"].startswith("#!/bin/bash")
+    assert rc == 0
+    assert doc["script"].startswith("#!/bin/bash")
     assert doc["sudoers"].endswith("NOPASSWD: /usr/local/sbin/heat-governor-gpuclock")
 
 
@@ -332,7 +343,9 @@ def test_a_hot_gpu_governs_when_the_board_is_cool() -> None:
 
     c = Controller(replace(SPARK, lookahead_s=0.0))
     d = c.step(80.0, 0, gpu_temp=88.0)  # GPU above its hot band, board cool
-    assert d.source == "gpu" and d.level == "hot" and not d.admit
+    assert d.source == "gpu"
+    assert d.level == "hot"
+    assert not d.admit
     assert d.gpu_temp_c == 88.0
 
 
@@ -341,7 +354,8 @@ def test_the_board_governs_when_it_is_closer_to_its_limit() -> None:
 
     c = Controller(replace(SPARK, lookahead_s=0.0))
     d = c.step(92.0, 0, gpu_temp=75.0)
-    assert d.source == "board" and d.level == "hot"
+    assert d.source == "board"
+    assert d.level == "hot"
 
 
 def test_gpu_input_off_when_not_declared() -> None:
@@ -355,7 +369,8 @@ def test_gpu_input_off_when_not_declared() -> None:
 
 def test_gpu_temp_config_override_and_validation() -> None:
     p = platforms.resolve("spark", config={"profile": {"gpu_temp": {"hot_c": 85.0}}})
-    assert p.gpu_temp_limits.hot_c == 85.0 and p.gpu_temp_limits.warm_c == 82.0
+    assert p.gpu_temp_limits.hot_c == 85.0
+    assert p.gpu_temp_limits.warm_c == 82.0
     assert any("gpu_temp" in x for x in cfgmod.validate({"profile": {"gpu_temp": {"x": 1}}}))
     with pytest.raises(ValueError):
         platforms.resolve("spark", config={"profile": {"gpu_temp": {"hot_c": 99.0}}})
@@ -382,5 +397,7 @@ def test_daemon_publishes_the_gpu_reading_and_source(tmp_path: Path) -> None:
     d = Daemon(SPARK, opts, sensor=GpuSensor(SPARK.zones, sys_root=sysr), docker=None)
     d.tick()
     st = read_state(tmp_path / "s.json")
-    assert st["source"] == "gpu" and st["gpu_temp_c"] == 89.0 and st["gpu_limit_c"] == 94.0
+    assert st["source"] == "gpu"
+    assert st["gpu_temp_c"] == 89.0
+    assert st["gpu_limit_c"] == 94.0
     assert st["level"] in ("hot", "critical")

@@ -109,9 +109,9 @@ class Daemon:
         self._stop = threading.Event()
         self.last: Decision | None = None
         self.host = socket.gethostname()
-        self.gpuclock = (
-            gpuclock if gpuclock is not None else (GpuClock() if opts.gpu_clock else None)
-        )
+        if gpuclock is None and opts.gpu_clock:
+            gpuclock = GpuClock()
+        self.gpuclock = gpuclock
         self._reload_at = 0.0
         self._gpu_retry_at = 0.0
         self.config_error: str | None = None
@@ -126,6 +126,17 @@ class Daemon:
     def discover(self) -> None:
         if not self.docker:
             return
+        found = self._find_containers()
+        gone = set(self.containers) - set(found)
+        for cid in gone:
+            self._left(self.containers[cid])
+        for cid in set(found) - set(self.containers):
+            c = found[cid]
+            capped = "yes" if c.cpu_cap or c.role == "batch" else "no"
+            self._log(f"governing {c.name} role={c.role} cpu-cap={capped}")
+        self.containers = found
+
+    def _find_containers(self) -> dict[str, Container]:
         found: dict[str, Container] = {}
         if self.opts.use_labels:
             try:
@@ -143,18 +154,15 @@ class Daemon:
                 continue
             cap = rule.role == "batch" or rule.cpu_cap or c.cpu_cap
             found[c.id] = Container(c.id, c.name, c.state, rule.role, cap, c.nano_cpus)
-        gone = set(self.containers) - set(found)
-        for cid in gone:
-            old = self.containers[cid]
-            self._log(f"container {old.name} left the governed set")
-            if self.capper and (cid in self.ledger.nano_cpus or self.capper.current.get(cid)):
-                self._fenced(f"release {old.name}", lambda old=old: self.capper.set(old, None))
-                self.capper.current.pop(cid, None)
-        for cid in set(found) - set(self.containers):
-            c = found[cid]
-            capped = "yes" if c.cpu_cap or c.role == "batch" else "no"
-            self._log(f"governing {c.name} role={c.role} cpu-cap={capped}")
-        self.containers = found
+        return found
+
+    def _left(self, old: Container) -> None:
+        """``old`` left the governed set: give back any CPU cap we put on it."""
+        self._log(f"container {old.name} left the governed set")
+        cid = old.id
+        if self.capper and (cid in self.ledger.nano_cpus or self.capper.current.get(cid)):
+            self._fenced(f"release {old.name}", lambda: self.capper.set(old, None))
+            self.capper.current.pop(cid, None)
 
     def batch(self) -> dict[str, Container]:
         return {k: c for k, c in self.containers.items() if c.role == "batch"}
@@ -246,14 +254,20 @@ class Daemon:
                 self._log(f"dry-run would set gpu ceiling {want or 'none'}")
             return
         if want is None:
-            ok, out = g.reset()
-            if ok:
-                self.ledger.gpu_locked = False
-                self.ledger.save()
-            else:
-                self._gpu_retry_at = now + self.GPU_RETRY_S
-            self._log("gpu ceiling removed" if ok else f"gpu reset FAILED: {out}")
-            return
+            self._gpu_reset(g, now)
+        else:
+            self._gpu_lock(g, want, now)
+
+    def _gpu_reset(self, g: GpuClock, now: float) -> None:
+        ok, out = g.reset()
+        if ok:
+            self.ledger.gpu_locked = False
+            self.ledger.save()
+        else:
+            self._gpu_retry_at = now + self.GPU_RETRY_S
+        self._log("gpu ceiling removed" if ok else f"gpu reset FAILED: {out}")
+
+    def _gpu_lock(self, g: GpuClock, want: int, now: float) -> None:
         self.ledger.gpu_locked = True
         self.ledger.save()  # record BEFORE acting
         ok, out = g.lock(want)
@@ -354,9 +368,7 @@ class Daemon:
                 self.gpuclock.ceiling_mhz if (self.gpuclock and self.opts.gpu_clock) else None
             ),
             "gpu_clock": (
-                "off"
-                if not self.opts.gpu_clock
-                else (self.gpuclock.reason if self.gpuclock else "off")
+                self.gpuclock.reason if (self.gpuclock and self.opts.gpu_clock) else "off"
             ),
             "config": (
                 str(self.opts.config.path) if self.opts.config and self.opts.config.path else None

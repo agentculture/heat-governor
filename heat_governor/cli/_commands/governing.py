@@ -18,6 +18,7 @@ from heat_governor.cli._output import emit_result
 from heat_governor.state import default_data_dir, default_state_path
 
 EXIT_HELD = 3  # `wait` timed out while the host was still too hot
+_JSON_HELP = "Emit structured JSON."
 
 
 def _config(args: argparse.Namespace):
@@ -143,38 +144,35 @@ def _listen(spec: str | None) -> tuple[str, int] | None:
         raise CliError(EXIT_USER_ERROR, f"bad --listen {spec!r}", "use HOST:PORT") from exc
 
 
-def cmd_run(args: argparse.Namespace) -> None:
-    from heat_governor.daemon import Daemon, Options
-    from heat_governor.docker import DEFAULT_SOCKET, Docker
+class _Pick:
+    """Command line > config file > default; remembers what the command line set."""
 
-    cfg = _config(args)
-    prof = _profile(args, cfg)
-    dcfg = cfg.daemon
+    def __init__(self, args: argparse.Namespace, dcfg: dict) -> None:
+        self.args = args
+        self.dcfg = dcfg
+        self.cli_set: set[str] = set()
 
-    def pick(flag: str, key: str, default):
-        """Command line > config file > default; remembers what the command line set."""
-        value = getattr(args, flag)
+    def __call__(self, flag: str, key: str, default):
+        value = getattr(self.args, flag)
         if value is not None:
-            cli_set.add(key)
+            self.cli_set.add(key)
             return value
-        return dcfg.get(key, default)
+        return self.dcfg.get(key, default)
 
-    cli_set: set[str] = set()
-    apply = True if args.apply else bool(dcfg.get("apply", False))
-    if args.once:
-        # one tick cannot also undo what it did on exit, so --once never acts
-        apply = False
-    if args.apply:
-        cli_set.add("apply")
-    data_s = pick("data_dir", "data_dir", None)
-    data = Path(data_s) if data_s else default_data_dir()
-    log_path = Path(args.log) if args.log else data / "governor.log"
+
+def _file_logger(log_path: Path):
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     def log(line: str) -> None:
         sys.stderr.write(line + "\n")
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
+    return log
+
+
+def _docker(args: argparse.Namespace, cfg):
+    from heat_governor.docker import DEFAULT_SOCKET, Docker
 
     sock = args.docker_socket or DEFAULT_SOCKET
     docker = None if args.no_docker or not Path(sock).exists() else Docker(sock)
@@ -184,9 +182,24 @@ def cmd_run(args: argparse.Namespace) -> None:
             f"no docker socket at {sock}",
             "containers can only be governed with docker access (or drop --batch/--serving)",
         )
+    return docker
+
+
+def _run_options(args: argparse.Namespace, cfg):
+    from heat_governor.daemon import Options
+
+    dcfg = cfg.daemon
+    pick = _Pick(args, dcfg)
+    # one tick cannot also undo what it did on exit, so --once never acts
+    apply = not args.once and (bool(args.apply) or bool(dcfg.get("apply", False)))
+    if args.apply:
+        pick.cli_set.add("apply")
+    data_s = pick("data_dir", "data_dir", None)
+    data = Path(data_s) if data_s else default_data_dir()
+    log = _file_logger(Path(args.log) if args.log else data / "governor.log")
     state_s = pick("state", "state", None)
     gpu_clock = pick("gpu_clock", "gpu_clock", False)
-    opts = Options(
+    return Options(
         apply=apply,
         poll_s=float(pick("poll", "poll_s", 1.0)),
         state_path=Path(state_s) if state_s else default_state_path(),
@@ -195,17 +208,37 @@ def cmd_run(args: argparse.Namespace) -> None:
         batch=tuple(args.batch or ()),
         serving=tuple(args.serving or ()),
         serving_cpu_cap=args.serving_cpu_cap,
-        use_labels=False if args.no_labels else bool(dcfg.get("use_labels", True)),
+        use_labels=not args.no_labels and bool(dcfg.get("use_labels", True)),
         discover_every_s=float(dcfg.get("discover_every_s", 5.0)),
         containers=tuple(cfg.containers),
         gpu_clock=bool(gpu_clock),
         platform=getattr(args, "platform", None),
         config=cfg if (cfg.path and dcfg.get("reload", True)) else None,
-        cli_set=frozenset(cli_set | ({"use_labels"} if args.no_labels else set())),
+        cli_set=frozenset(pick.cli_set | ({"use_labels"} if args.no_labels else set())),
         record=not args.no_record and bool(dcfg.get("record", True)),
         fsync=bool(dcfg.get("fsync", True)),
         log=log,
     )
+
+
+def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
+    if d.gpuclock and opts.gpu_clock:
+        d.gpuclock.probe()
+    d.discover()
+    dec = d.tick()
+    doc = {"dry_run": not opts.apply, "state": str(opts.state_path), **dec.as_dict()}
+    doc["config"] = str(cfg.path) if cfg.path and cfg.mtime else None
+    doc["containers"] = [{"name": c.name, "role": c.role} for c in d.containers.values()]
+    emit_result(doc if args.json else _decision_text(doc), json_mode=args.json)
+
+
+def cmd_run(args: argparse.Namespace) -> None:
+    from heat_governor.daemon import Daemon
+
+    cfg = _config(args)
+    prof = _profile(args, cfg)
+    opts = _run_options(args, cfg)
+    docker = _docker(args, cfg)
     try:
         d = Daemon(prof, opts, docker=docker)
     except OSError as exc:  # --listen port taken, unwritable data dir
@@ -215,14 +248,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             "pick a free --listen port (default suggestion 127.0.0.1:9476) or check --data-dir",
         ) from exc
     if args.once:
-        if d.gpuclock and opts.gpu_clock:
-            d.gpuclock.probe()
-        d.discover()
-        dec = d.tick()
-        doc = {"dry_run": not apply, "state": str(opts.state_path), **dec.as_dict()}
-        doc["config"] = str(cfg.path) if cfg.path and cfg.mtime else None
-        doc["containers"] = [{"name": c.name, "role": c.role} for c in d.containers.values()]
-        emit_result(doc if args.json else _decision_text(doc), json_mode=args.json)
+        _run_once(d, opts, cfg, args)
         return
     d.run()  # pragma: no cover - endless loop
 
@@ -408,14 +434,14 @@ def _source_args(p: argparse.ArgumentParser) -> None:
 def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("sense", help="Read the thermal zones, fans and GPU once (read-only).")
     _add_profile_args(p)
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=cmd_sense)
 
     p = sub.add_parser(
         "capabilities", help="What this host lets heat-governor read and change (read-only)."
     )
     _add_profile_args(p)
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=cmd_capabilities)
 
     p = sub.add_parser(
@@ -460,7 +486,7 @@ def register(sub: argparse._SubParsersAction) -> None:
 
     p = sub.add_parser("state", help="Read the published admission state (read-only).")
     _source_args(p)
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=cmd_state)
 
     p = sub.add_parser(
@@ -469,13 +495,13 @@ def register(sub: argparse._SubParsersAction) -> None:
     _source_args(p)
     p.add_argument("--timeout", type=float, help="Give up after this many seconds.")
     p.add_argument("--poll", type=float, default=1.0, help="Seconds between checks.")
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=cmd_wait)
 
     p = sub.add_parser("report", help="Reboots seen in the records, and what preceded them.")
     p.add_argument("--data-dir", help="Default ~/.local/state/heat-governor.")
     p.add_argument("--window", type=float, default=60.0, help="Seconds before each reboot.")
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=cmd_report)
 
     p = sub.add_parser(
@@ -489,7 +515,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--until", help="Same forms as --since (default: now).")
     p.add_argument("--above", type=float, help="Also count seconds at or above this C.")
     p.add_argument("--match", help="Only sensors whose name contains this (text output).")
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=cmd_sensors)
 
     p = sub.add_parser(
@@ -497,11 +523,11 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     _add_profile_args(p)
     p.add_argument("trace", help="Trace file.")
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=cmd_replay)
 
     p = sub.add_parser("unit", help="Print a systemd user unit for the daemon (writes nothing).")
     p.add_argument("--platform", help="Label for the description only.")
     p.add_argument("flags", nargs="*", help="Flags for `run` (default --apply). Put after --.")
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=cmd_unit)

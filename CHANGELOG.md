@@ -21,6 +21,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `admit` follows the configured concurrency factor (a factor above 0 admits), so holding at `hot` is a config choice.
 - `run` flags default to the config file's `[daemon]` values; command-line flags still win.
+- SonarCloud cleanup, behaviour unchanged: config validation, the system probe, the recorder (reboot report, replay, sensor stats), the actuators, the daemon's discovery and GPU-clock paths, profile overrides and `run` are split into small helpers (cognitive complexity <= 15); composite test assertions are split.
 
 ## [0.11.0] - 2026-10-23
 

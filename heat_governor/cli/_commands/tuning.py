@@ -16,7 +16,12 @@ from pathlib import Path
 
 from heat_governor import config as cfgmod
 from heat_governor import gpuclock
-from heat_governor.cli._commands.governing import _add_profile_args, _profile, _profile_dict
+from heat_governor.cli._commands.governing import (
+    _JSON_HELP,
+    _add_profile_args,
+    _profile,
+    _profile_dict,
+)
 from heat_governor.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from heat_governor.cli._output import emit_result
 
@@ -219,7 +224,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     def add(name: str, func, help_: str):
         q = csub.add_parser(name, help=help_)
         _add_profile_args(q)
-        q.add_argument("--json", action="store_true", help="Emit structured JSON.")
+        q.add_argument("--json", action="store_true", help=_JSON_HELP)
         q.set_defaults(func=func)
         return q
 
@@ -241,14 +246,14 @@ def register(sub: argparse._SubParsersAction) -> None:
     ):
         q = gsub.add_parser(name, help=help_)
         _add_profile_args(q)
-        q.add_argument("--json", action="store_true", help="Emit structured JSON.")
+        q.add_argument("--json", action="store_true", help=_JSON_HELP)
         q.set_defaults(func=func)
     q = gsub.add_parser("lock", help="Cap the GPU clock at MHZ (dry-run unless --apply).")
     q.add_argument("mhz", type=int, help="Ceiling in MHz.")
     q.add_argument("--apply", action="store_true", help="Actually lock it.")
-    q.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    q.add_argument("--json", action="store_true", help=_JSON_HELP)
     q.set_defaults(func=cmd_gpu_lock)
     q = gsub.add_parser("reset", help="Remove the GPU clock ceiling (dry-run unless --apply).")
     q.add_argument("--apply", action="store_true", help="Actually reset it.")
-    q.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    q.add_argument("--json", action="store_true", help=_JSON_HELP)
     q.set_defaults(func=cmd_gpu_reset)

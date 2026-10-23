@@ -26,6 +26,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Iterable, Sequence
 
 # Breakpoints of a piecewise-linear curve: (temperature C, value).
 Curve = tuple[tuple[float, float], ...]
@@ -187,8 +188,26 @@ def generic_profile(sys_root: Path = Path("/sys")) -> Profile:
     )
 
 
-def _curve(value: object) -> Curve:
-    return tuple((float(t), float(v)) for t, v in value)  # type: ignore[union-attr]
+def _curve(value: Iterable[Sequence[float]]) -> Curve:
+    return tuple((float(t), float(v)) for t, v in value)
+
+
+def _int_bands(value: Iterable[Sequence[float]]) -> tuple[tuple[float, int], ...]:
+    return tuple((float(t), int(c)) for t, c in value)
+
+
+def _gpu_temp_override(p: Profile, g: dict | bool) -> Profile:
+    if g is False:
+        return replace(p, gpu_temp_limits=None)
+    base = p.gpu_temp_limits or Limits(warm_c=82.0, hot_c=87.0, crit_c=91.0)
+    return replace(p, gpu_temp_limits=replace(base, **{k: float(v) for k, v in g.items()}))
+
+
+def _concurrency_override(p: Profile, conc: dict) -> Profile:
+    levels = ("cool", "warm", "hot", "critical")
+    cur = dict(zip(levels, p.concurrency))
+    cur.update({k: float(v) for k, v in conc.items()})
+    return replace(p, concurrency=tuple(cur[k] for k in levels))  # type: ignore[arg-type]
 
 
 def apply_overrides(profile: Profile, cfg: dict) -> Profile:
@@ -203,29 +222,18 @@ def apply_overrides(profile: Profile, cfg: dict) -> Profile:
     }
     if lim:
         p = replace(p, limits=replace(p.limits, **lim))
-    if "duty_curve" in cfg:
-        p = replace(p, duty_curve=_curve(cfg["duty_curve"]))
-    if "cpu_bands" in cfg:
-        p = replace(p, cpu_bands=tuple((float(t), int(c)) for t, c in cfg["cpu_bands"]))
-    if "gpu_clock_bands" in cfg:
-        p = replace(p, gpu_clock_bands=tuple((float(t), int(c)) for t, c in cfg["gpu_clock_bands"]))
-    for key in ("lookahead_s", "rate_window_s", "ramp_s", "duty_period_s", "duty_decay_per_s"):
+    converters = {"duty_curve": _curve, "cpu_bands": _int_bands, "gpu_clock_bands": _int_bands}
+    converters |= dict.fromkeys(
+        ("lookahead_s", "rate_window_s", "ramp_s", "duty_period_s", "duty_decay_per_s"), float
+    )
+    converters["gpu"] = str
+    for key, convert in converters.items():
         if key in cfg:
-            p = replace(p, **{key: float(cfg[key])})
-    if "gpu" in cfg:
-        p = replace(p, gpu=str(cfg["gpu"]))
+            p = replace(p, **{key: convert(cfg[key])})
     if "gpu_temp" in cfg:
-        g = cfg["gpu_temp"]
-        if g is False:
-            p = replace(p, gpu_temp_limits=None)
-        else:
-            base = p.gpu_temp_limits or Limits(warm_c=82.0, hot_c=87.0, crit_c=91.0)
-            p = replace(p, gpu_temp_limits=replace(base, **{k: float(v) for k, v in g.items()}))
+        p = _gpu_temp_override(p, cfg["gpu_temp"])
     if "concurrency" in cfg:
-        levels = ("cool", "warm", "hot", "critical")
-        cur = dict(zip(levels, p.concurrency))
-        cur.update({k: float(v) for k, v in cfg["concurrency"].items()})
-        p = replace(p, concurrency=tuple(cur[k] for k in levels))  # type: ignore[arg-type]
+        p = _concurrency_override(p, cfg["concurrency"])
     if p is not profile:
         p = replace(p, provenance=f"{profile.provenance}; overridden by config")
     return p

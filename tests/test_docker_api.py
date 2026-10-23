@@ -25,7 +25,7 @@ class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
 
-@pytest.fixture()
+@pytest.fixture
 def api(tmp_path: Path):
     calls: list[tuple[str, str, object]] = []
 
@@ -93,5 +93,6 @@ def test_http_error_raises(api) -> None:
 
 
 def test_missing_socket_raises(tmp_path: Path) -> None:
+    docker = Docker(str(tmp_path / "none.sock"))
     with pytest.raises(DockerError):
-        Docker(str(tmp_path / "none.sock")).inspect("x")
+        docker.inspect("x")

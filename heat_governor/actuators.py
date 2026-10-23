@@ -86,11 +86,14 @@ class Ledger:
             ok, out = gpu.reset()
             log(f"recover: gpu ceiling {'removed' if ok else 'reset FAILED: ' + out}")
             self.gpu_locked = not ok
-        if docker is None:
-            self.save()
-            return
-        # drop an entry only once its action is undone (or the container is gone):
-        # a failed restore keeps the original limit on record for the next try
+        if docker is not None:
+            # drop an entry only once its action is undone (or the container is gone):
+            # a failed restore keeps the original limit on record for the next try
+            self._recover_paused(docker, log)
+            self._recover_caps(docker, log)
+        self.save()
+
+    def _recover_paused(self, docker: DockerLike, log: Log) -> None:
         for cid in sorted(self.paused):
             try:
                 if docker.inspect(cid).state == "paused":
@@ -101,6 +104,8 @@ class Ledger:
                 if "404" in str(exc):
                     self.paused.discard(cid)
                 log(f"recover: {cid[:12]}: {exc}")
+
+    def _recover_caps(self, docker: DockerLike, log: Log) -> None:
         for cid, nano in sorted(self.nano_cpus.items()):
             try:
                 docker.set_nano_cpus(cid, restore_value(nano))
@@ -110,7 +115,6 @@ class Ledger:
                 if "404" in str(exc):
                     del self.nano_cpus[cid]
                 log(f"recover: {cid[:12]}: {exc} (kept on record)")
-        self.save()
 
 
 class CpuCapper:
@@ -127,37 +131,46 @@ class CpuCapper:
         when ``c`` was inspected; only a snapshot newer than our own last change
         can show that someone else changed the limit."""
         if self.current.get(c.id, "unset") == cpus:
-            # someone else changed the limit while we hold a cap: put ours back
-            fresh = observed_at is not None and observed_at > self.set_at.get(c.id, float("inf"))
-            if cpus is not None and self.apply and fresh and c.nano_cpus != int(cpus * 1e9):
-                self.set_at[c.id] = time.time()
-                self.docker.set_nano_cpus(c.id, int(cpus * 1e9))
-                self.log(f"re-assert {c.name} cpus={cpus} (was changed outside the governor)")
+            self._reassert(c, cpus, observed_at)
             return
         if cpus is None and c.id not in self.ledger.nano_cpus:
             self.current[c.id] = None
             return
         prefix = "" if self.apply else "dry-run would "
         if cpus is None:
-            nano = self.ledger.nano_cpus[c.id]
-            if self.apply:
-                self.docker.set_nano_cpus(c.id, restore_value(nano))
-                self.ledger.nano_cpus.pop(c.id, None)
-                self.ledger.save()
-            shown = "unlimited" if nano == 0 else f"{nano / 1e9:g}"
-            self.log(f"{prefix}restore {c.name} cpus={shown}")
+            self._restore(c, prefix)
         else:
-            if self.apply:
-                if c.id not in self.ledger.nano_cpus:
-                    self.ledger.nano_cpus[c.id] = c.nano_cpus
-                    self.ledger.save()
-                self.docker.set_nano_cpus(c.id, int(cpus * 1e9))
-            self.log(f"{prefix}cap {c.name} cpus={cpus}")
+            self._cap(c, cpus, prefix)
         self.current[c.id] = cpus
         self.set_at[c.id] = time.time()
 
+    def _reassert(self, c: Container, cpus: int | None, observed_at: float | None) -> None:
+        """Someone else changed the limit while we hold a cap: put ours back."""
+        fresh = observed_at is not None and observed_at > self.set_at.get(c.id, float("inf"))
+        if cpus is not None and self.apply and fresh and c.nano_cpus != int(cpus * 1e9):
+            self.set_at[c.id] = time.time()
+            self.docker.set_nano_cpus(c.id, int(cpus * 1e9))
+            self.log(f"re-assert {c.name} cpus={cpus} (was changed outside the governor)")
+
+    def _restore(self, c: Container, prefix: str) -> None:
+        nano = self.ledger.nano_cpus[c.id]
+        if self.apply:
+            self.docker.set_nano_cpus(c.id, restore_value(nano))
+            self.ledger.nano_cpus.pop(c.id, None)
+            self.ledger.save()
+        shown = "unlimited" if nano == 0 else f"{nano / 1e9:g}"
+        self.log(f"{prefix}restore {c.name} cpus={shown}")
+
+    def _cap(self, c: Container, cpus: int, prefix: str) -> None:
+        if self.apply:
+            if c.id not in self.ledger.nano_cpus:
+                self.ledger.nano_cpus[c.id] = c.nano_cpus
+                self.ledger.save()
+            self.docker.set_nano_cpus(c.id, int(cpus * 1e9))
+        self.log(f"{prefix}cap {c.name} cpus={cpus}")
+
     def release_all(self, containers: dict[str, Container]) -> None:
-        for cid in list(self.ledger.nano_cpus):
+        for cid in sorted(self.ledger.nano_cpus):  # a copy: the loop pops entries
             c = containers.get(cid)
             try:
                 if c is not None:
@@ -272,14 +285,14 @@ class DutyCycler:
 
     def unpause_all(self) -> None:
         with self._act:
-            for cid in list(self.held):
+            for cid in sorted(self.held):  # a copy: _unpause discards from held
                 self._unpause(cid)
 
     def release(self, cids) -> None:
         """Unpause and drop from the ledger: the container is no longer cycled."""
         with self._act:
             changed = False
-            for cid in list(cids):
+            for cid in sorted(cids):
                 self._unpause(cid)
                 if cid in self.ledger.paused and cid not in self.held:
                     self.ledger.paused.discard(cid)

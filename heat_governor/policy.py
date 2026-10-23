@@ -98,6 +98,12 @@ def band_cpus(temp: float, profile: Profile) -> int | None:
     return _band(temp, profile.cpu_bands)
 
 
+def _trend(rate: float) -> str:
+    if rate > 0.5:
+        return "rising"
+    return "steady" if rate > -0.5 else "falling"
+
+
 def _band(temp: float, bands) -> int | None:
     cap: int | None = None
     for from_c, value in bands:
@@ -228,7 +234,7 @@ class Controller:
         duty = self._duty(duty_target, now)
         cpus = self._cpu.step(band_cpus(eff, p), now, p.ramp_s)
         gpu_mhz = self._gpu.step(_band(eff, p.gpu_clock_bands), now, p.ramp_s)
-        reason = "rising" if rate > 0.5 else "steady" if rate > -0.5 else "falling"
+        reason = _trend(rate)
         return Decision(
             level,
             p.concurrency[LEVELS.index(level)] > 0,

@@ -48,7 +48,9 @@ def test_default_path_env(tmp_path: Path) -> None:
 
 def test_missing_state_admits_by_default(tmp_path: Path) -> None:
     adm = client.read(str(tmp_path / "none.json"))
-    assert adm.admit and adm.level == "unknown" and adm.reason == "no-state"
+    assert adm.admit
+    assert adm.level == "unknown"
+    assert adm.reason == "no-state"
     assert not client.read(str(tmp_path / "none.json"), if_unknown="hold").admit
 
 
@@ -56,14 +58,17 @@ def test_stale_state_is_unknown(tmp_path: Path) -> None:
     p = tmp_path / "s.json"
     write_state(p, _doc(at=time.time() - 60, admit=False, level="hot"))
     adm = client.read(str(p))
-    assert adm.level == "unknown" and adm.reason == "stale" and adm.admit
+    assert adm.level == "unknown"
+    assert adm.reason == "stale"
+    assert adm.admit
 
 
 def test_fresh_hot_state_holds(tmp_path: Path) -> None:
     p = tmp_path / "s.json"
     write_state(p, _doc(level="hot", admit=False, concurrency_factor=0.0))
     adm = client.read(str(p))
-    assert not adm.admit and adm.allowed(4) == 0
+    assert not adm.admit
+    assert adm.allowed(4) == 0
 
 
 def test_allowed_concurrency() -> None:

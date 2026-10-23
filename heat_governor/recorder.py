@@ -75,6 +75,24 @@ def iter_records(directory: Path) -> Iterator[dict]:
                     continue  # a torn last line after a power loss
 
 
+def _reboot_entry(boot: str, new: str | None, rec: dict, tail: list[dict], window_s: float) -> dict:
+    last = tail[-1]
+    recent = [r for r in tail if last["t"] - r["t"] <= window_s]
+    temps = [r["temp_c"] for r in recent if r.get("temp_c") is not None]
+    return {
+        "previous_boot": boot,
+        "new_boot": new,
+        "last_record_utc": _utc(last["t"]),
+        "restart_utc": _utc(rec["t"]),
+        "gap_s": round(rec["t"] - last["t"], 1),
+        "window_s": window_s,
+        "max_temp_c": max(temps) if temps else None,
+        "last": {k: last.get(k) for k in ("temp_c", "effective_c", "level", "duty", "cpus", "gpu")},
+        "last_zones": last.get("zones"),
+        "levels": dict(Counter(r.get("level") for r in recent)),
+    }
+
+
 def report(directory: Path, *, window_s: float = 60.0) -> list[dict]:
     """One entry per reboot seen in the records: the gap and what came before."""
     out: list[dict] = []
@@ -84,29 +102,9 @@ def report(directory: Path, *, window_s: float = 60.0) -> list[dict]:
         if rec.get("event") == "start":
             new = rec.get("boot_id")
             if boot is not None and new != boot and tail:
-                last = tail[-1]
-                recent = [r for r in tail if last["t"] - r["t"] <= window_s]
-                temps = [r["temp_c"] for r in recent if r.get("temp_c") is not None]
-                out.append(
-                    {
-                        "previous_boot": boot,
-                        "new_boot": new,
-                        "last_record_utc": _utc(last["t"]),
-                        "restart_utc": _utc(rec["t"]),
-                        "gap_s": round(rec["t"] - last["t"], 1),
-                        "window_s": window_s,
-                        "max_temp_c": max(temps) if temps else None,
-                        "last": {
-                            k: last.get(k)
-                            for k in ("temp_c", "effective_c", "level", "duty", "cpus", "gpu")
-                        },
-                        "last_zones": last.get("zones"),
-                        "levels": dict(Counter(r.get("level") for r in recent)),
-                    }
-                )
+                out.append(_reboot_entry(boot, new, rec, tail, window_s))
             boot, tail = new, []
-            continue
-        if "temp_c" in rec and "t" in rec:
+        elif "temp_c" in rec and "t" in rec:
             tail.append(rec)
             if len(tail) > 4000:
                 del tail[:2000]
@@ -118,6 +116,13 @@ def _utc(t: float) -> str:
 
 
 # -- replay ----------------------------------------------------------------
+
+
+def _float_or_none(v: object) -> float | None:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _t1s_samples(lines: Iterable[str]) -> Iterator[tuple]:
@@ -132,22 +137,14 @@ def _t1s_samples(lines: Iterable[str]) -> Iterator[tuple]:
             cols = parts
             continue
         row = dict(zip(cols, parts))
-        try:
-            up = float(row["up_s"])
-        except (KeyError, ValueError):
+        up = _float_or_none(row.get("up_s"))
+        if up is None:
             continue
-        temps = []
-        for k, v in row.items():
-            if k.startswith("z") and k.endswith("_c"):
-                try:
-                    temps.append(float(v))
-                except ValueError:
-                    continue
-        try:
-            gpu = float(row.get("gpu_c", ""))
-        except ValueError:
-            gpu = None
-        yield up, (max(temps) if temps else None), gpu
+        zone_temps = (
+            _float_or_none(v) for k, v in row.items() if k.startswith("z") and k.endswith("_c")
+        )
+        temps = [x for x in zone_temps if x is not None]
+        yield up, (max(temps) if temps else None), _float_or_none(row.get("gpu_c", ""))
 
 
 def _jsonl_samples(lines: Iterable[str]) -> Iterator[tuple]:
@@ -163,6 +160,46 @@ def _jsonl_samples(lines: Iterable[str]) -> Iterator[tuple]:
             yield float(rec["t"]), rec.get("board_temp_c", rec.get("temp_c")), gpu
 
 
+def _max_or(current: float | None, value: float | None) -> float | None:
+    if value is None:
+        return current
+    return value if current is None else max(current, value)
+
+
+class _Tally:
+    """What :func:`replay` accumulates over a trace."""
+
+    def __init__(self) -> None:
+        self.seconds: Counter[str] = Counter()
+        self.by_source: Counter[str] = Counter()
+        self.duty_s = 0.0
+        self.held_s = 0.0
+        self.n = 0
+        self.max_temp: float | None = None
+        self.max_eff: float | None = None
+        self.boots = 0
+        self.before_restart: list[dict] = []
+        self.last_decisions: list[dict] = []
+
+    def restart(self) -> None:
+        if self.last_decisions:
+            self.before_restart.append({"last_decisions": self.last_decisions[-10:]})
+        self.boots += 1
+        self.last_decisions = []
+
+    def add(self, t: float, temp: float | None, d, dt: float) -> None:
+        self.by_source[d.source] += dt
+        self.n += 1
+        self.seconds[d.level] += dt
+        self.duty_s += d.duty * dt
+        self.held_s += 0.0 if d.admit else dt
+        self.max_temp = _max_or(self.max_temp, temp)
+        self.max_eff = _max_or(self.max_eff, d.effective_c)
+        self.last_decisions.append({"t": t, **d.as_dict()})
+        if len(self.last_decisions) > 60:
+            del self.last_decisions[:30]
+
+
 def replay(path: Path, profile: Profile) -> dict:
     """Run the controller over a trace; what would it have decided?"""
     with open(path, encoding="utf-8") as fh:
@@ -170,54 +207,31 @@ def replay(path: Path, profile: Profile) -> dict:
     first = next((ln for ln in lines if ln.strip()), "")
     samples = _jsonl_samples(lines) if first.lstrip().startswith("{") else _t1s_samples(lines)
     ctrl = Controller(profile)
-    seconds: Counter[str] = Counter()
-    duty_s = 0.0
-    held_s = 0.0
-    n = 0
-    max_temp = max_eff = None
-    boots = 0
-    before_restart: list[dict] = []
-    last_decisions: list[dict] = []
+    tally = _Tally()
     prev_t: float | None = None
-    by_source: Counter[str] = Counter()
     for t, temp, gpu in samples:
         if t is None:  # a (re)start: the controller starts fresh like the daemon would
-            if last_decisions:
-                before_restart.append({"last_decisions": last_decisions[-10:]})
-            boots += 1
+            tally.restart()
             ctrl = Controller(profile)
             prev_t = None
-            last_decisions = []
             continue
         if prev_t is not None and t <= prev_t:
             continue
         dt = 1.0 if prev_t is None else min(t - prev_t, 5.0)
         prev_t = t
-        d = ctrl.step(temp, t, gpu)
-        by_source[d.source] += dt
-        n += 1
-        seconds[d.level] += dt
-        duty_s += d.duty * dt
-        held_s += 0.0 if d.admit else dt
-        if temp is not None:
-            max_temp = temp if max_temp is None else max(max_temp, temp)
-        if d.effective_c is not None:
-            max_eff = d.effective_c if max_eff is None else max(max_eff, d.effective_c)
-        last_decisions.append({"t": t, **d.as_dict()})
-        if len(last_decisions) > 60:
-            del last_decisions[:30]
-    total = sum(seconds.values()) or 1.0
+        tally.add(t, temp, ctrl.step(temp, t, gpu), dt)
+    total = sum(tally.seconds.values()) or 1.0
     return {
         "profile": profile.name,
-        "samples": n,
-        "starts_in_trace": boots,
-        "seconds_by_level": dict(seconds),
-        "seconds_by_source": dict(by_source),
-        "share_held": round(held_s / total, 4),
-        "mean_duty": round(duty_s / total, 4),
-        "max_temp_c": max_temp,
-        "max_effective_c": max_eff,
-        "before_each_restart": before_restart,
+        "samples": tally.n,
+        "starts_in_trace": tally.boots,
+        "seconds_by_level": dict(tally.seconds),
+        "seconds_by_source": dict(tally.by_source),
+        "share_held": round(tally.held_s / total, 4),
+        "mean_duty": round(tally.duty_s / total, 4),
+        "max_temp_c": tally.max_temp,
+        "max_effective_c": tally.max_eff,
+        "before_each_restart": tally.before_restart,
     }
 
 
@@ -250,6 +264,43 @@ def _is_temp(name: str) -> bool:
     return name.startswith("zone:") or name == "gpu:temp_c"  # limit_c is a limit, not a reading
 
 
+def _in_window(t: float, since: float | None, until: float | None) -> bool:
+    return (since is None or t >= since) and (until is None or t <= until)
+
+
+def _collect_series(
+    directory: Path, since: float | None, until: float | None
+) -> tuple[dict[str, list[float]], float | None, float | None]:
+    series: dict[str, list[float]] = {}
+    first = last = None
+    for rec in iter_records(directory):
+        t = rec.get("t")
+        if rec.get("event") or "temp_c" not in rec or t is None or not _in_window(t, since, until):
+            continue
+        first = t if first is None else first
+        last = t
+        sensors = flat_sensors(rec.get("zones"), rec.get("gpu"), rec.get("fans"), rec.get("system"))
+        for name, v in sensors.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                series.setdefault(name, []).append(float(v))
+    return series, first, last
+
+
+def _stats_row(name: str, vals: list[float], above_c: float | None) -> dict:
+    vals = sorted(vals)
+    n = len(vals)
+    row = {
+        "samples": n,
+        "min": round(vals[0], 2),
+        "mean": round(sum(vals) / n, 2),
+        "p95": round(vals[min(n - 1, int(0.95 * (n - 1) + 0.5))], 2),
+        "max": round(vals[-1], 2),
+    }
+    if above_c is not None and _is_temp(name):
+        row["s_at_or_above"] = sum(1 for v in vals if v >= above_c)
+    return row
+
+
 def sensor_stats(
     directory: Path,
     *,
@@ -259,37 +310,10 @@ def sensor_stats(
 ) -> dict:
     """Per sensor over [since, until]: samples, min, mean, p95, max, and for
     temperature sensors the seconds at or above ``above_c``."""
-    series: dict[str, list[float]] = {}
-    first = last = None
-    for rec in iter_records(directory):
-        t = rec.get("t")
-        if rec.get("event") or "temp_c" not in rec or t is None:
-            continue
-        if (since is not None and t < since) or (until is not None and t > until):
-            continue
-        first = t if first is None else first
-        last = t
-        sensors = flat_sensors(rec.get("zones"), rec.get("gpu"), rec.get("fans"), rec.get("system"))
-        for name, v in sensors.items():
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                series.setdefault(name, []).append(float(v))
-    out = {}
-    for name in sorted(series):
-        vals = sorted(series[name])
-        n = len(vals)
-        row = {
-            "samples": n,
-            "min": round(vals[0], 2),
-            "mean": round(sum(vals) / n, 2),
-            "p95": round(vals[min(n - 1, int(0.95 * (n - 1) + 0.5))], 2),
-            "max": round(vals[-1], 2),
-        }
-        if above_c is not None and _is_temp(name):
-            row["s_at_or_above"] = sum(1 for v in vals if v >= above_c)
-        out[name] = row
+    series, first, last = _collect_series(directory, since, until)
     return {
         "from_utc": _utc(first) if first else None,
         "to_utc": _utc(last) if last else None,
         "above_c": above_c,
-        "sensors": out,
+        "sensors": {name: _stats_row(name, series[name], above_c) for name in sorted(series)},
     }
