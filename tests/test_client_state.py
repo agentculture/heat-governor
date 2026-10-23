@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -28,7 +29,11 @@ def _doc(**kw) -> dict:
 
 def test_write_is_atomic_and_readable(tmp_path: Path) -> None:
     p = tmp_path / "s" / "state.json"
-    write_state(p, _doc())
+    old = os.umask(0o022)
+    try:
+        write_state(p, _doc())
+    finally:
+        os.umask(old)
     assert read_state(p)["level"] == "cool"
     assert not list(p.parent.glob("*.tmp"))
     assert oct(p.stat().st_mode)[-3:] == "644"

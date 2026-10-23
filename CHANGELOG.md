@@ -9,7 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Configuration file (`$HEAT_GOVERNOR_CONFIG` or ~/.config/heat-governor/config.toml): every band, curve, CPU/GPU clock band, per-level client concurrency factor, poll interval and container rule; strict validation (unknown keys are errors); a running daemon re-reads it within ~2 s and keeps the last good settings when an edit is invalid. `config overview|path|show|init|check` verbs.
+- Configuration file (`$HEAT_GOVERNOR_CONFIG` or $XDG_CONFIG_HOME/heat-governor/config.toml): every band, curve, CPU/GPU clock band, per-level client concurrency factor, poll interval and container rule; strict validation (unknown keys are errors); a running daemon re-reads it within ~2 s and keeps the last good settings when an edit is invalid. `config overview|path|show|init|check` verbs.
 - GPU clock ceiling: `gpu_clock_bands` per platform (declared, unmeasured), enabled by `daemon.gpu_clock` or `run --gpu-clock`; a root helper (`/usr/local/sbin/heat-governor-gpuclock`: lock/reset/status) behind a narrow sudoers rule; ledger-first, released on exit, on restart and when turned off. `gpu-clock overview|status|helper|lock|reset` verbs.
 - A CPU cap changed outside the governor is re-asserted on the next fresh discovery.
 - GPU temperature as a second input: the GPU's own reading with its own warm/hot/critical bands (DGX Spark 82/87/91 C, declared from the ~94 C limit the GB10 reports as T.Limit headroom), mapped onto the board's bands; whichever input is closer to its limit governs. `source`, `gpu_temp_c` and `gpu_limit_c` in the state; `profile.gpu_temp` in the config (false = off); `replay` feeds the trace's GPU column.

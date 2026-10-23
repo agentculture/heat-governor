@@ -37,8 +37,9 @@ def default_data_dir() -> Path:
 def write_state(path: Path, doc: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    # created with the process umask (022 by default -> 0644): readable by a client
+    # running as another user or in a container through a read-only bind mount
     tmp.write_text(json.dumps(doc, separators=(",", ":")))
-    os.chmod(tmp, 0o644)  # readable by a client running as another user or in a container
     os.replace(tmp, path)
 
 

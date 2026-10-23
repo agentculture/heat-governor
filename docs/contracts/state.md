@@ -8,8 +8,10 @@ and `heat_governor/client.py` reads it.
 
 | Source | Default |
 |---|---|
-| file | `$HEAT_GOVERNOR_STATE`, else `$XDG_RUNTIME_DIR/heat-governor/state.json`, else `~/.local/state/heat-governor/state.json` |
+| file | `$HEAT_GOVERNOR_STATE`, else `$XDG_RUNTIME_DIR/heat-governor/state.json`, else `$XDG_STATE_HOME/heat-governor/state.json` |
 | HTTP | `GET http://HOST:PORT/state` when the daemon runs with `--listen HOST:PORT` (off by default) |
+
+`$XDG_CONFIG_HOME` and `$XDG_STATE_HOME` default to `$HOME/.config` and `$HOME/.local/state` (the XDG defaults).
 
 The file is replaced atomically (write a temporary file, then rename), so a reader never sees a partial
 document. It is mode 0644, so a client in a container can read it through a read-only bind mount of the

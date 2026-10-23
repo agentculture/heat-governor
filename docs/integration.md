@@ -13,7 +13,7 @@ uv tool install heat-governor          # or: pip install heat-governor
 heat-governor capabilities             # what this host lets us read and change
 heat-governor sense                    # one reading of every zone
 heat-governor run --once               # one dry-run tick: what it would do now
-heat-governor unit -- --apply > ~/.config/systemd/user/heat-governor.service
+heat-governor unit -- --apply > $XDG_CONFIG_HOME/systemd/user/heat-governor.service
 systemctl --user daemon-reload && systemctl --user enable --now heat-governor
 loginctl enable-linger "$USER"         # keep it running without a login session
 ```
@@ -84,7 +84,7 @@ read the file directly.
 ## 4. Tune it
 
 All thresholds, curves, bands, the per-level concurrency factors, the poll interval and the container list
-live in `~/.config/heat-governor/config.toml` (`heat-governor config init --write` starts one). The daemon
+live in `$XDG_CONFIG_HOME/heat-governor/config.toml` (`heat-governor config init --write` starts one). The daemon
 re-reads it within ~2 s; an invalid edit is rejected and logged, and the last good settings stay. Every tick
 is recorded, so `heat-governor replay` can check a change against real traces before it governs.
 

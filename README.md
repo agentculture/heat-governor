@@ -29,7 +29,7 @@ heat-governor run --apply         # ...and governing the containers that opted i
 Install it as a user service:
 
 ```bash
-heat-governor unit -- --apply > ~/.config/systemd/user/heat-governor.service
+heat-governor unit -- --apply > $XDG_CONFIG_HOME/systemd/user/heat-governor.service
 systemctl --user daemon-reload && systemctl --user enable --now heat-governor
 loginctl enable-linger "$USER"
 ```
@@ -75,8 +75,8 @@ Everything above is a setting in one TOML file that a running daemon re-reads
 within about 2 s. A bad edit is rejected and the last good settings stay.
 
 ```bash
-heat-governor config init --write     # ~/.config/heat-governor/config.toml from the built-in profile
-$EDITOR ~/.config/heat-governor/config.toml
+heat-governor config init --write     # $XDG_CONFIG_HOME/heat-governor/config.toml from the built-in profile
+$EDITOR $XDG_CONFIG_HOME/heat-governor/config.toml
 heat-governor config check            # every problem at once; unknown keys are errors
 heat-governor config show             # what is in force
 heat-governor gpu-clock helper        # the root helper + sudoers line for GPU clocks
