@@ -302,6 +302,38 @@ def cmd_report(args: argparse.Namespace) -> None:
     emit_result("\n".join(out), json_mode=False)
 
 
+def cmd_sensors(args: argparse.Namespace) -> None:
+    d = Path(args.data_dir) if args.data_dir else default_data_dir()
+    try:
+        since, until = recorder.parse_when(args.since), recorder.parse_when(args.until)
+    except ValueError as exc:
+        raise CliError(
+            EXIT_USER_ERROR, f"bad time: {exc}", "use 2026-10-23T16:00:00Z, 16:00, -30m or epoch"
+        ) from exc
+    res = recorder.sensor_stats(d / "records", since=since, until=until, above_c=args.above)
+    if args.json:
+        emit_result(res, json_mode=True)
+        return
+    if not res["sensors"]:
+        emit_result(f"no records in that window under {d / 'records'}", json_mode=False)
+        return
+    head = f"{res['from_utc']} .. {res['to_utc']}"
+    cols = "sensor                         samples     min    mean     p95     max"
+    if args.above is not None:
+        cols += f"  s>={args.above:g}"
+    lines = [head, cols]
+    for name, r in res["sensors"].items():
+        if args.match and args.match not in name:
+            continue
+        line = (
+            f"{name:<30} {r['samples']:>7} {r['min']:>7} {r['mean']:>7} {r['p95']:>7} {r['max']:>7}"
+        )
+        if "s_at_or_above" in r:
+            line += f"  {r['s_at_or_above']:>5}"
+        lines.append(line)
+    emit_result("\n".join(lines), json_mode=False)
+
+
 def cmd_replay(args: argparse.Namespace) -> None:
     prof = _profile(args)
     path = Path(args.trace)
@@ -445,6 +477,17 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--window", type=float, default=60.0, help="Seconds before each reboot.")
     p.add_argument("--json", action="store_true", help="Emit structured JSON.")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser(
+        "sensors", help="Every sensor separately over a time window: min, mean, p95, max."
+    )
+    p.add_argument("--data-dir", help="Default $XDG_STATE_HOME/heat-governor.")
+    p.add_argument("--since", help="2026-10-23T16:00:00Z, 16:00 (today UTC), -30m or epoch.")
+    p.add_argument("--until", help="Same forms as --since (default: now).")
+    p.add_argument("--above", type=float, help="Also count seconds at or above this C.")
+    p.add_argument("--match", help="Only sensors whose name contains this (text output).")
+    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.set_defaults(func=cmd_sensors)
 
     p = sub.add_parser(
         "replay", help="Run the controller over a recorded trace (t1s log or records .jsonl)."

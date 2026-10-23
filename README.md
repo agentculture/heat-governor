@@ -102,6 +102,7 @@ heat-governor gpu-clock helper        # the root helper + sudoers line for GPU c
 | `wait` | Block until new work is admitted; exit 3 on `--timeout` while held. |
 | `report` | Reboots seen in the records, and what preceded each. |
 | `replay <trace>` | Run the controller over a recorded trace to tune a profile. |
+| `sensors` | Every sensor separately over a window: min, mean, p95, max, seconds above a threshold. |
 | `unit` | Print a systemd user unit. |
 | `config overview\|path\|show\|init\|check` | The config file a running daemon re-reads. |
 | `gpu-clock overview\|status\|helper\|lock\|reset` | The GPU clock ceiling (root helper). |

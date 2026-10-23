@@ -36,6 +36,7 @@ directory (mount the directory, not the file: an atomic rename does not show thr
 | `temp_c` | float or null | Governing temperature: the hottest readable watched zone. `null` = sensor lost (level is then `hot`). |
 | `effective_c`, `rate_c_s` | float | Temperature plus the lookahead on its rise, and the rise rate. |
 | `hottest_zone` | str or null | `index:type` of the hottest zone. |
+| `sensors` | object | Every sensor separately, this tick: `zone:<index>:<type>` (each thermal zone, null when unreadable), `gpu:<field>` (temp_c, power_w, sm_mhz, util_pct, events, tlimit_c, limit_c), `fan:<name>`. |
 | `source` | str | Which input governs: `board` (thermal zones) or `gpu` (the GPU's own temperature, mapped onto the board's bands). |
 | `gpu_temp_c`, `gpu_limit_c` | float or null | The GPU's reading, and its own thermal limit where the driver reports headroom (`temperature.gpu.tlimit`). |
 | `reason` | str | `rising`, `steady`, `falling` or `sensor_lost`. |

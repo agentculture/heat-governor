@@ -65,6 +65,13 @@ class Reading:
         live = [z for z in self.watched_zones() if z.temp_c is not None]
         return max(live, key=lambda z: z.temp_c or 0.0) if live else None
 
+    def sensors(self) -> dict[str, float | str | None]:
+        """Every sensor under its own flat name -- ``zone:<index>:<type>``,
+        ``gpu:<field>``, ``fan:<name>`` -- so results can be told apart per sensor."""
+        return flat_sensors(
+            {z.key: z.temp_c for z in self.zones}, self.gpu, self.fans  # type: ignore[arg-type]
+        )
+
     def as_dict(self) -> dict[str, object]:
         hot = self.hottest
         return {
@@ -76,6 +83,13 @@ class Reading:
             "fans": self.fans,
             "gpu": self.gpu,
         }
+
+
+def flat_sensors(zones: dict, gpu: dict, fans: dict) -> dict[str, float | str | None]:
+    out: dict[str, float | str | None] = {f"zone:{k}": v for k, v in (zones or {}).items()}
+    out |= {f"gpu:{k}": v for k, v in (gpu or {}).items()}
+    out |= {f"fan:{k}": v for k, v in (fans or {}).items()}
+    return out
 
 
 def _read(path: Path) -> str | None:

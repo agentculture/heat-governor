@@ -24,6 +24,7 @@ from typing import Iterable, Iterator
 
 from heat_governor.platforms import Profile
 from heat_governor.policy import Controller
+from heat_governor.sense import flat_sensors
 
 
 def boot_id(proc_root: Path = Path("/proc")) -> str:
@@ -217,4 +218,75 @@ def replay(path: Path, profile: Profile) -> dict:
         "max_temp_c": max_temp,
         "max_effective_c": max_eff,
         "before_each_restart": before_restart,
+    }
+
+
+# -- per-sensor statistics -------------------------------------------------------
+
+
+def parse_when(text: str | None, *, now: float | None = None) -> float | None:
+    """``2026-10-23T16:00:00Z``, ``16:00`` / ``16:00:30`` (today, UTC), an epoch
+    number, or a relative ``-30m`` / ``-2h`` / ``-90s``."""
+    if not text:
+        return None
+    now = time.time() if now is None else now
+    t = text.strip()
+    if t.startswith("-") and t[-1] in "smh" and t[1:-1].replace(".", "", 1).isdigit():
+        return now - float(t[1:-1]) * {"s": 1, "m": 60, "h": 3600}[t[-1]]
+    try:
+        return float(t)
+    except ValueError:
+        pass
+    if "T" in t:
+        return datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp()
+    day = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d")
+    hms = t if t.count(":") == 2 else t + ":00"
+    return datetime.fromisoformat(f"{day}T{hms}+00:00").timestamp()
+
+
+def _is_temp(name: str) -> bool:
+    return name.startswith("zone:") or name in ("gpu:temp_c", "gpu:limit_c")
+
+
+def sensor_stats(
+    directory: Path,
+    *,
+    since: float | None = None,
+    until: float | None = None,
+    above_c: float | None = None,
+) -> dict:
+    """Per sensor over [since, until]: samples, min, mean, p95, max, and for
+    temperature sensors the seconds at or above ``above_c``."""
+    series: dict[str, list[float]] = {}
+    first = last = None
+    for rec in iter_records(directory):
+        t = rec.get("t")
+        if rec.get("event") or "temp_c" not in rec or t is None:
+            continue
+        if (since is not None and t < since) or (until is not None and t > until):
+            continue
+        first = t if first is None else first
+        last = t
+        for name, v in flat_sensors(rec.get("zones"), rec.get("gpu"), rec.get("fans")).items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                series.setdefault(name, []).append(float(v))
+    out = {}
+    for name in sorted(series):
+        vals = sorted(series[name])
+        n = len(vals)
+        row = {
+            "samples": n,
+            "min": round(vals[0], 2),
+            "mean": round(sum(vals) / n, 2),
+            "p95": round(vals[min(n - 1, int(0.95 * (n - 1) + 0.5))], 2),
+            "max": round(vals[-1], 2),
+        }
+        if above_c is not None and _is_temp(name):
+            row["s_at_or_above"] = sum(1 for v in vals if v >= above_c)
+        out[name] = row
+    return {
+        "from_utc": _utc(first) if first else None,
+        "to_utc": _utc(last) if last else None,
+        "above_c": above_c,
+        "sensors": out,
     }

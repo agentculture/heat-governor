@@ -25,7 +25,8 @@ declared from their trip points, unmeasured), and a generic fallback.
 - `heat-governor sense` / `capabilities` -- read-only probes.
 - `heat-governor run [--apply]` -- the daemon.
 - `heat-governor state` / `wait` -- the client side of the signal.
-- `heat-governor report` / `replay <trace>` -- learn from recorded runs.
+- `heat-governor report` / `replay <trace>` / `sensors` -- learn from recorded runs
+  (`sensors`: every sensor separately over a window).
 - `heat-governor unit` -- a systemd user unit to install it.
 - `heat-governor config ...` -- the file a running daemon re-reads.
 - `heat-governor gpu-clock ...` -- the GPU clock ceiling (root helper).
@@ -274,6 +275,21 @@ The bands are declared, not measured: what a lower ceiling does to the board
 temperature on each platform is still to be measured.
 """
 
+_SENSORS = """\
+# heat-governor sensors
+
+Every sensor separately, from the per-tick records, over a time window: each
+thermal zone (`zone:<index>:<type>`), each GPU reading (`gpu:temp_c`,
+`gpu:power_w`, `gpu:sm_mhz`, `gpu:util_pct`, `gpu:limit_c`, ...) and each fan
+(`fan:<name>`), with samples, min, mean, p95, max and -- for temperatures --
+the seconds at or above `--above`. Use it to tell results apart per sensor,
+e.g. one GPU-ceiling step against another. The live state carries the same
+names under `sensors` every tick.
+
+    heat-governor sensors --since -30m --above 92
+    heat-governor sensors --since 16:00 --until 16:10 --match zone --json
+"""
+
 ENTRIES: dict[tuple[str, ...], str] = {
     (): _ROOT,
     ("heat-governor",): _ROOT,
@@ -292,6 +308,7 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("report",): _REPORT,
     ("replay",): _REPLAY,
     ("unit",): _UNIT,
+    ("sensors",): _SENSORS,
     ("config",): _CONFIG,
     ("config", "overview"): _CONFIG,
     ("config", "path"): _CONFIG,

@@ -366,6 +366,7 @@ class Daemon:
             "rate_c_s": d.rate_c_s,
             "hottest_zone": hot.key if hot else None,
             "source": d.source,
+            "sensors": reading.sensors(),
             "gpu_temp_c": d.gpu_temp_c,
             "gpu_limit_c": reading.gpu.get("limit_c"),
             "reason": d.reason,

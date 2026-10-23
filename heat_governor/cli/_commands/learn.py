@@ -32,6 +32,7 @@ Commands
   heat-governor wait [--timeout]   Block until new work is admitted (exit 3 if held).
   heat-governor report             Reboots seen in the records, and what preceded them.
   heat-governor replay <trace>     Run the controller over a recorded trace.
+  heat-governor sensors            Every sensor separately over a window (--since/--until).
   heat-governor unit -- <flags>    Print a systemd user unit (writes nothing).
   heat-governor config <verb>      overview | path | show | init [--write] | check:
                                    the TOML file a running daemon re-reads (~2 s).
@@ -83,6 +84,7 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["wait"], "summary": "Block until new work is admitted."},
             {"path": ["report"], "summary": "Reboots seen in the records."},
             {"path": ["replay"], "summary": "Run the controller over a recorded trace."},
+            {"path": ["sensors"], "summary": "Every sensor separately over a time window."},
             {"path": ["unit"], "summary": "Print a systemd user unit."},
             {"path": ["config"], "summary": "The config file a running daemon re-reads."},
             {"path": ["gpu-clock"], "summary": "The GPU clock ceiling (root helper)."},

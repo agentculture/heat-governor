@@ -131,3 +131,59 @@ def test_cli_batch_without_docker_is_env_error(tmp_path: Path, capsys) -> None:
         str(tmp_path),
     )
     assert rc == 2 and "hint:" in err
+
+
+# -- every sensor separately ------------------------------------------------------
+
+
+def test_sensor_stats_per_sensor_and_window(tmp_path: Path) -> None:
+    from heat_governor.recorder import sensor_stats
+
+    rec = Recorder(tmp_path, fsync=False)
+    t0 = 1_761_235_200.0
+    rec.write({"t": t0, "event": "start", "boot_id": "a"})
+    for i in range(10):
+        rec.write(
+            {
+                "t": t0 + i,
+                "temp_c": 90.0,
+                "zones": {"0:acpitz": 85.0 + i, "4:acpitz": 80.0},
+                "gpu": {"temp_c": 70.0 + i, "power_w": 40.0, "events": "0x0"},
+                "fans": {},
+            }
+        )
+    rec.close()
+    res = sensor_stats(tmp_path, since=t0 + 5, above_c=92)
+    s = res["sensors"]
+    assert s["zone:0:acpitz"]["samples"] == 5 and s["zone:0:acpitz"]["max"] == 94.0
+    assert s["zone:0:acpitz"]["s_at_or_above"] == 3  # 92, 93, 94
+    assert s["zone:4:acpitz"]["max"] == 80.0 and s["zone:4:acpitz"]["s_at_or_above"] == 0
+    assert s["gpu:temp_c"]["mean"] == 77.0 and "s_at_or_above" not in s["gpu:power_w"]
+    assert "gpu:events" not in s  # non-numeric
+
+
+def test_parse_when_forms() -> None:
+    from heat_governor.recorder import parse_when
+
+    now = 1_761_235_200.0  # 2025-10-23T16:00:00Z
+    assert parse_when("-30m", now=now) == now - 1800
+    assert parse_when("1761235200") == now
+    assert parse_when("2025-10-23T16:00:00Z") == now
+    assert parse_when("16:00", now=now) == now
+
+
+def test_cli_sensors_and_state_carries_every_sensor(tmp_path: Path, capsys) -> None:
+    from heat_governor.daemon import Daemon, Options
+    from heat_governor.platforms import SPARK
+    from heat_governor.sense import Sensor
+    from heat_governor.state import read_state
+    from tests.fakes import SPARK_ZONES, make_sys
+
+    sysr = make_sys(tmp_path, SPARK_ZONES)
+    opts = Options(state_path=tmp_path / "s.json", data_dir=tmp_path / "d", log=[].append)
+    d = Daemon(SPARK, opts, sensor=Sensor(SPARK.zones, sys_root=sysr), docker=None)
+    d.tick()
+    st = read_state(tmp_path / "s.json")
+    assert {f"zone:{i}:acpitz" for i in range(7)} <= set(st["sensors"])
+    rc, out, _ = _run(capsys, "sensors", "--data-dir", str(tmp_path / "d"), "--json")
+    assert rc == 0 and "zone:0:acpitz" in json.loads(out)["sensors"]
