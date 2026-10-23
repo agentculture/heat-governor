@@ -1,52 +1,124 @@
 # heat-governor
 
-Governs CPU clock speed, fan speed and active cores to keep machines thermally
-balanced without resets, and records each run so the next one is tuned better.
+Keeps machines running heavy AI work without thermal resets, while losing as
+little throughput as possible. One daemon per host senses the thermal zones
+about once a second, tells clients when to hold new work, duty-cycles and
+CPU-caps the containers that opt in, and records each run so the next one is
+tuned better.
 
-`heat-governor` is an [AgentCulture](https://github.com/agentculture) mesh
-agent. It is distributed as a Python package with an agent-first CLI and runs
-on the mesh as the `heat-governor` resident.
+It was built after a DGX Spark hard-reset twice in one day under long-context
+LLM decode: the hottest ACPI zone reached ~95 C while the GPU sat at ~80 C,
+and the zone moved up to 5 C in two seconds. See
+[`docs/HANDOFF-2026-10-23.md`](docs/HANDOFF-2026-10-23.md).
 
-## Status
-
-The repository currently contains the agent scaffold only. The thermal
-governing itself has not been implemented yet.
-
-| Capability | Status |
-|------------|--------|
-| Agent-first CLI, mesh identity, skill kit, CI + PyPI publishing | Available |
-| Reading temperatures, fan speed, clocks and online cores | Planned |
-| Controlling CPU clock, fan speed and active cores | Planned |
-| Control loop that keeps the machine balanced without resets | Planned |
-| Per-run records, used to tune the next run | Planned |
+`heat-governor` is also an [AgentCulture](https://github.com/agentculture)
+mesh agent with an agent-first CLI. The runtime package has no third-party
+dependencies.
 
 ## Quickstart
 
 ```bash
-uv sync
-uv run pytest -n auto                 # run the test suite
-uv run heat-governor whoami           # identity from culture.yaml
-uv run heat-governor learn            # self-teaching prompt (add --json)
-uv run teken cli doctor . --strict    # the agent-first rubric gate CI runs
+uv tool install heat-governor     # or, from a checkout: uv sync && uv run heat-governor ...
+heat-governor capabilities        # what this host lets us read and change
+heat-governor sense               # one reading of every zone
+heat-governor run --once          # one dry-run tick: what it would do right now
+heat-governor run                 # the daemon, signalling and recording only
+heat-governor run --apply         # ...and governing the containers that opted in
 ```
+
+Install it as a user service:
+
+```bash
+heat-governor unit -- --apply > $XDG_CONFIG_HOME/systemd/user/heat-governor.service
+systemctl --user daemon-reload && systemctl --user enable --now heat-governor
+loginctl enable-linger "$USER"
+```
+
+## How it governs
+
+| Level | When (effective temperature) | New work | Batch containers |
+|---|---|---|---|
+| cool | below warm | admitted, full concurrency | running |
+| warm | warm to hot | admitted, half concurrency | paused for a growing share of each 2 s period |
+| hot | hot to critical | held | paused for most of each period |
+| critical | at or above critical | held | paused |
+
+Two inputs feed it: the hottest board zone, and the GPU's own temperature with
+its own bands (DGX Spark: 82 / 87 / 91 C, under the ~94 C limit the GB10
+reports as headroom). Whichever is closer to its own limit governs. On the
+Jetsons the GPU zone is already one of the watched board zones.
+
+The effective temperature adds a short lookahead on a rising temperature.
+Levels rise at once and fall only after the temperature has stayed below the
+threshold (minus a hysteresis) for a dwell time. CPU caps drop at once and
+rise one band at a time. If every sensor is lost the host is treated as hot.
+
+| Platform | warm / hot / critical | Source |
+|---|---|---|
+| DGX Spark (GB10) | 88 / 91.5 / 93 C on the ACPI zones | measured: resets at ~94.5-95 C |
+| Jetson AGX Thor | 95 / 100 / 104 C | declared from the 109 C passive trip; unmeasured |
+| Jetson AGX Orin | 85 / 90 / 94 C | declared from the 99 C passive trip; unmeasured |
+| anything else | from the lowest critical trip minus 15 C | derived |
+
+Containers opt in by label: `heat-governor.role=batch` (duty-cycled and
+CPU-capped) or `heat-governor.role=serving` (never paused; CPU-capped only
+with `heat-governor.cpu-cap=true`). Unlabelled containers are left alone.
+The daemon only ever undoes a pause it made itself.
+
+With the root helper installed and `gpu_clock = true`, it also lowers the GPU
+clock ceiling per band (`nvidia-smi -lgc` on the Spark, devfreq `max_freq` on
+the Jetsons). It does not touch power modes or fans.
+
+## Configure and tune
+
+Everything above is a setting in one TOML file that a running daemon re-reads
+within about 2 s. A bad edit is rejected and the last good settings stay.
+
+```bash
+heat-governor config init --write     # $XDG_CONFIG_HOME/heat-governor/config.toml from the built-in profile
+$EDITOR $XDG_CONFIG_HOME/heat-governor/config.toml
+heat-governor config check            # every problem at once; unknown keys are errors
+heat-governor config show             # what is in force
+heat-governor gpu-clock helper        # the root helper + sudoers line for GPU clocks
+```
+
+## For other tools
+
+- Label your containers, or read the signal before starting new work:
+  `heat-governor wait --timeout 1800 && next-job`, or in Python
+  `heat_governor.client.wait()` / `client.Gate(4).slot()`.
+- The JSON contract: [`docs/contracts/state.md`](docs/contracts/state.md).
+- The guide for lobes, sparkrun, mjolnir and scripts:
+  [`docs/integration.md`](docs/integration.md).
 
 ## CLI
 
 | Verb | What it does |
 |------|--------------|
-| `whoami` | Report this agent's nick, version, backend, and model from `culture.yaml`. |
-| `learn` | Print a structured self-teaching prompt. |
-| `explain <path>` | Markdown docs for any noun/verb path. |
-| `overview` | Read-only descriptive snapshot of the agent. |
-| `doctor` | Check the agent-identity invariants (prompt-file-present, backend-consistency). |
-| `cli overview` | Describe the CLI surface itself. |
+| `sense` | Read every zone, fan and the GPU once. |
+| `capabilities` | What this host lets heat-governor read and change, and the active profile. |
+| `run` | The daemon (dry-run without `--apply`; `--once` for one tick). |
+| `state` | Read the published admission state (local file or `--source URL`). |
+| `wait` | Block until new work is admitted; exit 3 on `--timeout` while held. |
+| `report` | Reboots seen in the records, and what preceded each. |
+| `replay <trace>` | Run the controller over a recorded trace to tune a profile. |
+| `sensors` | Every sensor separately over a window: min, mean, p95, max, seconds above a threshold. |
+| `unit` | Print a systemd user unit. |
+| `config overview\|path\|show\|init\|check` | The config file a running daemon re-reads. |
+| `gpu-clock overview\|status\|helper\|lock\|reset` | The GPU clock ceiling (root helper). |
+| `whoami`, `learn`, `explain <path>`, `overview`, `doctor`, `cli overview` | Agent verbs. |
 
 Every command supports `--json`. Results go to stdout and errors/diagnostics
-to stderr, never mixed. Exit codes: `0` success, `1` user error, `2`
-environment error, `3+` reserved.
+to stderr. Exit codes: `0` success, `1` user error, `2` environment error,
+`3` `wait` timed out while held.
 
-The CLI is cited from [teken](https://github.com/agentculture/teken)
-(`afi-cli`), and the runtime package has no third-party dependencies.
+## Development
+
+```bash
+uv sync
+uv run pytest -n auto
+uv run teken cli doctor . --strict    # the agent-first rubric gate CI runs
+```
 
 ## Agent harnesses
 

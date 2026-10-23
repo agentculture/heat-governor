@@ -5,3 +5,8 @@ max-line-length = 100
 # E203: whitespace before ':' — conflicts with black's slice formatting.
 # W503: line break before binary operator — black does the opposite (W504-style).
 extend-ignore = E203, W503
+
+# gpuclock.py embeds the root helper script verbatim; its lines must match the
+# installed copy byte for byte, so they are not rewrapped.
+per-file-ignores =
+    heat_governor/gpuclock.py: E501

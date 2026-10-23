@@ -17,15 +17,9 @@ prompt** file, [`.pi/SYSTEM.md`](.pi/SYSTEM.md). This file is project
 
 ## What this project is
 
-`heat-governor` is an AgentCulture mesh agent that **governs CPU clock speed,
-fan speed and active cores to keep machines thermally balanced without
-resets, and records each run so the next one is tuned better.**
+`heat-governor` is an AgentCulture mesh agent that **keeps machines running heavy AI work without thermal resets: it senses the thermal zones, signals clients when to hold new work, duty-cycles and CPU-caps the containers that opt in, and records each run so the next one is tuned better.**
 
-It was scaffolded from `culture-agent-template`. Today it contains only the
-sibling-pattern baseline: an agent-first CLI, a mesh identity, the vendored
-guildmaster skill kit, and a CI/deploy pipeline. Thermal sensing, the
-clock/fan/core actuators, the control loop and per-run records are
-**(planned)**. No domain code exists yet. Keep that in mind when you answer
+It was scaffolded from `culture-agent-template`. The governing core has landed: `sense`, `capabilities`, `run` (the daemon), `state`, `wait`, `report`, `replay` and `unit`, with built-in profiles for the DGX Spark (measured), Jetson AGX Thor and Orin (declared, unmeasured). Live validation of `run --apply` on a real batch window is **(planned)**. The agent verbs (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) remain. Keep that in mind when you answer
 questions about what the agent can currently do.
 
 It is a sibling to [`guildmaster`](https://github.com/agentculture/guildmaster)
