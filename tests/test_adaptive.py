@@ -72,7 +72,8 @@ def test_min_cpus_is_the_floor() -> None:
     loop = _loop(min_cpus=4.0)
     assert _step(loop, 0.0, use=5.0).cap == 4.0
     s = _step(loop, 20.0, use=4.0)
-    assert s.action == "hold" and loop.cap == 4.0
+    assert s.action == "hold"
+    assert loop.cap == 4.0
     assert "floor" in s.reason
 
 
@@ -113,14 +114,16 @@ def test_evaluated_at_most_once_per_interval() -> None:
     _step(loop, 0.0)
     assert not loop.due(10.0)
     s = _step(loop, 10.0)
-    assert s.action == "wait" and loop.cap == 9.0
+    assert s.action == "wait"
+    assert loop.cap == 9.0
     assert loop.due(20.0)
 
 
 def test_unknown_use_holds_and_measures() -> None:
     loop = _loop()
     s = loop.step("hot", 0.05, None, HOST, 0.0)
-    assert s.action == "hold" and loop.cap is None
+    assert s.action == "hold"
+    assert loop.cap is None
     assert "measuring" in s.reason
 
 
@@ -132,14 +135,16 @@ def test_cooling_faster_than_needed_at_the_engage_level_releases_one_step() -> N
     _step(loop, 0.0, use=12.0)  # cap 9 at t=0
     assert _step(loop, 20.0, rate=-0.02, use=9.0).action == "hold"  # < 2 x interval
     s = _step(loop, 40.0, rate=-0.02, use=9.0)
-    assert s.action == "release" and s.cap == 11.0  # + max(1, 10% of 20)
+    assert s.action == "release"
+    assert s.cap == 11.0  # + max(1, 10% of 20)
 
 
 def test_no_release_while_above_the_engage_level() -> None:
     loop = _loop()
     _step(loop, 0.0, use=12.0)
     s = _step(loop, 40.0, level="hot", rate=-0.02, use=9.0)
-    assert s.action == "hold" and loop.cap == 9.0
+    assert s.action == "hold"
+    assert loop.cap == 9.0
 
 
 def test_below_engage_releases_one_step_per_two_intervals_then_removes() -> None:
@@ -158,7 +163,8 @@ def test_below_engage_releases_one_step_per_two_intervals_then_removes() -> None
 
 def test_below_engage_without_a_cap_does_nothing() -> None:
     s = _step(_loop(), 0.0, level="cool")
-    assert s.action == "hold" and s.cap is None
+    assert s.action == "hold"
+    assert s.cap is None
 
 
 def test_engage_level_hot_leaves_warm_alone() -> None:
@@ -174,13 +180,15 @@ def test_engage_level_hot_leaves_warm_alone() -> None:
 def test_sensor_loss_tightens_by_the_cold_start_step_and_never_releases() -> None:
     loop = _loop(model=Model(gain=0.01, samples=4))
     s = loop.step("hot", None, 12.0, HOST, 0.0)
-    assert s.action == "tighten" and s.cap == 9.0
+    assert s.action == "tighten"
+    assert s.cap == 9.0
     assert "sensor lost" in s.reason
     assert loop.pending is None  # no rate to learn from
     hi = _loop(engage="critical")
     hi.cap = 6.0
     s = hi.step("hot", None, 6.0, HOST, 100.0)  # not engaged, but blind: hold
-    assert s.action == "hold" and hi.cap == 6.0
+    assert s.action == "hold"
+    assert hi.cap == 6.0
 
 
 # -- learning --------------------------------------------------------------------
@@ -322,7 +330,8 @@ def test_systemctl_reads_cgroup_cpu_stat(tmp_path: Path) -> None:
     assert sc.cpu_usage_usec("app.slice") == 200000
     assert len(calls) == 1  # the path is cached
     assert calls[0][:3] == ["systemctl", "--user", "show"]
-    assert calls[0][-2:] == ["--", "app.slice"] and "ControlGroup" in calls[0]
+    assert calls[0][-2:] == ["--", "app.slice"]
+    assert "ControlGroup" in calls[0]
     stat.unlink()
     assert sc.cpu_usage_usec("app.slice") is None
     assert len(calls) == 2  # a vanished cgroup looks the path up again
@@ -464,9 +473,11 @@ def test_daemon_adaptive_engage_tighten_learn_cool_release_restore(tmp_path: Pat
 
     _run(d, t, sysr, sc, temp_md=rising, use_cpus=16, seconds=6)
     sets = [c for c in sc.calls if c[0] == "set"]
-    assert sets and sets[0] == ("set", "app.slice", "1200")  # 16 - 25% of 16
+    assert sets
+    assert sets[0] == ("set", "app.slice", "1200")  # 16 - 25% of 16
     tighten = [m for m in logs if "adaptive app.slice: tighten" in m]
-    assert tighten and "cold start" in tighten[0]
+    assert tighten
+    assert "cold start" in tighten[0]
     # the rise slows after the cut: one sample learned and persisted
     _run(d, t, sysr, sc, temp_md=lambda: temp[0], use_cpus=16, seconds=5)
     model = d.adaptive_store.model("spark", "app.slice")
@@ -482,9 +493,11 @@ def test_daemon_adaptive_engage_tighten_learn_cool_release_restore(tmp_path: Pat
     assert "app.slice" in saved["platforms"]["spark"]
     st = read_state(tmp_path / "state.json")
     (u,) = st["units"]
-    assert u["mode"] == "adaptive" and u["cpus"] is not None
+    assert u["mode"] == "adaptive"
+    assert u["cpus"] is not None
     assert u["use_cpus"] == pytest.approx(12.0, abs=0.5)
-    assert u["samples"] == model.samples and "gain" in u
+    assert u["samples"] == model.samples
+    assert "gain" in u
     # cool: released one step per 2 x interval, then removed and restored
     _run(d, t, sysr, sc, temp_md=70000, use_cpus=16, seconds=400)
     assert sc.units["app.slice"] is None
@@ -619,28 +632,35 @@ def test_the_deadband_is_the_measured_trend_noise() -> None:
     assert loop.band(0.0001) == DEADBAND
     assert loop.band(0.05) == 0.1
     s = loop.step("warm", 0.06, 12.0, 20, 0.0, noise=0.05)  # rising, but inside its noise
-    assert s.action == "hold" and "noise band 0.100" in s.reason
+    assert s.action == "hold"
+    assert "noise band 0.100" in s.reason
 
 
 def test_a_change_inside_the_noise_teaches_nothing() -> None:
     loop = _loop()
     loop.step("warm", 0.20, 12.0, 20, 0.0, noise=0.05)  # tighten, armed with noise 0.05
     s = loop.step("warm", 0.10, 9.0, 20, 20.0, noise=0.05)  # fell 0.10 < 2 x 0.071
-    assert not s.learned and loop.model.samples == 0 and loop.model.ignored == 1
+    assert not s.learned
+    assert loop.model.samples == 0
+    assert loop.model.ignored == 1
     assert "above the noise" in s.lesson
 
 
 def test_an_idle_unit_is_never_cut_and_its_cap_is_released() -> None:
     loop = _loop()
     s = loop.step("warm", 0.2, 0.1, 20, 0.0)
-    assert s.action == "hold" and loop.cap is None and "not the heat source" in s.reason
+    assert s.action == "hold"
+    assert loop.cap is None
+    assert "not the heat source" in s.reason
     loop.cap = 4.0
     s = loop.step("warm", 0.2, 0.0, 20, 20.0)
-    assert s.action == "release" and loop.cap == 6.0
+    assert s.action == "release"
+    assert loop.cap == 6.0
 
 
 def test_a_cap_that_is_not_binding_is_released_when_not_rising() -> None:
     loop = _loop()
     loop.cap = 10.0
     s = loop.step("warm", 0.0, 3.0, 20, 0.0)
-    assert s.action == "release" and "not binding" in s.reason
+    assert s.action == "release"
+    assert "not binding" in s.reason

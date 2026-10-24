@@ -135,7 +135,7 @@ class Systemctl:
         rc, out, err = self.run([*argv, "--", unit])
         if rc != 0:
             raise UnitError(f"systemctl --user show {unit}: {(err or out).strip() or rc}")
-        kv = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+        kv = {k: v for k, sep, v in (line.partition("=") for line in out.splitlines()) if sep}
         return UnitInfo(
             loaded=kv.get("LoadState") == "loaded",
             active=kv.get("ActiveState") in ("active", "activating", "reloading"),

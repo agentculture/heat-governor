@@ -109,8 +109,8 @@ def test_units_config_loads_rules(tmp_path: Path) -> None:
         ("app.slice", (("hot", 4.0), ("critical", 2.0))),
         ("x.scope", ()),
     ]
+    p.write_text('[[units]]\nname = "app.slice"\nhot = -1\n')
     with pytest.raises(ConfigError):
-        p.write_text('[[units]]\nname = "app.slice"\nhot = -1\n')
         load(p)
 
 
@@ -294,7 +294,8 @@ def test_systemctl_argv_always_user_and_runtime() -> None:
         "CPUQuota=400%",
     ]
     assert calls[2][-1] == "CPUQuota="
-    assert calls[0][:3] == ["systemctl", "--user", "show"] and calls[0][-2:] == ["--", "app.slice"]
+    assert calls[0][:3] == ["systemctl", "--user", "show"]
+    assert calls[0][-2:] == ["--", "app.slice"]
 
 
 def test_systemctl_errors() -> None:

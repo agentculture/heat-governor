@@ -260,31 +260,38 @@ class AdaptiveLoop:
     ) -> Step:
         engaged = LEVELS.index(level) >= LEVELS.index(self.engage)
         if rate is None:
-            if not engaged:
-                return Step("hold", self.cap, self.cap, use, "sensor lost: never release blind")
-            if use is None:
-                return Step("hold", self.cap, self.cap, None, "sensor lost; measuring use")
-            return self._tighten(use, None, f"use {use:g}, sensor lost: cold-start step")
+            return self._decide_blind(engaged, use)
         if not engaged:
             return self._release(host, f"level {level}, below engage {self.engage}")
         error = rate - self.target_c_s
         head = f"rate {rate:+.3f} C/s, target {self.target_c_s:+.3f} C/s, noise band {band:.3f}"
-        idle = use is not None and use < IDLE_USE
-        slack = use is not None and self.cap is not None and use < BINDING_SHARE * self.cap
         if error > band:
-            if use is None:
-                return Step("hold", self.cap, self.cap, None, f"{head}; measuring use")
-            if idle:
-                # the heat is not this unit's: it is not using the CPU
-                if self.cap is not None:
-                    return self._release(host, f"{head}; use {use:g}: not the heat source")
-                return Step("hold", None, None, use, f"{head}; use {use:g}: not the heat source")
-            return self._tighten(use, error, f"use {use:g}, {head}, {self._basis()}")
+            return self._decide_hot(use, error, host, head)
+        slack = use is not None and self.cap is not None and use < BINDING_SHARE * self.cap
         if slack:
             return self._release(host, f"{head}; use {use:g} of cap {self.cap:g}: cap not binding")
         if error < -band and level == self.engage:
             return self._release(host, f"{head}, cooling faster than needed")
         return Step("hold", self.cap, self.cap, use, f"{head}, within the noise band")
+
+    def _decide_blind(self, engaged: bool, use: float | None) -> Step:
+        """Sensor lost: never release blind; tighten from use once it is known."""
+        if not engaged:
+            return Step("hold", self.cap, self.cap, use, "sensor lost: never release blind")
+        if use is None:
+            return Step("hold", self.cap, self.cap, None, "sensor lost; measuring use")
+        return self._tighten(use, None, f"use {use:g}, sensor lost: cold-start step")
+
+    def _decide_hot(self, use: float | None, error: float, host: int, head: str) -> Step:
+        """Heating faster than the target (beyond the noise band)."""
+        if use is None:
+            return Step("hold", self.cap, self.cap, None, f"{head}; measuring use")
+        if use < IDLE_USE:
+            # the heat is not this unit's: it is not using the CPU
+            if self.cap is not None:
+                return self._release(host, f"{head}; use {use:g}: not the heat source")
+            return Step("hold", None, None, use, f"{head}; use {use:g}: not the heat source")
+        return self._tighten(use, error, f"use {use:g}, {head}, {self._basis()}")
 
 
 class Trend:
