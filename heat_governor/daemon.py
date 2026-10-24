@@ -240,22 +240,36 @@ class Daemon:
             self.unit_capper.set(name, unit_cpus(d.level, self.unit_bands(rule)))
             return
         trend = self.trends[name]
-        trend.add(now, None if d.reason == "sensor_lost" else d.temp_c)
+        trend.add(now, None if d.reason == "sensor_lost" else d.temp_c, d.source)
         if loop.due(now):
-            use = self.unit_use[name] = self.meter.sample(name, now)
-            live = self.unit_capper.applies(name)
-            if not live:
-                loop.pending = None  # a change not made has no response to learn from
-            rate = trend.take()
-            noise = trend.noise
-            step = loop.step(d.level, rate, use, self.host_cpus, now, learn=live, noise=noise)
-            if step.lesson:
-                self._log(f"adaptive {name}: {step.lesson}")
-            if step.changed:
-                self._log(step.describe(name, dry=not live))
-            if step.learned:
-                self.adaptive_store.save()
+            self._evaluate(name, loop, trend, d.level, now)
         self.unit_capper.set(name, loop.cap)
+
+    def _evaluate(self, name: str, loop: AdaptiveLoop, trend: Trend, level: str, now: float):
+        """One adaptive evaluation: measure use, fit the trend, step the loop, log."""
+        use = self.unit_use[name] = self.meter.sample(name, now)
+        live = self.unit_capper.applies(name)
+        if not live:
+            loop.pending = None  # a change not made has no response to learn from
+        rate = trend.take()
+        step = loop.step(
+            level,
+            rate,
+            use,
+            self.host_cpus,
+            now,
+            learn=live,
+            noise=trend.noise,
+            long=trend.long(),
+            switched=trend.switched,
+        )
+        if step.lesson:
+            self._log(f"adaptive {name}: {step.lesson}")
+        if step.changed:
+            trend.restart_long()  # the readings before a change describe another cap
+            self._log(step.describe(name, dry=not live))
+        if step.learned:
+            self.adaptive_store.save()
 
     def unit_bands(self, rule: UnitRule) -> tuple[tuple[str, float], ...]:
         """A unit's own bands replace the platform default entirely."""

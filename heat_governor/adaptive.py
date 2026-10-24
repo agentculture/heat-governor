@@ -34,8 +34,17 @@ Rules, evaluated at most once per ``interval_s``:
 * **learning**: a TIGHTEN arms one sample ``(time, use, rate)``; the next
   evaluation takes ``(rate_before - rate_now) / (use_before - use_now)`` when
   use fell by >= 0.5 CPU and the rate fell, else counts it ``ignored``. The
-  gain is an EWMA (alpha 0.3) of the samples, clamped to [1e-4, 0.05]. Nothing
-  is armed in dry-run: a change that is not made has no response to measure.
+  gain is an EWMA (alpha 0.3) of the samples, clamped to [GAIN_MIN, GAIN_MAX]
+  = [1e-4, 0.5]. Nothing is armed in dry-run: a change that is not made has no
+  response to measure. Samples use the per-interval rate only.
+* **long window**: when the interval's error is inside its noise band, the
+  slope over the last 4 intervals (:meth:`Trend.long`, same source, no sensor
+  loss, restarted after every change) is checked against its own, much smaller
+  band; beyond it the loop tightens or releases as above, saying so
+  (``long trend +0.0060 C/s over 79 s, noise band 0.0050``).
+* **source switch**: the trend is fitted per governing source (board vs the
+  GPU's mapped scale); a switch starts a new window, and an interval with too
+  few readings of the new source holds and learns nothing.
 """
 
 from __future__ import annotations
@@ -43,6 +52,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -60,6 +70,7 @@ MAX_STEP_SHARE = 0.5  # of measured use, the largest single cut
 RELEASE_SHARE = 0.10  # of host CPUs per release step
 
 Log = Callable[[str], None]
+Long = tuple[float, float | None, float]  # Trend.long(): slope, standard error, span s
 
 
 @dataclass
@@ -237,10 +248,15 @@ class AdaptiveLoop:
         *,
         learn: bool = True,
         noise: float | None = None,
+        long: Long | None = None,
+        switched: bool = False,
     ) -> Step:
         """One evaluation. ``rate`` in C/s (None = sensor lost); ``use`` in CPUs
         over the last interval (None = not measured yet / unreadable); ``noise``
-        the standard error of ``rate`` (it sets the deadband)."""
+        the standard error of ``rate`` (it sets the deadband); ``long`` the
+        :meth:`Trend.long` fit, consulted when the interval's error is inside its
+        band; ``switched``: the governing source changed in this window, so a
+        ``rate`` of None means too few readings of the new source, not blindness."""
         if not self.due(now):
             return Step("wait", self.cap, self.cap, self.last_use, "between evaluations")
         self._now = now
@@ -248,7 +264,10 @@ class AdaptiveLoop:
         learned, lesson = self._learn(rate, use, noise)
         if use is not None:
             self.last_use = use
-        s = self._decide(level, rate, use, host_cpus, self.band(noise))
+        if rate is None and switched:
+            s = Step("hold", self.cap, self.cap, use, "governing source switched: new trend window")
+        else:
+            s = self._decide(level, rate, use, host_cpus, self.band(noise), long)
         if s.action == "tighten" and learn and rate is not None and use is not None:
             self.pending = (now, use, rate, noise or 0.0)
         if lesson is not None:
@@ -256,7 +275,13 @@ class AdaptiveLoop:
         return s
 
     def _decide(
-        self, level: str, rate: float | None, use: float | None, host: int, band: float = DEADBAND
+        self,
+        level: str,
+        rate: float | None,
+        use: float | None,
+        host: int,
+        band: float = DEADBAND,
+        long: Long | None = None,
     ) -> Step:
         engaged = LEVELS.index(level) >= LEVELS.index(self.engage)
         if rate is None:
@@ -272,7 +297,20 @@ class AdaptiveLoop:
             return self._release(host, f"{head}; use {use:g} of cap {self.cap:g}: cap not binding")
         if error < -band and level == self.engage:
             return self._release(host, f"{head}, cooling faster than needed")
-        return Step("hold", self.cap, self.cap, use, f"{head}, within the noise band")
+        s = self._decide_long(level, use, host, long) if long is not None else None
+        return s or Step("hold", self.cap, self.cap, use, f"{head}, within the noise band")
+
+    def _decide_long(self, level: str, use: float | None, host: int, long: Long) -> Step | None:
+        """Inside the interval's band: a slow trend over the last intervals,
+        beyond its own (much smaller) standard error, still counts."""
+        rate, noise, span = long
+        error, band = rate - self.target_c_s, self.band(noise)
+        head = f"long trend {rate:+.4f} C/s over {span:g} s, noise band {band:.4f}"
+        if error > band:
+            return self._decide_hot(use, error, host, head)
+        if error < -band and level == self.engage:
+            return self._release(host, f"{head}, cooling faster than needed")
+        return None
 
     def _decide_blind(self, engaged: bool, use: float | None) -> Step:
         """Sensor lost: never release blind; tighten from use once it is known."""
@@ -294,22 +332,58 @@ class AdaptiveLoop:
         return self._tighten(use, error, f"use {use:g}, {head}, {self._basis()}")
 
 
+def fit(pts: list[tuple[float, float]]) -> tuple[float | None, float | None]:
+    """Least-squares ``(slope, standard error of the slope)`` through ``pts``;
+    ``(None, None)`` with fewer than :attr:`Trend.MIN_POINTS` or no time spread."""
+    n = len(pts)
+    if n < Trend.MIN_POINTS:
+        return None, None
+    mt = sum(t for t, _ in pts) / n
+    mc = sum(c for _, c in pts) / n
+    var = sum((t - mt) ** 2 for t, _ in pts)
+    if var <= 0:
+        return None, None
+    slope = sum((t - mt) * (c - mc) for t, c in pts) / var
+    resid = sum((c - mc - slope * (t - mt)) ** 2 for t, c in pts)
+    return round(slope, 5), round((resid / (n - 2) / var) ** 0.5, 5)
+
+
 class Trend:
     """The temperature trend the loop acts on: the least-squares slope (C/s)
     of every governing reading since the last evaluation. The controller's own
     ``rate_c_s`` spans ``rate_window_s`` (2 s on the Spark, whose hot zone jumps
     2-5 C per second): one such reading per ``interval_s`` is mostly noise, and
     a gain learned from noise would size every step wrongly. ``None`` with fewer
-    than three readings or a sensor loss in the window."""
+    than three readings or a sensor loss in the window.
+
+    Readings are fitted per governing ``source`` only: the board and the GPU's
+    mapped scale differ (on the Spark often by ~8 C), so a switch starts a new
+    window and :attr:`switched` says the window just taken began at one.
+
+    :meth:`long` fits the last :attr:`WINDOWS` interval windows together (same
+    source, no sensor loss): a slow creep that stays inside each interval's
+    noise band stands out there, because the slope's standard error falls with
+    the window's length to the power 1.5."""
 
     MIN_POINTS = 3
+    WINDOWS = 4
 
     def __init__(self) -> None:
         self.points: list[tuple[float, float]] = []
         self.blind = False
         self.noise: float | None = None  # standard error of the last slope taken
+        self.source: str | None = None
+        self.switched = False  # the window just taken started at a source switch
+        self._switch = False
+        self.windows: deque[list[tuple[float, float]]] = deque(maxlen=self.WINDOWS)
 
-    def add(self, now: float, temp: float | None) -> None:
+    def add(self, now: float, temp: float | None, source: str | None = None) -> None:
+        if source is not None and source != self.source:
+            if self.source is not None:  # a different series: never fit across it
+                self.points = []
+                self.windows.clear()
+                self._switch = True
+            self.source = source
         if temp is None:
             self.blind = True
         else:
@@ -318,19 +392,29 @@ class Trend:
     def take(self) -> float | None:
         """The slope over the readings so far, then start a new window."""
         pts, blind = self.points, self.blind
+        self.switched, self._switch = self._switch, False
         self.points, self.blind, self.noise = [], False, None
-        if blind or len(pts) < self.MIN_POINTS:
+        if blind:
+            self.windows.clear()  # a sensor loss breaks the long window too
             return None
-        n = len(pts)
-        mt = sum(t for t, _ in pts) / n
-        mc = sum(c for _, c in pts) / n
-        var = sum((t - mt) ** 2 for t, _ in pts)
-        if var <= 0:
+        self.windows.append(pts)
+        slope, self.noise = fit(pts)
+        return slope
+
+    def long(self) -> tuple[float, float | None, float] | None:
+        """``(slope, standard error, span in s)`` over the kept windows, or None
+        with fewer than two of them."""
+        if len(self.windows) < 2:
             return None
-        slope = sum((t - mt) * (c - mc) for t, c in pts) / var
-        resid = sum((c - mc - slope * (t - mt)) ** 2 for t, c in pts)
-        self.noise = round((resid / (n - 2) / var) ** 0.5, 5) if n > 2 else None
-        return round(slope, 5)
+        pts = [p for w in self.windows for p in w]
+        slope, noise = fit(pts)
+        if slope is None:
+            return None
+        return slope, noise, round(pts[-1][0] - pts[0][0], 1)
+
+    def restart_long(self) -> None:
+        """After a change: the windows before it describe a different cap."""
+        self.windows.clear()
 
 
 class UsageMeter:
