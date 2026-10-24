@@ -38,13 +38,15 @@ Layout::
     critical = 2                  # (spark: 8 / 4 / 2, declared, unmeasured)
     dry_run = true                # optional: log only, change nothing
 
-    [[units]]                     # or: a feedback loop that learns the unit's effect
-    name = "app.slice"
-    mode = "adaptive"             # levels (default) | adaptive; no warm/hot/critical
-    min_cpus = 1                  # never cap below this
-    engage = "warm"               # warm | hot | critical
-    interval_s = 20               # one evaluation per interval (>= 5)
-    target_rate_c_min = 0.0       # temperature rate to hold while engaged, C/min
+    # or, INSTEAD of the levels entry above (a unit may be listed only once),
+    # a feedback loop that learns the unit's effect:
+    # [[units]]
+    # name = "app.slice"
+    # mode = "adaptive"           # levels (default) | adaptive; no warm/hot/critical
+    # min_cpus = 1                # never cap below this
+    # engage = "warm"             # warm | hot | critical
+    # interval_s = 20             # one evaluation per interval (>= 5)
+    # target_rate_c_min = 0.0     # temperature rate to hold while engaged, C/min
 """
 
 from __future__ import annotations

@@ -18,9 +18,14 @@ The actuator here follows the same rules as the container actuators:
 * every change is ``--runtime``: it lives under ``/run`` and a reboot drops it,
   so a cap can never outlive the machine's uptime;
 * a band never RAISES a quota tighter than the unit's own;
-* ``apply=False`` logs ``dry-run would ...`` and changes nothing;
+* ``apply=False`` (or a unit's ``dry_run``) logs ``dry-run would cap ...`` and
+  ``dry-run would restore ...`` and changes nothing; a ledger entry, though,
+  means a real change was made, so it is always restored for real;
 * a unit that does not exist (or is inactive) is reported once and skipped,
-  then looked for again every :attr:`UnitCapper.RETRY_S`.
+  then looked for again every :attr:`UnitCapper.RETRY_S`; any other systemctl
+  error is logged once per message and retried at the same pace;
+* a unit gone before its restore keeps its original as an orphan
+  (``Ledger.unit_orphans``), restored first when the unit is seen again.
 
 Nothing is governed unless the config lists a unit (``[[units]]``).
 Docker containers live in ``system.slice`` and are never affected.
@@ -100,6 +105,7 @@ class SystemctlLike(Protocol):
 
 
 CGROUP_ROOT = Path("/sys/fs/cgroup")
+NOT_FOUND = "not found"
 RETRY_S = 30.0  # how often a missing / failing unit or an unresolved cgroup is tried again
 
 
@@ -199,7 +205,7 @@ class Systemctl:
         )
         if rc != 0:
             msg = (err or out).strip() or str(rc)
-            if "not found" in msg or "not loaded" in msg:
+            if NOT_FOUND in msg or "not loaded" in msg:
                 raise UnitMissing(msg)
             raise UnitError(f"systemctl --user set-property {unit} {value}: {msg}")
 
@@ -333,7 +339,7 @@ class UnitCapper:
         """The unit's quota right now, read fresh (never a remembered value)."""
         info = self.systemctl.show(unit)
         if not info.loaded:
-            raise UnitMissing("not found")
+            raise UnitMissing(NOT_FOUND)
         if not info.active:
             raise UnitMissing("inactive")
         return info.quota_usec
@@ -346,7 +352,7 @@ class UnitCapper:
         if unit not in orphans:
             return
         if not self.systemctl.show(unit).loaded:
-            raise UnitMissing("not found")
+            raise UnitMissing(NOT_FOUND)
         self.ledger.unit_quota[unit] = orphans.pop(unit)
         self.ledger.save()
         self.log(f"unit {unit} is back: restoring the original it had before it vanished")

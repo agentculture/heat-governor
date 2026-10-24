@@ -21,6 +21,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Config validation of `[[units]]` reports a duplicate unit name even when that entry's `dry_run` is also invalid, and no longer fails on a non-string `name`.
 - A container's original CPU limit is read with a fresh `docker inspect` right before the first cap, never taken from the discovery snapshot: right after a restore that snapshot still showed the previous cap, which then became the recorded original (DGX Spark 2026-10-23: model-gear-vllm-primary held at 12 CPUs for ~27 h, across a reboot). No cap is made when the limit cannot be read.
 - An original of no limit (NanoCpus 0) survives a restore -> cap cycle as 0 (logged `cpus=unlimited`) instead of turning into every host CPU; on exit a failed restore of a container that left keeps its ledger entry.
+- A user unit switched to `dry_run = true` while it holds a real cap gets its original back for real on the next change; exit and release restore every ledger entry for real whenever the daemon applies, whatever `dry_run` says.
+- Any `systemctl --user` error on a unit (no user bus, controller not delegated), not only a missing unit, is logged once per distinct message and retried every 30 s instead of every tick.
+- A unit whose cgroup cannot be resolved or read is looked up again only every 30 s, and a levels-mode unit's use is sampled at most every 5 s (no `systemctl show` per tick).
+- A unit gone at restore or recovery time keeps its original in the ledger's `unit_orphans` instead of dropping it: the governor's `--runtime` drop-in can apply again when the unit loads, so the orphaned original is restored when it is seen again and is never replaced by the governor's own cap.
+- Crash recovery of a container whose original was no limit (0) seeds the written -> original mapping, so the next cap records 0, not every host CPU.
+- The adaptive trend is fitted per governing source: a board <-> gpu switch starts a new window instead of reading as a fast rise, and an interval with too few readings of the new source holds and learns nothing.
+- Dry-run logs `dry-run would restore unit X CPUQuota=<original>` when a would-be unit cap is lifted, so a dry-run trace no longer looks like a permanent cap.
+- Adaptive mode catches a slow creep that stays inside each interval's noise band (Orin 2026-10-24: ~0.005 C/s over 6 min against 0.009-0.018 C/s bands): when the interval's error is inside its band, the slope over the last 4 intervals (same source, restarted after each change) is checked against its own, much smaller band. Learning still uses per-interval rates.
+- Docstrings: adaptive's gain clamp is [1e-4, 0.5]; the config layout sample shows the adaptive unit commented out (listing `app.slice` twice failed validation).
 
 ## [0.12.0] - 2026-10-23
 

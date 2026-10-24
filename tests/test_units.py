@@ -499,3 +499,13 @@ def test_run_once_lists_units_and_changes_nothing(tmp_path: Path, monkeypatch, c
         {"name": "app.slice", "mode": "levels", "cpus": unit_cpus(doc["level"], (("hot", 4.0),))}
     ]
     assert [c for c in sc.calls if c[0] == "set"] == []
+
+
+def test_the_module_docstring_layout_is_a_valid_config() -> None:
+    import tomllib
+
+    import heat_governor.config as config
+
+    layout = config.__doc__.split("Layout::", 1)[1]
+    text = "\n".join(line[4:] for line in layout.splitlines())
+    assert validate(tomllib.loads(text)) == []
