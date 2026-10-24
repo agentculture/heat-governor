@@ -79,3 +79,33 @@ def test_no_cap_without_a_fresh_read_of_the_original(tmp_path: Path) -> None:
     assert led.nano_cpus == {}
     assert ("cpus", "s1", 4_000_000_000) not in d.calls
     assert cap.current.get("s1", "unset") == "unset"  # retried on the next tick
+
+
+def test_crash_recovery_of_an_unlimited_original_keeps_it_unlimited(tmp_path: Path) -> None:
+    from heat_governor.daemon import Daemon, Options
+    from heat_governor.platforms import SPARK
+    from heat_governor.sense import Sensor
+    from tests.fakes import SPARK_ZONES, make_sys
+
+    led = Ledger(tmp_path / "data" / "ledger.json")
+    led.nano_cpus = {"s1": 0}  # a crashed run capped an unlimited container
+    led.save()
+    d = FakeDocker(container("s1", "lane", "serving", cap=True, nano=4_000_000_000))
+    sysr = make_sys(tmp_path, SPARK_ZONES)
+    opts = Options(apply=True, data_dir=tmp_path / "data", log=[].append, record=False)
+    gov = Daemon(SPARK, opts, sensor=Sensor(SPARK.zones, sys_root=sysr), docker=d)
+    gov.start()
+    assert d.c["s1"].nano_cpus == ALL  # recover wrote every host CPU for "no limit"
+    gov.capper.set(d.c["s1"], 4)
+    assert gov.ledger.nano_cpus == {"s1": 0}  # not ALL
+    gov.shutdown()
+
+
+def test_recover_hands_back_what_it_wrote(tmp_path: Path) -> None:
+    led = Ledger(tmp_path / "l.json")
+    led.nano_cpus = {"s1": 0, "s2": 6_000_000_000}
+    d = FakeDocker(
+        container("s1", "a", "serving", nano=4_000_000_000),
+        container("s2", "b", "serving", nano=4_000_000_000),
+    )
+    assert led.recover(d, [].append) == {"s1": (ALL, 0), "s2": (6_000_000_000, 6_000_000_000)}

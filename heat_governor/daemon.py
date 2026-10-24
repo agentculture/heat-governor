@@ -550,12 +550,7 @@ class Daemon:
                 }
             )
         if self.opts.apply:
-            units = self.systemctl
-            if units is None and (self.ledger.unit_quota or self.ledger.unit_orphans):
-                units = self.systemctl = Systemctl()
-            self.ledger.recover(
-                self.docker, self._log, gpu=self.gpuclock or GpuClock(), units=units
-            )
+            self._recover()
         if self.opts.gpu_clock and self.gpuclock:
             self.gpuclock.probe()
             self._log(f"gpu clock control: {self.gpuclock.reason}")
@@ -570,6 +565,17 @@ class Daemon:
             f"limits warm/hot/crit={self.profile.limits.warm_c}/{self.profile.limits.hot_c}/"
             f"{self.profile.limits.crit_c} ({self.profile.provenance})"
         )
+
+    def _recover(self) -> None:
+        """Undo what a crashed run left on the ledger (containers, units, GPU)."""
+        units = self.systemctl
+        if units is None and (self.ledger.unit_quota or self.ledger.unit_orphans):
+            units = self.systemctl = Systemctl()
+        restored = self.ledger.recover(
+            self.docker, self._log, gpu=self.gpuclock or GpuClock(), units=units
+        )
+        if self.capper:
+            self.capper.restored.update(restored)  # so 0 ("no limit") survives as 0
 
     def shutdown(self) -> None:
         if self.cycler:

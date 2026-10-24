@@ -96,9 +96,15 @@ class Ledger:
                 os.fsync(fh.fileno())
             os.replace(tmp, self.path)
 
-    def recover(self, docker: DockerLike | None, log: Log, *, gpu=None, units=None) -> None:
+    def recover(
+        self, docker: DockerLike | None, log: Log, *, gpu=None, units=None
+    ) -> dict[str, tuple[int, int]]:
         """Undo what a previous (crashed) run left behind -- only its own actions.
-        ``units`` is a :class:`heat_governor.units.SystemctlLike`."""
+        ``units`` is a :class:`heat_governor.units.SystemctlLike`. Returns, per
+        container restored, ``(NanoCpus written, the original it stands for)``
+        to seed :attr:`CpuCapper.restored` (an original of 0 is written as every
+        host CPU, which the next cap must not record as the original)."""
+        restored: dict[str, tuple[int, int]] = {}
         if self.gpu_locked and gpu is not None:
             ok, out = gpu.reset()
             log(f"recover: gpu ceiling {'removed' if ok else 'reset FAILED: ' + out}")
@@ -107,12 +113,13 @@ class Ledger:
             # drop an entry only once its action is undone (or the container is gone):
             # a failed restore keeps the original limit on record for the next try
             self._recover_paused(docker, log)
-            self._recover_caps(docker, log)
+            restored = self._recover_caps(docker, log)
         if units is not None and (self.unit_quota or self.unit_orphans):
             from heat_governor.units import recover_units
 
             recover_units(self, units, log)
         self.save()
+        return restored
 
     def _recover_paused(self, docker: DockerLike, log: Log) -> None:
         for cid in sorted(self.paused):
@@ -126,16 +133,19 @@ class Ledger:
                     self.paused.discard(cid)
                 log(f"recover: {cid[:12]}: {exc}")
 
-    def _recover_caps(self, docker: DockerLike, log: Log) -> None:
+    def _recover_caps(self, docker: DockerLike, log: Log) -> dict[str, tuple[int, int]]:
+        restored: dict[str, tuple[int, int]] = {}
         for cid, nano in sorted(self.nano_cpus.items()):
             try:
                 docker.set_nano_cpus(cid, restore_value(nano))
                 log(f"recover: restored {cid[:12]} NanoCpus={nano}")
+                restored[cid] = (restore_value(nano), nano)
                 del self.nano_cpus[cid]
             except DockerError as exc:
                 if "404" in str(exc):
                     del self.nano_cpus[cid]
                 log(f"recover: {cid[:12]}: {exc} (kept on record)")
+        return restored
 
 
 class CpuCapper:
