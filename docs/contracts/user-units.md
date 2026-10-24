@@ -67,8 +67,9 @@ dry_run = true             # optional, as in levels mode
 ```
 
 The loop's conditions come from what it measures, not from fixed CPU counts. Its inputs, at most once
-per `interval_s`: the level, the governing temperature's rate (`rate_c_s` in the state, over the
-profile's `rate_window_s`), the unit's measured CPU use over the last interval, and the host CPU count.
+per `interval_s`: the level, the governing temperature's trend over that interval (the least-squares slope
+of every 1 s reading since the last evaluation; not the state's `rate_c_s`, whose 2 s window on the Spark
+is mostly zone jitter), the unit's measured CPU use over the last interval, and the host CPU count.
 
 | Situation | What the loop does |
 |---|---|

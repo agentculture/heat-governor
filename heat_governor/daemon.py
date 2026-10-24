@@ -29,7 +29,7 @@ from typing import Callable
 
 from heat_governor import __version__, platforms
 from heat_governor.actuators import CpuCapper, DutyCycler, Ledger
-from heat_governor.adaptive import AdaptiveLoop, ModelStore, UsageMeter
+from heat_governor.adaptive import AdaptiveLoop, ModelStore, Trend, UsageMeter
 from heat_governor.config import Config, ConfigError, ContainerRule, UnitRule
 from heat_governor.config import changed as config_changed
 from heat_governor.config import diff as config_diff
@@ -129,6 +129,7 @@ class Daemon:
         self._unbanded: set[str] = set()
         self.host_cpus = host_cpus or os.cpu_count() or 1
         self.adaptive: dict[str, AdaptiveLoop] = {}  # unit -> its loop (mode = adaptive)
+        self.trends: dict[str, Trend] = {}  # unit -> temperature readings since its last step
         self._adaptive_store: ModelStore | None = None
         self.unit_use: dict[str, float | None] = {}  # unit -> CPUs used, last measured
         self.meter = UsageMeter(self._unit_usage)
@@ -217,7 +218,9 @@ class Daemon:
         want = {u.name: u for u in units if u.mode == "adaptive"}
         for name in set(self.adaptive) - set(want):
             del self.adaptive[name]
+            self.trends.pop(name, None)
         for name, r in want.items():
+            self.trends.setdefault(name, Trend())
             loop = self.adaptive.setdefault(name, AdaptiveLoop())
             loop.configure(r.min_cpus, r.engage, r.interval_s, r.target_rate_c_min)
             loop.model = self.adaptive_store.model(self.profile.name, name)
@@ -231,12 +234,14 @@ class Daemon:
             self.unit_use[name] = self.meter.sample(name, now)
             self.unit_capper.set(name, unit_cpus(d.level, self.unit_bands(rule)))
             return
+        trend = self.trends[name]
+        trend.add(now, None if d.reason == "sensor_lost" else d.temp_c)
         if loop.due(now):
             use = self.unit_use[name] = self.meter.sample(name, now)
             live = self.unit_capper.applies(name)
             if not live:
                 loop.pending = None  # a change not made has no response to learn from
-            rate = None if d.reason == "sensor_lost" else d.rate_c_s
+            rate = trend.take()
             step = loop.step(d.level, rate, use, self.host_cpus, now, learn=live)
             if step.lesson:
                 self._log(f"adaptive {name}: {step.lesson}")

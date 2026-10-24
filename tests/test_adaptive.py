@@ -582,3 +582,28 @@ def test_run_once_reports_an_adaptive_unit(tmp_path: Path, monkeypatch, capsys) 
     doc = json.loads(capsys.readouterr().out)
     assert doc["units"] == [{"name": "app.slice", "mode": "adaptive", "cpus": None}]
     assert [c for c in sc.calls if c[0] == "set"] == []
+
+
+# -- the trend the loop acts on ----------------------------------------------
+
+
+def test_trend_is_the_least_squares_slope_over_the_window() -> None:
+    from heat_governor.adaptive import Trend
+
+    tr = Trend()
+    for i in range(21):  # +0.05 C/s with +-2 C of zone jitter on alternate seconds
+        tr.add(float(i), 80.0 + 0.05 * i + (2.0 if i % 2 else -2.0))
+    assert abs(tr.take() - 0.05) < 0.02
+    assert tr.take() is None  # a new window starts empty
+
+
+def test_trend_is_unknown_when_blind_or_too_short() -> None:
+    from heat_governor.adaptive import Trend
+
+    tr = Trend()
+    tr.add(0.0, 80.0)
+    tr.add(1.0, 81.0)
+    assert tr.take() is None
+    for i in range(5):
+        tr.add(float(i), None if i == 2 else 80.0)
+    assert tr.take() is None

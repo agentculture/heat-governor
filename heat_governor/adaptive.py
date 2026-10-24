@@ -10,8 +10,9 @@ each change from it. What it learned is kept across restarts
 
 Everything here is pure except :class:`ModelStore` (one JSON file) -- no
 systemctl, no clock of its own. The daemon feeds :meth:`AdaptiveLoop.step` the
-level, ``Decision.rate_c_s`` (``None`` on sensor loss), the unit's measured
-CPU use over the last interval, the host CPU count and the time, and hands the
+level, the temperature trend over the last interval (:class:`Trend`: the
+least-squares slope of every governing reading, ``None`` on sensor loss), the
+unit's measured CPU use over the same interval, the host CPU count and the time, and hands the
 resulting cap to the existing :class:`heat_governor.units.UnitCapper`, so the
 ledger-first, never-raise-a-tighter-original, dry-run, missing-unit and
 restore rules apply unchanged.
@@ -259,6 +260,41 @@ class AdaptiveLoop:
         if error < -DEADBAND and level == self.engage:
             return self._release(host, f"{head}, cooling faster than needed")
         return Step("hold", self.cap, self.cap, use, f"{head}, within the deadband")
+
+
+class Trend:
+    """The temperature trend the loop acts on: the least-squares slope (C/s)
+    of every governing reading since the last evaluation. The controller's own
+    ``rate_c_s`` spans ``rate_window_s`` (2 s on the Spark, whose hot zone jumps
+    2-5 C per second): one such reading per ``interval_s`` is mostly noise, and
+    a gain learned from noise would size every step wrongly. ``None`` with fewer
+    than three readings or a sensor loss in the window."""
+
+    MIN_POINTS = 3
+
+    def __init__(self) -> None:
+        self.points: list[tuple[float, float]] = []
+        self.blind = False
+
+    def add(self, now: float, temp: float | None) -> None:
+        if temp is None:
+            self.blind = True
+        else:
+            self.points.append((now, temp))
+
+    def take(self) -> float | None:
+        """The slope over the readings so far, then start a new window."""
+        pts, blind = self.points, self.blind
+        self.points, self.blind = [], False
+        if blind or len(pts) < self.MIN_POINTS:
+            return None
+        n = len(pts)
+        mt = sum(t for t, _ in pts) / n
+        mc = sum(c for _, c in pts) / n
+        var = sum((t - mt) ** 2 for t, _ in pts)
+        if var <= 0:
+            return None
+        return round(sum((t - mt) * (c - mc) for t, c in pts) / var, 5)
 
 
 class UsageMeter:
