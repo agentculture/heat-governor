@@ -132,6 +132,7 @@ class Daemon:
         self.trends: dict[str, Trend] = {}  # unit -> temperature readings since its last step
         self._adaptive_store: ModelStore | None = None
         self.unit_use: dict[str, float | None] = {}  # unit -> CPUs used, last measured
+        self._use_sampled: dict[str, float] = {}  # levels-mode unit -> when use was last read
         self.meter = UsageMeter(self._unit_usage)
         if opts.units:
             self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
@@ -225,13 +226,17 @@ class Daemon:
             loop.configure(r.min_cpus, r.engage, r.interval_s, r.target_rate_c_min)
             loop.model = self.adaptive_store.model(self.profile.name, name)
 
+    USE_SAMPLE_S = 5.0  # a levels-mode unit's use is read at most this often
+
     def _unit_step(self, rule: UnitRule, d: Decision, now: float) -> None:
         """Measure the unit, size its cap (by level or by its loop), hand it to the
         capper (which applies the ledger, dry-run and missing-unit rules)."""
         name = rule.name
         loop = self.adaptive.get(name)
         if loop is None:
-            self.unit_use[name] = self.meter.sample(name, now)
+            if now - self._use_sampled.get(name, float("-inf")) >= self.USE_SAMPLE_S:
+                self._use_sampled[name] = now  # use only feeds the state: no need per tick
+                self.unit_use[name] = self.meter.sample(name, now)
             self.unit_capper.set(name, unit_cpus(d.level, self.unit_bands(rule)))
             return
         trend = self.trends[name]

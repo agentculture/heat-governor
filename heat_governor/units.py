@@ -100,6 +100,7 @@ class SystemctlLike(Protocol):
 
 
 CGROUP_ROOT = Path("/sys/fs/cgroup")
+RETRY_S = 30.0  # how often a missing / failing unit or an unresolved cgroup is tried again
 
 
 def read_usage_usec(stat: Path) -> int | None:
@@ -119,13 +120,21 @@ class Systemctl:
     """``systemctl --user``, the two calls the actuator needs. Every change is
     ``set-property --runtime``; ``--`` ends the options before the unit name."""
 
+    RETRY_S = RETRY_S  # an unresolvable / unreadable cgroup is looked up again after this
+
     def __init__(
-        self, run: Run = _run, exe: str = "systemctl", cgroup_root: Path = CGROUP_ROOT
+        self,
+        run: Run = _run,
+        exe: str = "systemctl",
+        cgroup_root: Path = CGROUP_ROOT,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.run = run
         self.exe = exe
         self.cgroup_root = cgroup_root
+        self.clock = clock
         self._cgroups: dict[str, Path] = {}  # unit -> its cpu.stat (cached)
+        self._no_cgroup: dict[str, float] = {}  # unit -> when to look its cgroup up again
 
     def show(self, unit: str) -> UnitInfo:
         props = ("LoadState", "ActiveState", "CPUQuotaPerSecUSec")
@@ -163,19 +172,24 @@ class Systemctl:
     def cpu_usage_usec(self, unit: str) -> int | None:
         """The unit's cumulative CPU time in microseconds (cgroup v2
         ``cpu.stat`` ``usage_usec``). The cgroup path is cached and looked up
-        again once when its file has gone (the unit restarted)."""
+        again once when its file has gone (the unit restarted); a lookup that
+        finds no readable ``cpu.stat`` is not repeated for RETRY_S."""
         cached = self._cgroups.get(unit)
         if cached is not None:
             usec = read_usage_usec(cached)
             if usec is not None:
                 return usec
             self._cgroups.pop(unit, None)
-        stat = self._cpu_stat(unit)
-        if stat is None:
+        now = self.clock()
+        if now < self._no_cgroup.get(unit, now):
             return None
-        usec = read_usage_usec(stat)
-        if usec is not None:
-            self._cgroups[unit] = stat
+        stat = self._cpu_stat(unit)
+        usec = None if stat is None else read_usage_usec(stat)
+        if usec is None:
+            self._no_cgroup[unit] = now + self.RETRY_S
+            return None
+        self._no_cgroup.pop(unit, None)
+        self._cgroups[unit] = stat
         return usec
 
     def set_quota(self, unit: str, percent: str | None) -> None:
@@ -210,7 +224,6 @@ def _quota_arg(usec: int | None) -> str | None:
 
 
 DRY = "dry-run would "
-RETRY_S = 30.0  # how often a missing / failing unit or an unresolved cgroup is tried again
 
 
 class UnitCapper:

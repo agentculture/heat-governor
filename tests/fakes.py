@@ -113,6 +113,7 @@ class FakeSystemctl:
         self.ledger_path = ledger  # when set: what was on disk at each set_quota
         self.on_disk: list[dict] = []
         self.usage: dict[str, int] = {}  # unit -> cumulative CPU usec (settable)
+        self.usage_reads = 0  # how often cpu_usage_usec was called
 
     def show(self, unit: str):
         self.calls.append(("show", unit))
@@ -133,4 +134,5 @@ class FakeSystemctl:
         self.units[unit] = None if percent is None else int(float(percent) * 10_000)
 
     def cpu_usage_usec(self, unit: str) -> int | None:
+        self.usage_reads += 1
         return self.usage.get(unit) if unit in self.units else None

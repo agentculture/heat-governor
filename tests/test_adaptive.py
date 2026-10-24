@@ -548,7 +548,7 @@ def test_levels_units_report_mode_and_use(tmp_path: Path) -> None:
 
     sc = FakeSystemctl({"app.slice": None})
     d, sysr, t, _ = _daemon(tmp_path, sc, UnitRule("app.slice"))
-    _run(d, t, sysr, sc, temp_md=80000, use_cpus=3, seconds=3)
+    _run(d, t, sysr, sc, temp_md=80000, use_cpus=3, seconds=7)  # sampled every 5 s
     (u,) = read_state(tmp_path / "state.json")["units"]
     assert u["mode"] == "levels"
     assert u["use_cpus"] == pytest.approx(3.0)
