@@ -36,6 +36,8 @@ from heat_governor.config import diff as config_diff
 from heat_governor.config import load as load_config
 from heat_governor.docker import Container, Docker, DockerError
 from heat_governor.gpuclock import GpuClock
+from heat_governor.gpulaw import GpuGovernor, Plan
+from heat_governor.operator_ceiling import OperatorCeiling, hold_path
 from heat_governor.platforms import Profile
 from heat_governor.policy import Controller, Decision, unit_cpus
 from heat_governor.recorder import Recorder, boot_id
@@ -59,6 +61,7 @@ class Options:
     containers: tuple[ContainerRule, ...] = ()  # from the config file
     units: tuple[UnitRule, ...] = ()  # systemd user units to CPU-cap (config [[units]])
     gpu_clock: bool = False  # lower the GPU clock ceiling per gpu_clock_bands
+    gpu_ceiling_mhz: int | None = None  # the operator's ceiling from the config (law)
     platform: str | None = None  # explicit --platform (else config, else detected)
     config: Config | None = None  # re-read while running when it changes
     cli_set: frozenset = frozenset()  # option names given on the command line (win over the file)
@@ -118,11 +121,20 @@ class Daemon:
         self._stop = threading.Event()
         self.last: Decision | None = None
         self.host = socket.gethostname()
-        if gpuclock is None and opts.gpu_clock:
+        self.operator = OperatorCeiling(hold_path(data) if data else None, opts.gpu_ceiling_mhz)
+        if gpuclock is None and (opts.gpu_clock or self.operator.mhz is not None):
             gpuclock = GpuClock()
-        self.gpuclock = gpuclock
+        self.gpu = GpuGovernor(
+            gpuclock,
+            self.ledger,
+            self.operator,
+            self._log,
+            apply=opts.apply,
+            enabled=opts.gpu_clock,
+        )
+        self._gpu_plan = Plan(False, None, None, False)
         self._reload_at = 0.0
-        self._gpu_retry_at = 0.0
+        self._operator_at = 0.0
         self.config_error: str | None = None
         self.systemctl = systemctl
         self.unit_capper: UnitCapper | None = None
@@ -353,6 +365,7 @@ class Daemon:
                 setattr(self.opts, key, d[key])
         if "gpu_clock" in d and "gpu_clock" not in self.opts.cli_set:
             self.set_gpu_clock(bool(d["gpu_clock"]))
+        self.set_gpu_ceiling(d.get("gpu_ceiling_mhz"))
         self.opts.containers = tuple(cfg.containers)
         self._set_units(tuple(cfg.units))
         self._discovered_at = 0.0  # re-discover on the next tick
@@ -362,61 +375,40 @@ class Daemon:
     def _restart_only_changes(self, old: dict, new: dict) -> list[str]:
         return [k for k in self.RESTART_ONLY if old.get(k) != new.get(k)]
 
+    @property
+    def gpuclock(self) -> GpuClock | None:
+        return self.gpu.clock
+
     def set_gpu_clock(self, on: bool) -> None:
         if on == self.opts.gpu_clock:
             return
-        self.opts.gpu_clock = on
+        self.opts.gpu_clock = self.gpu.enabled = on
         if on:
-            self.gpuclock = self.gpuclock or GpuClock()
-            self.gpuclock.probe()
-            self._log(f"gpu clock control on: {self.gpuclock.reason}")
+            self._log(f"gpu clock control on: {self.gpu.probe()}")
         else:
-            self._release_gpu("gpu clock control off")
+            self.gpu.release("gpu clock control off")
 
-    # -- GPU clock ceiling
-    GPU_RETRY_S = 30.0  # after a failed helper call, wait before trying again
+    def set_gpu_ceiling(self, mhz: int | None) -> None:
+        """The config's operator ceiling (``[daemon] gpu_ceiling_mhz``)."""
+        if mhz == self.operator.config_mhz:
+            return
+        self.opts.gpu_ceiling_mhz = self.operator.config_mhz = mhz
+        self._operator_changed()
 
-    def _gpu(self, want: int | None, now: float = 0.0) -> None:
-        g = self.gpuclock
-        if not (self.opts.gpu_clock and g and g.available) or want == g.ceiling_mhz:
+    # -- the operator's GPU ceiling (law)
+    def _poll_operator(self, now: float) -> None:
+        if now - self._operator_at < self.opts.reload_every_s:
             return
-        if now < self._gpu_retry_at:
-            return
-        if not self.opts.apply:
-            if want != getattr(self, "_gpu_would", "unset"):
-                self._gpu_would = want
-                self._log(f"dry-run would set gpu ceiling {want or 'none'}")
-            return
-        if want is None:
-            self._gpu_reset(g, now)
+        self._operator_at = now
+        if self.operator.poll():
+            self._operator_changed()
+
+    def _operator_changed(self) -> None:
+        if self.operator.mhz is None:
+            self._log("gpu: operator ceiling cleared -- the daemon's own ceiling rules again")
         else:
-            self._gpu_lock(g, want, now)
-
-    def _gpu_reset(self, g: GpuClock, now: float) -> None:
-        ok, out = g.reset()
-        if ok:
-            self.ledger.gpu_locked = False
-            self.ledger.save()
-        else:
-            self._gpu_retry_at = now + self.GPU_RETRY_S
-        self._log("gpu ceiling removed" if ok else f"gpu reset FAILED: {out}")
-
-    def _gpu_lock(self, g: GpuClock, want: int, now: float) -> None:
-        self.ledger.gpu_locked = True
-        self.ledger.save()  # record BEFORE acting
-        ok, out = g.lock(want)
-        if not ok:
-            self._gpu_retry_at = now + self.GPU_RETRY_S
-        self._log(f"gpu ceiling {want} MHz" if ok else f"gpu lock {want} FAILED: {out}")
-
-    def _release_gpu(self, why: str) -> None:
-        g = self.gpuclock
-        if g and (g.ceiling_mhz is not None or self.ledger.gpu_locked) and self.opts.apply:
-            ok, out = g.reset()
-            if ok:
-                self.ledger.gpu_locked = False
-                self.ledger.save()
-            self._log(f"{why}: gpu ceiling removed" if ok else f"{why}: gpu reset FAILED: {out}")
+            self._log(f"gpu: operator ceiling {self.operator.describe()} is law")
+        self.gpu.operator_changed()
 
     # -- one tick
     def tick(self) -> Decision:
@@ -425,6 +417,7 @@ class Daemon:
         admission signal clients depend on."""
         now = self.clock()
         self.maybe_reload(now)
+        self._poll_operator(now)
         reading = self.sensor.read()
         d = self.ctrl.step(reading.temp_c, now, reading.gpu_temp_c)
         if self.last is None or d.level != self.last.level:
@@ -433,6 +426,7 @@ class Daemon:
                 f"temp={d.temp_c} eff={d.effective_c} source={d.source} ({d.reason})"
             )
         self.last = d
+        self._gpu_plan = self.gpu.plan(d.gpu_mhz)
         doc = self.state_doc(d, reading, now)
         if self.opts.state_path:
             write_state(self.opts.state_path, doc)
@@ -451,6 +445,7 @@ class Daemon:
                     "duty": d.duty,
                     "cpus": d.cpus,
                     "gpu_mhz": d.gpu_mhz,
+                    **self._gpu_record(),
                     "source": d.source,
                     "zones": {z.key: z.temp_c for z in reading.zones},
                     "fans": reading.fans,
@@ -474,7 +469,7 @@ class Daemon:
                     f"cap {c.name}",
                     lambda c=c: self.capper.set(c, d.cpus, observed_at=self._observed_at),
                 )
-        self._fenced("gpu ceiling", lambda: self._gpu(d.gpu_mhz, now))
+        self._fenced("gpu ceiling", lambda: self.gpu.step(d.gpu_mhz, d.level, now))
         if self.unit_capper:
             for rule in self.opts.units:
                 self._fenced(f"unit {rule.name}", lambda r=rule: self._unit_step(r, d, now))
@@ -501,12 +496,11 @@ class Daemon:
             "concurrency_factor": d.concurrency_factor,
             "duty": d.duty,
             "cpus": d.cpus,
-            "gpu_ceiling_mhz": (
-                self.gpuclock.ceiling_mhz if (self.gpuclock and self.opts.gpu_clock) else None
-            ),
+            "gpu_ceiling_mhz": self.gpuclock.ceiling_mhz if self.gpuclock else None,
             "gpu_clock": (
                 self.gpuclock.reason if (self.gpuclock and self.opts.gpu_clock) else "off"
             ),
+            **self.gpu.doc(self._gpu_plan),
             "config": (
                 str(self.opts.config.path) if self.opts.config and self.opts.config.path else None
             ),
@@ -532,6 +526,14 @@ class Daemon:
                 for c in self.containers.values()
             ],
             "units": [self._unit_doc(u) for u in self.opts.units],
+        }
+
+    def _gpu_record(self) -> dict:
+        p = self._gpu_plan
+        return {
+            "gpu_operator_mhz": self.operator.mhz,
+            "gpu_wanted_mhz": p.wanted,
+            "gpu_held_by_operator": p.held,
         }
 
     def _unit_doc(self, u: UnitRule) -> dict:
@@ -565,9 +567,10 @@ class Daemon:
             )
         if self.opts.apply:
             self._recover()
-        if self.opts.gpu_clock and self.gpuclock:
-            self.gpuclock.probe()
-            self._log(f"gpu clock control: {self.gpuclock.reason}")
+        if self.gpu.needed():
+            self._log(f"gpu clock control: {self.gpu.probe()}")
+        if self.operator.mhz is not None:
+            self._log(f"gpu: operator ceiling {self.operator.describe()} is law")
         if self.opts.units:
             self._note_self_inside()
         if self.cycler:
@@ -586,7 +589,11 @@ class Daemon:
         if units is None and (self.ledger.unit_quota or self.ledger.unit_orphans):
             units = self.systemctl = Systemctl()
         restored = self.ledger.recover(
-            self.docker, self._log, gpu=self.gpuclock or GpuClock(), units=units
+            self.docker,
+            self._log,
+            gpu=self.gpuclock or GpuClock(),
+            units=units,
+            gpu_operator_mhz=self.operator.mhz,
         )
         if self.capper:
             self.capper.restored.update(restored)  # so 0 ("no limit") survives as 0
@@ -598,7 +605,7 @@ class Daemon:
             self.capper.release_all(self.containers)
         if self.unit_capper:
             self.unit_capper.release_all()
-        self._release_gpu("stop")
+        self.gpu.release("stop")
         if self.server:
             self.server.stop()
         self._log("stop: own pauses released, CPU limits, unit quotas and GPU ceiling restored")

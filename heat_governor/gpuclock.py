@@ -82,6 +82,22 @@ class GpuClock:
             self.ceiling_mhz = None
         return rc == 0, out
 
+    def read_ceiling(self) -> int | None:
+        """The ceiling the hardware shows, in MHz, read back through the helper's
+        existing ``status`` -- where it shows one. On a Jetson that is the GPU
+        devfreq node's ``max_freq``. On the DGX Spark (GB10) ``status`` prints the
+        current and maximum SM clocks (``2405, 3003``): ``nvidia-smi`` exposes no
+        ``-lgc`` lock there (checked live 2026-10-24), so this is ``None`` and a
+        hand ceiling is invisible -- it must be declared to be law."""
+        rc, out = self.run(["sudo", "-n", self.helper, "status"])
+        return parse_ceiling(out) if rc == 0 else None
+
+
+def parse_ceiling(out: str) -> int | None:
+    """A Jetson ``status`` line (a bare MHz integer), else ``None``."""
+    text = (out or "").strip()
+    return int(text) if text.isdigit() else None
+
 
 HELPER_SCRIPT = r"""#!/bin/bash
 # heat-governor-gpuclock -- the only privileged step of heat-governor.

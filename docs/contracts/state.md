@@ -30,8 +30,11 @@ directory (mount the directory, not the file: an atomic rename does not show thr
 | `concurrency_factor` | float | `1.0` cool, `0.5` warm, `0.0` hot/critical. Allowed in-flight = `max(1, floor(base × factor))` while admitted. |
 | `duty` | float | Fraction of each period batch containers are paused (0-1). |
 | `cpus` | int or null | CPU cap applied to governed containers; `null` = their own limit. |
-| `gpu_ceiling_mhz` | int or null | GPU clock ceiling the daemon set; `null` = none. |
+| `gpu_ceiling_mhz` | int or null | GPU clock ceiling the daemon set (its band, or the operator's); `null` = none. |
 | `gpu_clock` | str | `off`, or the control's status (`ok ...`, `helper not installed ...`). |
+| `gpu_operator_mhz`, `gpu_operator_source` | int or null, str or null | The operator's GPU ceiling in force (law) and where it comes from: `config` (`[daemon] gpu_ceiling_mhz`), `hold` (`gpu-clock hold`) or `observed` (a hand lock seen on a Jetson); `null` = none. See [`gpu-clock.md`](gpu-clock.md). |
+| `gpu_wanted_mhz` | int or null | The policy's band ceiling this tick while `gpu_clock` is on; `null` = it wants no ceiling, or `gpu_clock` is off. |
+| `gpu_held_by_operator` | bool | `true` when the policy wanted a ceiling above the operator's (including none): the operator's held, and this is what would have happened. Also in every per-tick record; `heat-governor sensors` counts the ticks (`gpu_held_by_operator_ticks`). |
 | `config`, `config_error` | str or null | The config file in force, and why the last edit was rejected (if it was). |
 | `temp_c` | float or null | Governing temperature: the hottest readable watched zone. `null` = sensor lost (level is then `hot`). |
 | `effective_c`, `rate_c_s` | float | Temperature plus the lookahead on its rise, and the rise rate. |

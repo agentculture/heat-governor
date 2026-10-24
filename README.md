@@ -78,6 +78,16 @@ With the root helper installed and `gpu_clock = true`, it also lowers the GPU
 clock ceiling per band (`nvidia-smi -lgc` on the Spark, devfreq `max_freq` on
 the Jetsons). It does not touch power modes or fans.
 
+An operator's own GPU ceiling is law: declare it with `[daemon]
+gpu_ceiling_mhz` or `heat-governor gpu-clock hold <MHz>` (`release` gives it
+back). The daemon then writes `min(operator ceiling, band)`, never above it,
+never resets it (even on exit), applies it with `gpu_clock` off too, and logs
+each ceiling it would have raised (`gpu: would raise the ceiling to ... --
+operator ceiling ... MHz holds`). On a Jetson an undeclared hand lock is seen
+through the helper and held the same way; on the DGX Spark it is invisible
+and must be declared. Likewise a CPU band never raises a container's own,
+tighter limit. Contract: [`docs/contracts/gpu-clock.md`](docs/contracts/gpu-clock.md).
+
 ## Configure and tune
 
 Everything above is a setting in one TOML file that a running daemon re-reads
@@ -114,7 +124,7 @@ heat-governor gpu-clock helper        # the root helper + sudoers line for GPU c
 | `sensors` | Every sensor separately over a window: min, mean, p95, max, seconds above a threshold. |
 | `unit` | Print a systemd user unit. |
 | `config overview\|path\|show\|init\|check` | The config file a running daemon re-reads. |
-| `gpu-clock overview\|status\|helper\|lock\|reset` | The GPU clock ceiling (root helper). |
+| `gpu-clock overview\|status\|helper\|lock\|reset\|hold\|release` | The GPU clock ceiling (root helper); `hold`/`release` declare the operator's ceiling (law). |
 | `whoami`, `learn`, `explain <path>`, `overview`, `doctor`, `cli overview` | Agent verbs. |
 
 Every command supports `--json`. Results go to stdout and errors/diagnostics

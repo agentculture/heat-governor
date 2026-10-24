@@ -25,6 +25,7 @@ Layout::
     poll_s = 1.0
     listen = "127.0.0.1:9476"
     apply = true
+    gpu_ceiling_mhz = 2200        # optional: the operator's GPU ceiling -- law
 
     [[containers]]                # for containers started without labels
     name = "model-gear-vllm-primary"
@@ -95,6 +96,7 @@ DAEMON_KEYS = {
     "fsync": bool,
     "reload": bool,
     "gpu_clock": bool,
+    "gpu_ceiling_mhz": int,
 }
 CONTAINER_KEYS = {"name", "role", "cpu_cap"}
 UNIT_LEVELS = ("warm", "hot", "critical")
@@ -298,6 +300,9 @@ def _validate_daemon(dmn: dict, problems: list[str]) -> None:
         problems.append("daemon.poll_s must be between 0.1 and 10 seconds")
     if isinstance(dmn.get("listen"), str) and ":" not in dmn["listen"]:
         problems.append("daemon.listen must be HOST:PORT")
+    ceiling = dmn.get("gpu_ceiling_mhz")
+    if _is_num(ceiling) and not 100 <= ceiling <= 5000:
+        problems.append("daemon.gpu_ceiling_mhz must be > 0, a whole MHz within 100-5000")
 
 
 def _validate_container(i: int, c: dict, seen: set[str], problems: list[str]) -> None:
@@ -522,6 +527,8 @@ def template(profile: Profile) -> str:
         '# listen = "127.0.0.1:9476"',
         "# use_labels = true    # govern containers labelled heat-governor.role=...",
         "# gpu_clock = false    # true: lower the GPU clock ceiling per gpu_clock_bands",
+        "# gpu_ceiling_mhz = 2200  # the operator's GPU ceiling: law, applied even with",
+        "#                         # gpu_clock off; the daemon may go below it, never above",
         "",
         "# Containers started without labels:",
         "# [[containers]]",

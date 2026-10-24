@@ -270,20 +270,24 @@ def _in_window(t: float, since: float | None, until: float | None) -> bool:
 
 def _collect_series(
     directory: Path, since: float | None, until: float | None
-) -> tuple[dict[str, list[float]], float | None, float | None]:
+) -> tuple[dict[str, list[float]], float | None, float | None, int]:
+    """Every numeric sensor's values in the window, the window's first and last
+    record times, and how many ticks the operator's GPU ceiling held the policy."""
     series: dict[str, list[float]] = {}
     first = last = None
+    held = 0
     for rec in iter_records(directory):
         t = rec.get("t")
         if rec.get("event") or "temp_c" not in rec or t is None or not _in_window(t, since, until):
             continue
         first = t if first is None else first
         last = t
+        held += rec.get("gpu_held_by_operator") is True
         sensors = flat_sensors(rec.get("zones"), rec.get("gpu"), rec.get("fans"), rec.get("system"))
         for name, v in sensors.items():
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 series.setdefault(name, []).append(float(v))
-    return series, first, last
+    return series, first, last, held
 
 
 def _stats_row(name: str, vals: list[float], above_c: float | None) -> dict:
@@ -309,11 +313,14 @@ def sensor_stats(
     above_c: float | None = None,
 ) -> dict:
     """Per sensor over [since, until]: samples, min, mean, p95, max, and for
-    temperature sensors the seconds at or above ``above_c``."""
-    series, first, last = _collect_series(directory, since, until)
+    temperature sensors the seconds at or above ``above_c``; and
+    ``gpu_held_by_operator_ticks``, the ticks on which the policy wanted a GPU
+    ceiling above the operator's (it would have happened)."""
+    series, first, last, held = _collect_series(directory, since, until)
     return {
         "from_utc": _utc(first) if first else None,
         "to_utc": _utc(last) if last else None,
         "above_c": above_c,
+        "gpu_held_by_operator_ticks": held,
         "sensors": {name: _stats_row(name, series[name], above_c) for name in sorted(series)},
     }

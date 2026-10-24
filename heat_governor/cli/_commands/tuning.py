@@ -3,9 +3,11 @@
 ``config``: path / show / init / check / overview -- the file a running daemon
 re-reads, so the governor can be tuned as we learn without a restart.
 
-``gpu-clock``: overview / status / helper / lock / reset -- the GPU clock
-ceiling, the one control that needs the root helper. ``lock`` and ``reset``
-are dry-run unless ``--apply``.
+``gpu-clock``: overview / status / helper / lock / reset / hold / release -- the
+GPU clock ceiling, the one control that needs the root helper. ``lock`` and
+``reset`` are dry-run unless ``--apply``. ``hold`` / ``release`` declare the
+operator's own ceiling (law for the daemon) in ``<data_dir>/operator.json``;
+they write that file only, and the running daemon applies it.
 """
 
 from __future__ import annotations
@@ -16,9 +18,11 @@ from pathlib import Path
 
 from heat_governor import config as cfgmod
 from heat_governor import gpuclock
+from heat_governor import operator_ceiling as opc
 from heat_governor.cli._commands.governing import (
     _JSON_HELP,
     _add_profile_args,
+    _config,
     _profile,
     _profile_dict,
 )
@@ -148,8 +152,43 @@ def _clock() -> gpuclock.GpuClock:
     return g
 
 
+_CEILING_KEY = "gpu_ceiling_mhz"
+_INVISIBLE = (
+    "a raw `nvidia-smi -lgc` or `sudo heat-governor-gpuclock lock` is invisible here "
+    "(no lock is exposed): declare a hand ceiling with `gpu-clock hold` or "
+    "[daemon] gpu_ceiling_mhz for it to be law"
+)
+_VISIBLE = (
+    "a hand lock below the daemon's own ceiling is seen through the helper's status "
+    "and treated as the operator's (source observed) until `gpu-clock release`"
+)
+
+
+def _data_dir(args: argparse.Namespace, cfg) -> Path:
+    from heat_governor.state import default_data_dir
+
+    chosen = getattr(args, "data_dir", None) or cfg.daemon.get("data_dir")
+    return Path(chosen) if chosen else default_data_dir()
+
+
+def _operator_doc(args: argparse.Namespace, cfg, prof) -> dict:
+    path = opc.hold_path(_data_dir(args, cfg))
+    hold = opc.read_hold(path)
+    config_mhz = cfg.daemon.get(_CEILING_KEY)
+    mhz, source = opc.effective(config_mhz, hold)
+    return {
+        "mhz": mhz,
+        "source": source,
+        "config_mhz": config_mhz,
+        "hold": None if hold is None else {"mhz": hold.mhz, "source": hold.source},
+        "path": str(path),
+        "hand_lock": _INVISIBLE if prof.gpu != "jetson" else _VISIBLE,
+    }
+
+
 def cmd_gpu_status(args: argparse.Namespace) -> None:
-    prof = _profile(args)
+    cfg = _config(args)
+    prof = _profile(args, cfg)
     g = _clock()
     doc = {
         "helper": g.helper,
@@ -157,17 +196,69 @@ def cmd_gpu_status(args: argparse.Namespace) -> None:
         "status": g.reason,
         "platform": prof.name,
         "gpu_clock_bands": [list(b) for b in prof.gpu_clock_bands],
+        "hardware_ceiling_mhz": g.read_ceiling() if g.available else None,
+        "operator_ceiling": _operator_doc(args, cfg, prof),
     }
     if args.json:
         emit_result(doc, json_mode=True)
         return
     bands = ", ".join(f">={t:g}C -> {m} MHz" for t, m in prof.gpu_clock_bands) or "none"
+    op = doc["operator_ceiling"]
+    law = "none" if op["mhz"] is None else f"{op['mhz']} MHz (source {op['source']})"
     emit_result(
         f"gpu clock control: {'available' if g.available else 'UNAVAILABLE'} -- {g.reason}\n"
         f"bands ({prof.name}): {bands}\n"
-        "the daemon uses them only with daemon.gpu_clock = true (or run --gpu-clock)",
+        "the daemon uses them only with daemon.gpu_clock = true (or run --gpu-clock)\n"
+        f"operator ceiling (law): {law}; the daemon may go below it, never above\n"
+        f"hand locks: {op['hand_lock']}",
         json_mode=False,
     )
+
+
+def cmd_gpu_hold(args: argparse.Namespace) -> None:
+    mhz = int(args.mhz)
+    if not gpuclock.MIN_MHZ <= mhz <= gpuclock.MAX_MHZ:
+        raise CliError(
+            EXIT_USER_ERROR,
+            f"refusing {mhz} MHz (allowed {gpuclock.MIN_MHZ}-{gpuclock.MAX_MHZ})",
+            "pick a ceiling the root helper accepts",
+        )
+    path = opc.hold_path(_data_dir(args, _config(args)))
+    opc.write_hold(path, mhz, opc.HOLD)
+    doc = {_CEILING_KEY: mhz, "source": opc.HOLD, "path": str(path)}
+    emit_result(
+        (
+            doc
+            if args.json
+            else f"operator GPU ceiling {mhz} MHz held ({path}).\n"
+            "A running daemon applies it within ~2 s (even with gpu_clock off) and never "
+            "writes a ceiling above it; `heat-governor gpu-clock release` gives it back."
+        ),
+        json_mode=args.json,
+    )
+
+
+def cmd_gpu_release(args: argparse.Namespace) -> None:
+    cfg = _config(args)
+    path = opc.hold_path(_data_dir(args, cfg))
+    old = opc.clear_hold(path)
+    still = cfg.daemon.get(_CEILING_KEY)
+    doc = {
+        "released": None if old is None else {_CEILING_KEY: old.mhz, "source": old.source},
+        "config_gpu_ceiling_mhz": still,
+        "path": str(path),
+    }
+    if args.json:
+        emit_result(doc, json_mode=True)
+        return
+    text = (
+        f"released the operator GPU ceiling {old.mhz} MHz ({old.source})"
+        if old
+        else "no held or observed operator GPU ceiling"
+    )
+    if still:
+        text += f"; [daemon] gpu_ceiling_mhz = {still} in the config still holds"
+    emit_result(text, json_mode=False)
 
 
 def cmd_gpu_helper(args: argparse.Namespace) -> None:
@@ -220,6 +311,8 @@ def cmd_gpu_reset(args: argparse.Namespace) -> None:
 
 # -- registration ------------------------------------------------------------------
 
+_DATA_DIR_HELP = "The daemon's data directory (default: daemon.data_dir, else XDG state)."
+
 
 def register(sub: argparse._SubParsersAction) -> None:
     pc = sub.add_parser("config", help="The config file a running daemon re-reads.")
@@ -250,6 +343,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     ):
         q = gsub.add_parser(name, help=help_)
         _add_profile_args(q)
+        q.add_argument("--data-dir", help=_DATA_DIR_HELP)
         q.add_argument("--json", action="store_true", help=_JSON_HELP)
         q.set_defaults(func=func)
     q = gsub.add_parser("lock", help="Cap the GPU clock at MHZ (dry-run unless --apply).")
@@ -261,3 +355,18 @@ def register(sub: argparse._SubParsersAction) -> None:
     q.add_argument("--apply", action="store_true", help="Actually reset it.")
     q.add_argument("--json", action="store_true", help=_JSON_HELP)
     q.set_defaults(func=cmd_gpu_reset)
+    q = gsub.add_parser(
+        "hold", help="Declare the operator's GPU ceiling (law: the daemon never goes above it)."
+    )
+    q.add_argument("mhz", type=int, help="Ceiling in MHz (100-5000).")
+    _hold_args(q)
+    q.set_defaults(func=cmd_gpu_hold)
+    q = gsub.add_parser("release", help="Give back a held (or observed) operator GPU ceiling.")
+    _hold_args(q)
+    q.set_defaults(func=cmd_gpu_release)
+
+
+def _hold_args(q: argparse.ArgumentParser) -> None:
+    q.add_argument("--config", help="Config file (its daemon.data_dir picks the directory).")
+    q.add_argument("--data-dir", help=_DATA_DIR_HELP)
+    q.add_argument("--json", action="store_true", help=_JSON_HELP)

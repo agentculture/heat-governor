@@ -214,6 +214,7 @@ def _run_options(args: argparse.Namespace, cfg):
         containers=tuple(cfg.containers),
         units=tuple(cfg.units),
         gpu_clock=bool(gpu_clock),
+        gpu_ceiling_mhz=dcfg.get("gpu_ceiling_mhz"),
         platform=getattr(args, "platform", None),
         config=cfg if (cfg.path and dcfg.get("reload", True)) else None,
         cli_set=frozenset(pick.cli_set | ({"use_labels"} if args.no_labels else set())),
@@ -226,8 +227,7 @@ def _run_options(args: argparse.Namespace, cfg):
 def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
     from heat_governor.policy import unit_cpus
 
-    if d.gpuclock and opts.gpu_clock:
-        d.gpuclock.probe()
+    d.gpu.ensure()
     d.discover()
     dec = d.tick()
     doc = {"dry_run": not opts.apply, "state": str(opts.state_path), **dec.as_dict()}
@@ -380,6 +380,11 @@ def cmd_sensors(args: argparse.Namespace) -> None:
         if "s_at_or_above" in r:
             line += f"  {r['s_at_or_above']:>5}"
         lines.append(line)
+    if res.get("gpu_held_by_operator_ticks"):
+        lines.append(
+            f"gpu: the operator ceiling held a higher policy ceiling on "
+            f"{res['gpu_held_by_operator_ticks']} ticks"
+        )
     emit_result("\n".join(lines), json_mode=False)
 
 

@@ -136,3 +136,46 @@ class FakeSystemctl:
     def cpu_usage_usec(self, unit: str) -> int | None:
         self.usage_reads += 1
         return self.usage.get(unit) if unit in self.units else None
+
+
+class FakeGpuClock:
+    """The GPU clock helper, in memory. ``hw`` is the ceiling the hardware shows
+    (what the helper's ``status`` reads back on a Jetson: devfreq max_freq);
+    ``visible=False`` is the DGX Spark (GB10), whose status shows no lock at all.
+    :meth:`hand_lock` is the operator's own ``sudo heat-governor-gpuclock lock``,
+    made behind the daemon's back."""
+
+    def __init__(self, *, hw_max: int = 1300, visible: bool = True, available: bool = True):
+        self.helper = "/fake/heat-governor-gpuclock"
+        self.available = available
+        self.reason = "ok" if available else "helper not installed"
+        self.ceiling_mhz: int | None = None
+        self.hw_max = hw_max
+        self.hw = hw_max
+        self.visible = visible
+        self.calls: list[tuple] = []
+        self.reads = 0
+        self.probes = 0
+
+    def probe(self) -> bool:
+        self.probes += 1
+        return self.available
+
+    def lock(self, mhz: int):
+        self.calls.append(("lock", mhz))
+        self.ceiling_mhz = mhz
+        self.hw = min(mhz, self.hw_max)
+        return True, str(mhz)
+
+    def reset(self):
+        self.calls.append(("reset",))
+        self.ceiling_mhz = None
+        self.hw = self.hw_max
+        return True, "reset"
+
+    def read_ceiling(self) -> int | None:
+        self.reads += 1
+        return self.hw if self.visible else None
+
+    def hand_lock(self, mhz: int) -> None:
+        self.hw = mhz

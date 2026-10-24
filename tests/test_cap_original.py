@@ -60,7 +60,7 @@ def test_a_limit_changed_by_the_operator_after_a_restore_is_the_new_original(
     cap.set(stale, 12)
     cap.set(stale, None)
     d.set_nano_cpus("s1", 10_000_000_000)  # the operator's own docker update
-    cap.set(stale, 12)
+    cap.set(stale, 8)  # below the new limit (a band above it never raises it: see below)
     assert led.nano_cpus == {"s1": 10_000_000_000}
 
 
