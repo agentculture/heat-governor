@@ -522,3 +522,63 @@ def test_an_unlimited_container_is_capped_by_the_band(tmp_path: Path) -> None:
     dk, cap, logs = _capper(tmp_path, nano=0)
     cap.set(dk.c["s1"], 8)
     assert dk.c["s1"].nano_cpus == 8_000_000_000
+
+
+# -- a hand lock through the CLI is law: `gpu-clock lock --apply` records a hold --------
+
+
+def _hold_file(tmp_path: Path) -> Path:
+    from heat_governor import operator_ceiling as opc
+
+    return opc.hold_path(tmp_path)
+
+
+def test_cli_lock_apply_records_a_hold(tmp_path: Path, capsys, monkeypatch) -> None:
+    from heat_governor.cli._commands import tuning
+
+    clock = FakeGpuClock(visible=False)  # the DGX Spark: the hardware shows no lock
+    monkeypatch.setattr(tuning, "_clock", lambda: clock)
+    rc, _, _ = _cli(capsys, GC, LOCK, "2200", "--apply", DATA, str(tmp_path))
+    doc = json.loads(_hold_file(tmp_path).read_text())
+    assert rc == 0
+    assert clock.calls == [(LOCK, 2200)]
+    assert doc["gpu_ceiling_mhz"] == 2200
+    assert doc[SOURCE] == HOLD
+
+
+def test_cli_lock_dry_run_records_nothing(tmp_path: Path, capsys, monkeypatch) -> None:
+    from heat_governor.cli._commands import tuning
+
+    monkeypatch.setattr(tuning, "_clock", lambda: FakeGpuClock(visible=False))
+    rc, out, _ = _cli(capsys, GC, LOCK, "2200", DATA, str(tmp_path))
+    assert rc == 0
+    assert "dry run" in out
+    assert not _hold_file(tmp_path).exists()
+
+
+def test_cli_lock_that_fails_records_nothing(tmp_path: Path, capsys, monkeypatch) -> None:
+    from heat_governor.cli._commands import tuning
+
+    clock = FakeGpuClock(visible=False)
+    monkeypatch.setattr(clock, "lock", lambda mhz: (False, "denied"))
+    monkeypatch.setattr(tuning, "_clock", lambda: clock)
+    rc, _, _ = _cli(capsys, GC, LOCK, "2200", "--apply", DATA, str(tmp_path))
+    assert rc != 0
+    assert not _hold_file(tmp_path).exists()
+
+
+def test_cli_reset_apply_releases_the_hold(tmp_path: Path, capsys, monkeypatch) -> None:
+    from heat_governor.cli._commands import tuning
+
+    clock = FakeGpuClock(visible=False)
+    monkeypatch.setattr(tuning, "_clock", lambda: clock)
+    _cli(capsys, GC, LOCK, "2200", "--apply", DATA, str(tmp_path))
+    rc, _, _ = _cli(capsys, GC, "reset", "--apply", DATA, str(tmp_path))
+    assert rc == 0
+    assert not _hold_file(tmp_path).exists()
+
+
+def test_orin_gpu_steps_are_the_measured_devfreq_steps() -> None:
+    from heat_governor.platforms import ORIN
+
+    assert ORIN.gpu_clock_bands == ((85.0, 1122), (88.0, 918))

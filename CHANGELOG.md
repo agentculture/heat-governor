@@ -16,6 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `gpu-clock lock <MHz> --apply` also records the operator hold (law), and `gpu-clock reset --apply` releases it: a hand lock made through the CLI is law even on the DGX Spark, whose hardware shows no lock (operator decision 2026-10-24).
+- Orin GPU clock steps are measured, not declared: 1122 MHz at warm (85 C), 918 MHz at 88 C (was 1100 at 88 C, 900 at 91 C; 1100 is not an Orin devfreq step and landed on 1020). Decider sweep 2026-10-24: full 1300 MHz reached 94.1 C board max; 1122 MHz held 83.6 C for -12% req/s and -25% GPU rail. Thor's steps stay declared (a lower clock saved only 1-5 W there). Evidence: docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md and docs/evidence/2026-10-24-gpu-clock-ceiling-spark.md.
 - A CPU band never raises a container's own `NanoCpus` limit that is tighter than the band (the rule user units already follow): a container limited to 4 CPUs is never set to 8, a lower cap of ours is restored to its own limit instead, and the would-be raise is logged once per change of the band (`would raise <container> to 8 cpus -- its own limit 4 holds`).
 - Adaptive mode's conditions come from the measured data: the deadband is 2 x the standard error of the interval's least-squares temperature trend (min 0.005 C/s), a learning sample must exceed the combined noise of the trends before and after the cut, an idle unit (< 0.5 CPU) is never cut and a non-binding cap is released, and the gain clamp is widened to 0.5 C/s per CPU (live Thor samples reached 0.16). Found by live runs on Thor and Orin, 2026-10-24.
 

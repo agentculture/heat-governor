@@ -298,7 +298,23 @@ def _manual(args: argparse.Namespace, action: str) -> None:
         raise CliError(
             EXIT_ENV_ERROR, f"{action} failed: {out}", "see heat-governor gpu-clock status"
         )
-    emit_result({"ok": True, "output": out} if args.json else f"done: {out}", json_mode=args.json)
+    note = _record_hand(args, action)
+    emit_result(
+        {"ok": True, "output": out, "hold": note} if args.json else f"done: {out}; {note}",
+        json_mode=args.json,
+    )
+
+
+def _record_hand(args: argparse.Namespace, action: str) -> str:
+    """A hand lock is the operator's ceiling (law): record it as a hold, so a running
+    daemon never goes above it -- on a DGX Spark the hardware shows no lock to observe.
+    A hand reset gives a hold back."""
+    path = opc.hold_path(_data_dir(args, _config(args)))
+    if action == "lock":
+        opc.write_hold(path, int(args.mhz), opc.HOLD)
+        return f"held as the operator's ceiling ({path})"
+    old = opc.clear_hold(path)
+    return "released the held ceiling" if old else "no hold to release"
 
 
 def cmd_gpu_lock(args: argparse.Namespace) -> None:
@@ -348,12 +364,12 @@ def register(sub: argparse._SubParsersAction) -> None:
         q.set_defaults(func=func)
     q = gsub.add_parser("lock", help="Cap the GPU clock at MHZ (dry-run unless --apply).")
     q.add_argument("mhz", type=int, help="Ceiling in MHz.")
-    q.add_argument("--apply", action="store_true", help="Actually lock it.")
-    q.add_argument("--json", action="store_true", help=_JSON_HELP)
+    q.add_argument("--apply", action="store_true", help="Actually lock it (and hold it: law).")
+    _hold_args(q)
     q.set_defaults(func=cmd_gpu_lock)
     q = gsub.add_parser("reset", help="Remove the GPU clock ceiling (dry-run unless --apply).")
-    q.add_argument("--apply", action="store_true", help="Actually reset it.")
-    q.add_argument("--json", action="store_true", help=_JSON_HELP)
+    q.add_argument("--apply", action="store_true", help="Actually reset it (and release a hold).")
+    _hold_args(q)
     q.set_defaults(func=cmd_gpu_reset)
     q = gsub.add_parser(
         "hold", help="Declare the operator's GPU ceiling (law: the daemon never goes above it)."

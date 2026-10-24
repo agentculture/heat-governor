@@ -111,7 +111,10 @@ THOR = Profile(
     limits=Limits(warm_c=95.0, hot_c=100.0, crit_c=104.0),
     duty_curve=((95.0, 0.0), (98.0, 0.2), (101.0, 0.5), (104.0, 1.0)),
     cpu_bands=((95.0, 10), (100.0, 6)),
-    gpu_clock_bands=((98.0, 1300), (101.0, 1000)),  # declared, unmeasured
+    # measured 2026-10-24 (docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md): worker
+    # decode loses 3-15% at 1300-900 MHz for only 1-5 W, so no default ceiling; these
+    # heat steps stay declared
+    gpu_clock_bands=((98.0, 1300), (101.0, 1000)),
     gpu="jetson",
     provenance="declared: passive trip 109 C minus margin; unmeasured",
     notes="gpu-thermal returns EAGAIN while the GPU is idle; that zone is skipped, not hot.",
@@ -130,9 +133,15 @@ ORIN = Profile(
     limits=Limits(warm_c=85.0, hot_c=90.0, crit_c=94.0),
     duty_curve=((85.0, 0.0), (88.0, 0.2), (91.0, 0.5), (94.0, 1.0)),
     cpu_bands=((85.0, 8), (90.0, 4)),
-    gpu_clock_bands=((88.0, 1100), (91.0, 900)),  # declared, unmeasured
+    # measured 2026-10-24 (docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md): the
+    # decider at 2 concurrent, full 1300 MHz -> board 94.1 C max; 1122 MHz -> 83.6 C max for
+    # -12% req/s and -25% GPU rail; 918 MHz -> 80.2 C for -27%. Steps are devfreq steps.
+    gpu_clock_bands=((85.0, 1122), (88.0, 918)),
     gpu="jetson",
-    provenance="declared: passive trip 99 C minus margin; unmeasured",
+    provenance=(
+        "declared limits: passive trip 99 C minus margin; GPU clock steps measured "
+        "2026-10-24 (decider sweep)"
+    ),
     notes="cv0-2 zones return ENODATA (no DLA load); skipped.",
 )
 

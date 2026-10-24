@@ -83,7 +83,13 @@ does this after each of its own writes and every 5 s while it drives the GPU.
   maximum SM clocks (`2405, 3003`; checked live 2026-10-24). A raw `nvidia-smi -lgc` or
   `sudo heat-governor-gpuclock lock` is therefore **invisible** to the daemon and is *not* law there.
   To make a hand ceiling law on the Spark, declare it with `gpu-clock hold <MHz>` or
-  `[daemon] gpu_ceiling_mhz`.
+  `[daemon] gpu_ceiling_mhz`, or lock it through the CLI.
+
+**`heat-governor gpu-clock lock <MHz> --apply` records a hold** (source `hold`) after
+the helper succeeds, on every platform, so a lock made through the CLI is law
+everywhere. `gpu-clock reset --apply` releases that hold; a config
+`gpu_ceiling_mhz` still holds after a reset. A dry run, or a lock the helper
+refuses, records nothing.
 
 Limits:
 
