@@ -168,7 +168,10 @@ with `--listen`); record the tick; and with `--apply`:
 
 - with `[[units]]` in the config, set a CPUQuota on those systemd user
   units (e.g. `app.slice`) by level (`systemctl --user set-property
-  --runtime`; a reboot drops it). Off unless a unit is listed.
+  --runtime`; a reboot drops it). Off unless a unit is listed. With
+  `mode = "adaptive"` a feedback loop sizes the cap instead: it measures
+  how the temperature rate responds to the CPU it takes away, learns that
+  per unit (kept in `<data_dir>/adaptive.json`) and releases as it cools.
 
 Serving containers are never paused. Only pauses this daemon made are ever
 undone; a restart releases what its ledger recorded. On exit it unpauses its
@@ -255,8 +258,9 @@ gpu), `[daemon]` (apply, poll_s, listen, state, data_dir, use_labels,
 discover_every_s, record, fsync, reload, gpu_clock), `[[containers]]`
 (name, role = batch|serving, cpu_cap) and `[[units]]` (name of a systemd
 user unit, plus optional warm / hot / critical CPU counts; without them the
-platform default: spark 8 / 4 / 2, declared, unmeasured). Units are off
-unless listed; contract: `docs/contracts/user-units.md`.
+platform default: spark 8 / 4 / 2, declared, unmeasured; or `mode =
+"adaptive"` with min_cpus, engage, interval_s, target_rate_c_min). Units are
+off unless listed; contract: `docs/contracts/user-units.md`.
 """
 
 _GPU_CLOCK = """\

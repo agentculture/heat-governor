@@ -234,7 +234,16 @@ def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
     doc["config"] = str(cfg.path) if cfg.path and cfg.mtime else None
     doc["containers"] = [{"name": c.name, "role": c.role} for c in d.containers.values()]
     doc["units"] = [
-        {"name": u.name, "cpus": unit_cpus(dec.level, d.unit_bands(u))} for u in opts.units
+        {
+            "name": u.name,
+            "mode": u.mode,
+            "cpus": (
+                d.adaptive[u.name].cap
+                if u.name in d.adaptive
+                else unit_cpus(dec.level, d.unit_bands(u))
+            ),
+        }
+        for u in opts.units
     ]
     emit_result(doc if args.json else _decision_text(doc), json_mode=args.json)
 

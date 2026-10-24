@@ -9,7 +9,8 @@ Which containers it touches:
   started without labels). Everything else is left alone.
 
 And, only when the config lists them (``[[units]]``), systemd user units such
-as ``app.slice``: a CPUQuota by level (:mod:`heat_governor.units`).
+as ``app.slice``: a CPUQuota by level (:mod:`heat_governor.units`), or sized by
+the learning loop of :mod:`heat_governor.adaptive` (``mode = "adaptive"``).
 
 Without ``apply`` the loop still senses, publishes the admission signal and
 records -- all harmless -- but changes no container (it logs what it would do).
@@ -28,6 +29,7 @@ from typing import Callable
 
 from heat_governor import __version__, platforms
 from heat_governor.actuators import CpuCapper, DutyCycler, Ledger
+from heat_governor.adaptive import AdaptiveLoop, ModelStore, UsageMeter
 from heat_governor.config import Config, ConfigError, ContainerRule, UnitRule
 from heat_governor.config import changed as config_changed
 from heat_governor.config import diff as config_diff
@@ -82,6 +84,7 @@ class Daemon:
         gpuclock: GpuClock | None = None,
         systemctl: SystemctlLike | None = None,
         clock: Callable[[], float] = time.time,
+        host_cpus: int | None = None,
     ) -> None:
         self.profile = profile
         self.opts = opts
@@ -124,8 +127,14 @@ class Daemon:
         self.systemctl = systemctl
         self.unit_capper: UnitCapper | None = None
         self._unbanded: set[str] = set()
+        self.host_cpus = host_cpus or os.cpu_count() or 1
+        self.adaptive: dict[str, AdaptiveLoop] = {}  # unit -> its loop (mode = adaptive)
+        self._adaptive_store: ModelStore | None = None
+        self.unit_use: dict[str, float | None] = {}  # unit -> CPUs used, last measured
+        self.meter = UsageMeter(self._unit_usage)
         if opts.units:
             self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
+            self._sync_adaptive(opts.units)
 
     # -- logging: to the log sink and into the record
     def _log(self, msg: str) -> None:
@@ -191,6 +200,52 @@ class Daemon:
             )
         return self.unit_capper
 
+    @property
+    def adaptive_store(self) -> ModelStore:
+        """What the adaptive loops learned, ``<data_dir>/adaptive.json`` (read on
+        first use, written after each accepted sample)."""
+        if self._adaptive_store is None:
+            path = (self.opts.data_dir or Path(".")) / "adaptive.json"
+            self._adaptive_store = ModelStore(path, self._log)
+        return self._adaptive_store
+
+    def _unit_usage(self, unit: str) -> int | None:
+        return self.systemctl.cpu_usage_usec(unit) if self.systemctl else None
+
+    def _sync_adaptive(self, units: tuple[UnitRule, ...]) -> None:
+        """One loop per adaptive unit; a reload keeps each loop's cap and model."""
+        want = {u.name: u for u in units if u.mode == "adaptive"}
+        for name in set(self.adaptive) - set(want):
+            del self.adaptive[name]
+        for name, r in want.items():
+            loop = self.adaptive.setdefault(name, AdaptiveLoop())
+            loop.configure(r.min_cpus, r.engage, r.interval_s, r.target_rate_c_min)
+            loop.model = self.adaptive_store.model(self.profile.name, name)
+
+    def _unit_step(self, rule: UnitRule, d: Decision, now: float) -> None:
+        """Measure the unit, size its cap (by level or by its loop), hand it to the
+        capper (which applies the ledger, dry-run and missing-unit rules)."""
+        name = rule.name
+        loop = self.adaptive.get(name)
+        if loop is None:
+            self.unit_use[name] = self.meter.sample(name, now)
+            self.unit_capper.set(name, unit_cpus(d.level, self.unit_bands(rule)))
+            return
+        if loop.due(now):
+            use = self.unit_use[name] = self.meter.sample(name, now)
+            live = self.unit_capper.applies(name)
+            if not live:
+                loop.pending = None  # a change not made has no response to learn from
+            rate = None if d.reason == "sensor_lost" else d.rate_c_s
+            step = loop.step(d.level, rate, use, self.host_cpus, now, learn=live)
+            if step.lesson:
+                self._log(f"adaptive {name}: {step.lesson}")
+            if step.changed:
+                self._log(step.describe(name, dry=not live))
+            if step.learned:
+                self.adaptive_store.save()
+        self.unit_capper.set(name, loop.cap)
+
     def unit_bands(self, rule: UnitRule) -> tuple[tuple[str, float], ...]:
         """A unit's own bands replace the platform default entirely."""
         bands = rule.bands or self.profile.unit_bands
@@ -208,6 +263,7 @@ class Daemon:
         self.opts.units = units
         if gone and self.unit_capper:
             self.unit_capper.release(gone)
+        self._sync_adaptive(units)
         if units:
             self._ensure_unit_capper().set_dry({u.name for u in units if u.dry_run})
             if {u.name for u in units} != old:
@@ -396,10 +452,7 @@ class Daemon:
         self._fenced("gpu ceiling", lambda: self._gpu(d.gpu_mhz, now))
         if self.unit_capper:
             for rule in self.opts.units:
-                cpus = unit_cpus(d.level, self.unit_bands(rule))
-                self._fenced(
-                    f"unit {rule.name}", lambda n=rule.name, c=cpus: self.unit_capper.set(n, c)
-                )
+                self._fenced(f"unit {rule.name}", lambda r=rule: self._unit_step(r, d, now))
 
     def _fenced(self, what: str, fn) -> None:
         try:
@@ -453,18 +506,23 @@ class Daemon:
                 }
                 for c in self.containers.values()
             ],
-            "units": [
-                {
-                    "name": u.name,
-                    "dry_run": u.dry_run,
-                    "cpus": self.unit_capper.current.get(u.name) if self.unit_capper else None,
-                    "missing": bool(
-                        self.unit_capper and u.name in self.unit_capper.missing_units()
-                    ),
-                }
-                for u in self.opts.units
-            ],
+            "units": [self._unit_doc(u) for u in self.opts.units],
         }
+
+    def _unit_doc(self, u: UnitRule) -> dict:
+        doc = {
+            "name": u.name,
+            "mode": u.mode,
+            "dry_run": u.dry_run,
+            "cpus": self.unit_capper.current.get(u.name) if self.unit_capper else None,
+            "use_cpus": self.unit_use.get(u.name),
+            "missing": bool(self.unit_capper and u.name in self.unit_capper.missing_units()),
+        }
+        loop = self.adaptive.get(u.name)
+        if loop is not None:
+            doc["gain"] = loop.model.gain
+            doc["samples"] = loop.model.samples
+        return doc
 
     # -- lifecycle
     def start(self) -> None:

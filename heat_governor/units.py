@@ -96,15 +96,36 @@ def _run(argv: list[str]) -> tuple[int, str, str]:  # pragma: no cover - thin sh
 class SystemctlLike(Protocol):
     def show(self, unit: str) -> UnitInfo: ...
     def set_quota(self, unit: str, percent: str | None) -> None: ...
+    def cpu_usage_usec(self, unit: str) -> int | None: ...
+
+
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+
+
+def read_usage_usec(stat: Path) -> int | None:
+    """``usage_usec`` from a cgroup v2 ``cpu.stat``; None when unreadable."""
+    try:
+        text = stat.read_text()
+    except OSError:
+        return None
+    for line in text.splitlines():
+        key, _, value = line.partition(" ")
+        if key == "usage_usec" and value.strip().isdigit():
+            return int(value)
+    return None
 
 
 class Systemctl:
     """``systemctl --user``, the two calls the actuator needs. Every change is
     ``set-property --runtime``; ``--`` ends the options before the unit name."""
 
-    def __init__(self, run: Run = _run, exe: str = "systemctl") -> None:
+    def __init__(
+        self, run: Run = _run, exe: str = "systemctl", cgroup_root: Path = CGROUP_ROOT
+    ) -> None:
         self.run = run
         self.exe = exe
+        self.cgroup_root = cgroup_root
+        self._cgroups: dict[str, Path] = {}  # unit -> its cpu.stat (cached)
 
     def show(self, unit: str) -> UnitInfo:
         props = ("LoadState", "ActiveState", "CPUQuotaPerSecUSec")
@@ -120,6 +141,42 @@ class Systemctl:
             active=kv.get("ActiveState") in ("active", "activating", "reloading"),
             quota_usec=parse_quota(kv.get("CPUQuotaPerSecUSec", "infinity")),
         )
+
+    def _cpu_stat(self, unit: str) -> Path | None:
+        """``<cgroup_root><ControlGroup>/cpu.stat`` for ``unit``, or None (no
+        cgroup: inactive, or the path would leave the cgroup root)."""
+        rc, out, _ = self.run([self.exe, "--user", "show", "-p", "ControlGroup", "--", unit])
+        if rc != 0:
+            return None
+        cg = next(
+            (
+                ln.split("=", 1)[1].strip()
+                for ln in out.splitlines()
+                if ln.startswith("ControlGroup=")
+            ),
+            "",
+        )
+        if not cg.startswith("/") or ".." in cg.split("/"):
+            return None
+        return self.cgroup_root / cg.lstrip("/") / "cpu.stat"
+
+    def cpu_usage_usec(self, unit: str) -> int | None:
+        """The unit's cumulative CPU time in microseconds (cgroup v2
+        ``cpu.stat`` ``usage_usec``). The cgroup path is cached and looked up
+        again once when its file has gone (the unit restarted)."""
+        cached = self._cgroups.get(unit)
+        if cached is not None:
+            usec = read_usage_usec(cached)
+            if usec is not None:
+                return usec
+            self._cgroups.pop(unit, None)
+        stat = self._cpu_stat(unit)
+        if stat is None:
+            return None
+        usec = read_usage_usec(stat)
+        if usec is not None:
+            self._cgroups[unit] = stat
+        return usec
 
     def set_quota(self, unit: str, percent: str | None) -> None:
         value = "CPUQuota=" if percent is None else f"CPUQuota={percent}%"

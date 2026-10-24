@@ -25,7 +25,7 @@ files, and a CI/deploy pipeline. It is a sibling to
 | Platform profiles: Spark (measured), Thor + Orin (declared), generic (`platforms.py`) | Implemented |
 | Pure controller: levels, lookahead, hysteresis, duty, CPU ramp, sensor loss (`policy.py`) | Implemented |
 | Actuators: duty-cycle pause + CPU caps over the docker socket, own-pause ledger (`actuators.py`, `docker.py`) | Implemented, unit-tested; not yet run with `--apply` on a real window |
-| User-unit CPU quota (`[[units]]`, e.g. `app.slice`) via `systemctl --user set-property --runtime` (`units.py`) | Implemented, unit-tested with a fake; opt-in; Spark bands declared, unmeasured |
+| User-unit CPU quota (`[[units]]`, e.g. `app.slice`) via `systemctl --user set-property --runtime` (`units.py`); `mode = "adaptive"` learning loop (`adaptive.py`) | Implemented, unit-tested with a fake; opt-in; Spark bands declared, unmeasured; adaptive constants untuned, not run on a real box |
 | Admission signal: state file, `GET /state`, client `read`/`wait`/`Gate` (`state.py`, `client.py`) | Implemented |
 | Records, reboot report, trace replay (`recorder.py`; `report`, `replay`) | Implemented |
 | Live validation on a batch window (duty vs peak temperature vs throughput) | (planned) |

@@ -344,7 +344,16 @@ def test_daemon_caps_units_by_level_reports_and_restores(tmp_path: Path) -> None
     assert sc.units["app.slice"] == 4_000_000
     d.tick()
     st = read_state(tmp_path / "state.json")
-    assert st["units"] == [{"name": "app.slice", "dry_run": False, "cpus": 4.0, "missing": False}]
+    assert st["units"] == [
+        {
+            "name": "app.slice",
+            "mode": "levels",
+            "dry_run": False,
+            "cpus": 4.0,
+            "use_cpus": None,
+            "missing": False,
+        }
+    ]
     d.shutdown()
     assert sc.units["app.slice"] is None
     assert Ledger(tmp_path / "data" / "ledger.json").unit_quota == {}
@@ -480,5 +489,7 @@ def test_run_once_lists_units_and_changes_nothing(tmp_path: Path, monkeypatch, c
     )
     assert rc in (0, None)
     doc = json.loads(capsys.readouterr().out)
-    assert doc["units"] == [{"name": "app.slice", "cpus": unit_cpus(doc["level"], (("hot", 4.0),))}]
+    assert doc["units"] == [
+        {"name": "app.slice", "mode": "levels", "cpus": unit_cpus(doc["level"], (("hot", 4.0),))}
+    ]
     assert [c for c in sc.calls if c[0] == "set"] == []

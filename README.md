@@ -69,7 +69,10 @@ Opt-in, it also caps the CPU quota of the operator's own systemd **user**
 units by level, for example `app.slice`, where interactive terminal sessions
 and their test runs live (`[[units]]` in the config; every change is
 `systemctl --user set-property --runtime`, so a reboot drops it; contract in
-[`docs/contracts/user-units.md`](docs/contracts/user-units.md)).
+[`docs/contracts/user-units.md`](docs/contracts/user-units.md)). With
+`mode = "adaptive"` a feedback loop sizes the cap instead, from how the
+temperature rate responds to the CPU it takes away; it learns that response
+per unit and keeps it across restarts.
 
 With the root helper installed and `gpu_clock = true`, it also lowers the GPU
 clock ceiling per band (`nvidia-smi -lgc` on the Spark, devfreq `max_freq` on

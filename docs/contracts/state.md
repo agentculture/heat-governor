@@ -43,7 +43,7 @@ directory (mount the directory, not the file: an atomic rename does not show thr
 | `limits` | object | `warm_c`, `hot_c`, `crit_c` of the active profile. |
 | `applying` | bool | Whether the daemon changes containers (`--apply`) or only signals. |
 | `containers` | list | Governed containers: `name`, `role`, `paused_by_governor`, `cpus`. |
-| `units` | list | Configured systemd user units (`[[units]]`, empty when none): `name`, `dry_run` (decisions logged only), `cpus` (the cap the daemon holds — for a dry-run unit, the cap it would hold; `null` = the unit's own quota), `missing` (`true` while the unit is not found or inactive and therefore skipped). See [`user-units.md`](user-units.md). |
+| `units` | list | Configured systemd user units (`[[units]]`, empty when none): `name`, `mode` (`levels` or `adaptive`), `dry_run` (decisions logged only), `cpus` (the cap the daemon holds — for a dry-run unit, the cap it would hold; `null` = the unit's own quota), `use_cpus` (CPUs the unit used over the last measurement: each tick for `levels`, each evaluation for `adaptive`; `null` until measured or when its cgroup is unreadable), `missing` (`true` while the unit is not found or inactive and therefore skipped). Adaptive units also carry `gain` (learned C/s of temperature rate per CPU removed, `null` until learned) and `samples`. See [`user-units.md`](user-units.md). |
 
 The level, admission and temperatures are this tick's. Actuator results (`containers`, `units`, `gpu_ceiling_mhz`)
 are as of the previous tick: the daemon publishes before it touches docker or the GPU helper, so a slow or
@@ -66,5 +66,6 @@ failing actuator can never delay the admission signal.
  "concurrency_factor":0.5,"duty":0.15,"cpus":8,"temp_c":89.5,"effective_c":89.9,"rate_c_s":0.8,
  "hottest_zone":"4:acpitz","reason":"rising","limits":{"warm_c":88.0,"hot_c":91.5,"crit_c":93.0},
  "applying":true,"containers":[{"name":"model-gear-vllm-primary","role":"serving",
- "paused_by_governor":false,"cpus":8}],"units":[{"name":"app.slice","dry_run":false,"cpus":8.0,"missing":false}]}
+ "paused_by_governor":false,"cpus":8}],"units":[{"name":"app.slice","mode":"adaptive","dry_run":false,"cpus":8.0,"use_cpus":7.9,"missing":false,
+ "gain":0.004,"samples":5}]}
 ```
