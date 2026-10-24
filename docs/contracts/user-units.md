@@ -71,11 +71,14 @@ per `interval_s`: the level, the governing temperature's trend over that interva
 of every 1 s reading since the last evaluation; not the state's `rate_c_s`, whose 2 s window on the Spark
 is mostly zone jitter), the unit's measured CPU use over the last interval, and the host CPU count.
 
+**The noise band comes from the data.** Each evaluation fits a least-squares line through every 1 s reading of the interval; the band is `max(0.005, 2 x the slope's standard error)`. A box whose zones jitter (Thor: about +-0.1 C/s over 20 s) gets a wide band and stops flapping between tighten and release; a quiet box gets a narrow one. Measured live 2026-10-24 on Thor and Orin with a fixed 0.005 band: the loop alternated tighten/release every interval and kept cutting an idle test slice after its burner stopped; both are fixed by these rules.
+
 | Situation | What the loop does |
 |---|---|
-| Engaged (level >= `engage`) and `rate - target` > 0.005 C/s | **Tighten.** The cut in CPUs is `error / gain` once a gain is learned, else the cold-start step `max(1, 25% of use)`. The cut is clamped to 1 CPU minimum and 50% of measured use maximum. The new cap is `max(min_cpus, use - cut)`, never above the current cap. It is based on measured use, because a cap far above what the unit uses does nothing. |
-| Engaged, `rate - target` < -0.005 C/s, and the level is exactly `engage` | **Release** one step: `+max(1, 10% of host CPUs)`, at most once per `2 x interval_s`. |
-| Engaged, otherwise | **Hold** (inside the deadband, at `min_cpus`, or above the engage level while cooling). |
+| Engaged (level >= `engage`), `rate - target` above the noise band, and the unit uses >= 0.5 CPU | **Tighten.** The cut in CPUs is `error / gain` once a gain is learned, else the cold-start step `max(1, 25% of use)`. The cut is clamped to 1 CPU minimum and 50% of measured use maximum. The new cap is `max(min_cpus, use - cut)`, never above the current cap. It is based on measured use, because a cap far above what the unit uses does nothing. |
+| Engaged, the unit uses < 0.5 CPU (it is not the heat source), or it uses under half its cap while the rate is inside the band (the cap is not binding) | **Release** one step (paced as below); an uncapped idle unit is never cut. |
+| Engaged, `rate - target` below minus the noise band, and the level is exactly `engage` | **Release** one step: `+max(1, 10% of host CPUs)`, at most once per `2 x interval_s`. |
+| Engaged, otherwise | **Hold** (inside the noise band, at `min_cpus`, or above the engage level while cooling). |
 | Not engaged (level below `engage`) | **Release** one step per `2 x interval_s`. Once the cap would reach the host CPU count it is removed, which restores the unit's own quota through the normal restore path. |
 | Sensor lost (no readable zone; the level is then `hot`) | Engaged: tighten by the cold-start step, because a learned gain cannot be applied to an unknown error. Not engaged: hold, so the loop never releases while blind. Nothing is learned. |
 | Use not measured yet (the first evaluation, or an unreadable cgroup) | Hold. |
@@ -83,7 +86,7 @@ is mostly zone jitter), the unit's measured CPU use over the last interval, and 
 **Learning.** Each tighten records `(time, use, rate)`. The next evaluation compares: when use fell by
 at least 0.5 CPU and the rate fell, the sample is `(rate_before - rate_now) / (use_before - use_now)` in
 C/s per CPU. Otherwise the sample is counted in `ignored`. The gain is an EWMA (alpha 0.3) of the samples,
-clamped to [0.0001, 0.05] C/s per CPU. Each tighten yields one sample at most. **In dry-run nothing is
+clamped to [0.0001, 0.5] C/s per CPU. A sample is taken only when the rate fell by more than 2 x the combined standard error of the two trends (before and after the cut); smaller changes are noise and are counted `ignored`. Each tighten yields one sample at most. **In dry-run nothing is
 learned**: the change is not made, so there is no response to measure, and the would-be decision is only
 logged.
 

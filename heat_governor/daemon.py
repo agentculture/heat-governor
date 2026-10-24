@@ -242,7 +242,8 @@ class Daemon:
             if not live:
                 loop.pending = None  # a change not made has no response to learn from
             rate = trend.take()
-            step = loop.step(d.level, rate, use, self.host_cpus, now, learn=live)
+            noise = trend.noise
+            step = loop.step(d.level, rate, use, self.host_cpus, now, learn=live, noise=noise)
             if step.lesson:
                 self._log(f"adaptive {name}: {step.lesson}")
             if step.changed:

@@ -48,9 +48,12 @@ from pathlib import Path
 from typing import Callable
 
 LEVELS = ("cool", "warm", "hot", "critical")
-DEADBAND = 0.005  # C/s: |error| inside this holds
+DEADBAND = 0.005  # C/s: the smallest band; the measured trend noise widens it
+NOISE_K = 2.0  # an error or a learned change must exceed NOISE_K x its standard error
+IDLE_USE = 0.5  # CPUs: a unit using less cannot be the heat source -- never cut it
+BINDING_SHARE = 0.5  # a cap the unit uses less than this share of is not binding
 ALPHA = 0.3  # EWMA weight of a new sample
-GAIN_MIN, GAIN_MAX = 1e-4, 0.05  # C/s per CPU
+GAIN_MIN, GAIN_MAX = 1e-4, 0.5  # C/s per CPU (live Thor samples reached 0.16)
 MIN_DELTA_USE = 0.5  # CPUs: a smaller change in use teaches nothing
 COLD_START_SHARE = 0.25  # of measured use, before a gain is learned
 MAX_STEP_SHARE = 0.5  # of measured use, the largest single cut
@@ -142,7 +145,7 @@ class AdaptiveLoop:
     cap: float | None = None
     evaluated_at: float | None = None
     adjusted_at: float | None = None
-    pending: tuple[float, float, float] | None = None  # (time, use, rate) at a tighten
+    pending: tuple[float, float, float, float] | None = None  # (time, use, rate, noise)
     last_use: float | None = None
     _now: float = field(default=0.0, repr=False, compare=False)
 
@@ -159,16 +162,24 @@ class AdaptiveLoop:
         return self.evaluated_at is None or now - self.evaluated_at >= self.interval_s
 
     # -- pieces ---------------------------------------------------------------
-    def _learn(self, rate: float | None, use: float | None) -> tuple[bool, str | None]:
+    def band(self, noise: float | None) -> float:
+        """The deadband: the measured trend noise, never below DEADBAND."""
+        return max(DEADBAND, NOISE_K * noise) if noise else DEADBAND
+
+    def _learn(
+        self, rate: float | None, use: float | None, noise: float | None
+    ) -> tuple[bool, str | None]:
         if self.pending is None:
             return False, None
-        _, use0, rate0 = self.pending
+        _, use0, rate0, noise0 = self.pending
         self.pending = None
         if rate is None or use is None:
             self.model.ignored += 1
             return False, "sample ignored: rate or use unknown"
         d_use, d_rate = use0 - use, rate0 - rate
-        if d_use >= MIN_DELTA_USE and d_rate > 0:
+        # the change must stand out from both trends' own noise, or it teaches noise
+        need = max(0.0, NOISE_K * ((noise0 or 0.0) ** 2 + (noise or 0.0) ** 2) ** 0.5)
+        if d_use >= MIN_DELTA_USE and d_rate > need:
             self.model.add(d_rate / d_use, self._now)
             return True, (
                 f"learned gain {self.model.gain:.4f} C/s/cpu from {self.model.samples} samples "
@@ -177,7 +188,8 @@ class AdaptiveLoop:
         self.model.ignored += 1
         return False, (
             f"sample ignored: use fell {d_use:g} cpus, rate fell {d_rate:+.3f} C/s "
-            f"(needs >= {MIN_DELTA_USE:g} cpus and a falling rate; {self.model.ignored} ignored)"
+            f"(needs >= {MIN_DELTA_USE:g} cpus and a fall above the noise {need:.3f} C/s; "
+            f"{self.model.ignored} ignored)"
         )
 
     def _basis(self) -> str:
@@ -224,24 +236,28 @@ class AdaptiveLoop:
         now: float,
         *,
         learn: bool = True,
+        noise: float | None = None,
     ) -> Step:
         """One evaluation. ``rate`` in C/s (None = sensor lost); ``use`` in CPUs
-        over the last interval (None = not measured yet / unreadable)."""
+        over the last interval (None = not measured yet / unreadable); ``noise``
+        the standard error of ``rate`` (it sets the deadband)."""
         if not self.due(now):
             return Step("wait", self.cap, self.cap, self.last_use, "between evaluations")
         self._now = now
         self.evaluated_at = now
-        learned, lesson = self._learn(rate, use)
+        learned, lesson = self._learn(rate, use, noise)
         if use is not None:
             self.last_use = use
-        s = self._decide(level, rate, use, host_cpus)
+        s = self._decide(level, rate, use, host_cpus, self.band(noise))
         if s.action == "tighten" and learn and rate is not None and use is not None:
-            self.pending = (now, use, rate)
+            self.pending = (now, use, rate, noise or 0.0)
         if lesson is not None:
             s = Step(s.action, s.cap, s.prev, s.use, s.reason, learned, lesson)
         return s
 
-    def _decide(self, level: str, rate: float | None, use: float | None, host: int) -> Step:
+    def _decide(
+        self, level: str, rate: float | None, use: float | None, host: int, band: float = DEADBAND
+    ) -> Step:
         engaged = LEVELS.index(level) >= LEVELS.index(self.engage)
         if rate is None:
             if not engaged:
@@ -252,14 +268,23 @@ class AdaptiveLoop:
         if not engaged:
             return self._release(host, f"level {level}, below engage {self.engage}")
         error = rate - self.target_c_s
-        head = f"rate {rate:+.3f} C/s, target {self.target_c_s:+.3f} C/s"
-        if error > DEADBAND:
+        head = f"rate {rate:+.3f} C/s, target {self.target_c_s:+.3f} C/s, noise band {band:.3f}"
+        idle = use is not None and use < IDLE_USE
+        slack = use is not None and self.cap is not None and use < BINDING_SHARE * self.cap
+        if error > band:
             if use is None:
                 return Step("hold", self.cap, self.cap, None, f"{head}; measuring use")
+            if idle:
+                # the heat is not this unit's: it is not using the CPU
+                if self.cap is not None:
+                    return self._release(host, f"{head}; use {use:g}: not the heat source")
+                return Step("hold", None, None, use, f"{head}; use {use:g}: not the heat source")
             return self._tighten(use, error, f"use {use:g}, {head}, {self._basis()}")
-        if error < -DEADBAND and level == self.engage:
+        if slack:
+            return self._release(host, f"{head}; use {use:g} of cap {self.cap:g}: cap not binding")
+        if error < -band and level == self.engage:
             return self._release(host, f"{head}, cooling faster than needed")
-        return Step("hold", self.cap, self.cap, use, f"{head}, within the deadband")
+        return Step("hold", self.cap, self.cap, use, f"{head}, within the noise band")
 
 
 class Trend:
@@ -275,6 +300,7 @@ class Trend:
     def __init__(self) -> None:
         self.points: list[tuple[float, float]] = []
         self.blind = False
+        self.noise: float | None = None  # standard error of the last slope taken
 
     def add(self, now: float, temp: float | None) -> None:
         if temp is None:
@@ -285,7 +311,7 @@ class Trend:
     def take(self) -> float | None:
         """The slope over the readings so far, then start a new window."""
         pts, blind = self.points, self.blind
-        self.points, self.blind = [], False
+        self.points, self.blind, self.noise = [], False, None
         if blind or len(pts) < self.MIN_POINTS:
             return None
         n = len(pts)
@@ -294,7 +320,10 @@ class Trend:
         var = sum((t - mt) ** 2 for t, _ in pts)
         if var <= 0:
             return None
-        return round(sum((t - mt) * (c - mc) for t, c in pts) / var, 5)
+        slope = sum((t - mt) * (c - mc) for t, c in pts) / var
+        resid = sum((c - mc - slope * (t - mt)) ** 2 for t, c in pts)
+        self.noise = round((resid / (n - 2) / var) ** 0.5, 5) if n > 2 else None
+        return round(slope, 5)
 
 
 class UsageMeter:

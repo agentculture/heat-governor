@@ -11,6 +11,7 @@ import pytest
 
 from heat_governor.adaptive import (
     ALPHA,
+    DEADBAND,
     GAIN_MAX,
     GAIN_MIN,
     AdaptiveLoop,
@@ -188,7 +189,7 @@ def test_sensor_loss_tightens_by_the_cold_start_step_and_never_releases() -> Non
 def test_a_tighten_is_followed_by_one_sample() -> None:
     loop = _loop()
     _step(loop, 0.0, rate=0.03, use=12.0)
-    assert loop.pending == (0.0, 12.0, 0.03)
+    assert loop.pending == (0.0, 12.0, 0.03, 0.0)
     s = _step(loop, 20.0, rate=0.01, use=8.0)  # 0.02 C/s for 4 CPUs
     assert s.learned
     assert s.lesson == (
@@ -245,7 +246,7 @@ def test_describe_formats_the_log_line() -> None:
     s = _step(loop, 0.0, rate=0.03, use=12.3)
     assert s.describe("app.slice") == (
         "adaptive app.slice: tighten 12.3 -> 6.15 cpus (use 12.3, rate +0.030 C/s, "
-        "target +0.000 C/s, gain 0.0040 C/s/cpu from 5 samples)"
+        "target +0.000 C/s, noise band 0.005, gain 0.0040 C/s/cpu from 5 samples)"
     )
     assert s.describe("app.slice", dry=True).startswith("adaptive app.slice: dry-run would tighten")
 
@@ -607,3 +608,39 @@ def test_trend_is_unknown_when_blind_or_too_short() -> None:
     for i in range(5):
         tr.add(float(i), None if i == 2 else 80.0)
     assert tr.take() is None
+
+
+# -- conditions from the data: noise band, significance, idle units ------------
+
+
+def test_the_deadband_is_the_measured_trend_noise() -> None:
+    loop = _loop()
+    assert loop.band(None) == DEADBAND
+    assert loop.band(0.0001) == DEADBAND
+    assert loop.band(0.05) == 0.1
+    s = loop.step("warm", 0.06, 12.0, 20, 0.0, noise=0.05)  # rising, but inside its noise
+    assert s.action == "hold" and "noise band 0.100" in s.reason
+
+
+def test_a_change_inside_the_noise_teaches_nothing() -> None:
+    loop = _loop()
+    loop.step("warm", 0.20, 12.0, 20, 0.0, noise=0.05)  # tighten, armed with noise 0.05
+    s = loop.step("warm", 0.10, 9.0, 20, 20.0, noise=0.05)  # fell 0.10 < 2 x 0.071
+    assert not s.learned and loop.model.samples == 0 and loop.model.ignored == 1
+    assert "above the noise" in s.lesson
+
+
+def test_an_idle_unit_is_never_cut_and_its_cap_is_released() -> None:
+    loop = _loop()
+    s = loop.step("warm", 0.2, 0.1, 20, 0.0)
+    assert s.action == "hold" and loop.cap is None and "not the heat source" in s.reason
+    loop.cap = 4.0
+    s = loop.step("warm", 0.2, 0.0, 20, 20.0)
+    assert s.action == "release" and loop.cap == 6.0
+
+
+def test_a_cap_that_is_not_binding_is_released_when_not_rising() -> None:
+    loop = _loop()
+    loop.cap = 10.0
+    s = loop.step("warm", 0.0, 3.0, 20, 0.0)
+    assert s.action == "release" and "not binding" in s.reason
