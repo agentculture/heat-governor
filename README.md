@@ -36,38 +36,177 @@ loginctl enable-linger "$USER"
 
 ## How it governs
 
-| Level | When (effective temperature) | New work | Batch containers |
+```mermaid
+flowchart LR
+  S["sense, about 1 s<br/>board zones + GPU temp"] --> C["controller<br/>effective temp, level"]
+  C --> A["admit / hold<br/>new work"]
+  C --> D["duty-cycle<br/>batch containers"]
+  C --> K["CPU cap<br/>opted-in containers"]
+  C --> U["CPU quota<br/>user units: levels or adaptive"]
+  C --> G["GPU ceiling<br/>min(operator, band)"]
+  A & D & K & U & G --> R["ledger first, then act<br/>records per tick"]
+```
+
+| Level | When (effective temperature) | New work | Batch containers | CPU caps / unit quota / GPU step |
+|---|---|---|---|---|
+| cool | below warm | admitted, full | running | none (operator ceiling only) |
+| warm | warm to hot | admitted, half | paused part of each 2 s | first step |
+| hot | hot to critical | held | paused most of each period | lower step |
+| critical | at or above critical | held | paused | lowest step |
+
+| Rule | Value |
+|---|---|
+| Inputs | hottest board zone; GPU temp on its own bands (Spark 82 / 87 / 91 C); the one closer to its limit governs |
+| Rising | lookahead on the rate; levels rise at once |
+| Falling | below the threshold minus hysteresis, for the dwell time |
+| Sensors lost | treated as hot |
+| Container opt-in | label `heat-governor.role=batch` or `serving` (+ `heat-governor.cpu-cap=true`) |
+| Never | undoes a pause it did not make; touches power modes or fans |
+
+| Platform | warm / hot / critical | GPU steps | Source |
 |---|---|---|---|
-| cool | below warm | admitted, full concurrency | running |
-| warm | warm to hot | admitted, half concurrency | paused for a growing share of each 2 s period |
-| hot | hot to critical | held | paused for most of each period |
-| critical | at or above critical | held | paused |
+| DGX Spark (GB10) | 88 / 91.5 / 93 C (ACPI zones) | operator ceiling **2200 MHz** (law); 1800 / 1400 above warm | measured (resets at about 94.5-95 C; clock sweep 2026-10-24) |
+| Jetson AGX Thor | 95 / 100 / 104 C | 1300 / 1000 MHz | limits declared; clock sweep 2026-10-24: no default ceiling |
+| Jetson AGX Orin | 85 / 90 / 94 C | **1122 MHz at 85 C, 918 MHz at 88 C** | limits declared; GPU steps measured 2026-10-24 |
+| anything else | lowest critical trip minus 15 C | none | derived |
 
-Two inputs feed it: the hottest board zone, and the GPU's own temperature with
-its own bands (DGX Spark: 82 / 87 / 91 C, under the ~94 C limit the GB10
-reports as headroom). Whichever is closer to its own limit governs. On the
-Jetsons the GPU zone is already one of the watched board zones.
+### The operator's ceiling is law
 
-The effective temperature adds a short lookahead on a rising temperature.
-Levels rise at once and fall only after the temperature has stayed below the
-threshold (minus a hysteresis) for a dwell time. CPU caps drop at once and
-rise one band at a time. If every sensor is lost the host is treated as hot.
+```mermaid
+flowchart LR
+  B["policy band<br/>for the level"] --> M{"min"}
+  O["operator ceiling<br/>config gpu_ceiling_mhz /<br/>gpu-clock hold or lock --apply /<br/>observed on a Jetson"] --> M
+  M --> W["written ceiling"]
+  B -.->|band above operator| L["log: gpu: would raise the ceiling to X<br/>-- operator ceiling Y MHz holds"]
+```
 
-| Platform | warm / hot / critical | Source |
+| Case | What the daemon does |
+|---|---|
+| heat wants a lower ceiling | goes below the operator's |
+| heat wants a higher one, or none | keeps the operator's and logs "would raise" (state: `gpu_held_by_operator`) |
+| exit, `gpu_clock` off, crash recovery | restores the operator's, never a reset |
+| hand lock on a Jetson | read back, held as `observed` |
+| hand lock on a DGX Spark | invisible to the hardware: declare it, or use `gpu-clock lock --apply` (records a hold) |
+| a container's own CPU limit is tighter than the band | never raised; logged |
+
+Contract: [`docs/contracts/gpu-clock.md`](docs/contracts/gpu-clock.md).
+
+### Adaptive user-unit quota
+
+Opt-in (`[[units]]`, e.g. `app.slice`, where interactive sessions and their
+test runs live). Every change is `systemctl --user set-property --runtime`, so
+a reboot drops it.
+
+```mermaid
+flowchart LR
+  T["interval trend<br/>least-squares slope<br/>+ its standard error"] --> E{"error vs<br/>noise band"}
+  E -->|above, unit busy| TI["tighten:<br/>error / learned gain"]
+  E -->|inside| LW{"long window<br/>4 intervals"}
+  LW -->|creep beyond its noise| TI
+  LW -->|no| H["hold"]
+  E -->|below, or unit idle, or cap not binding| RE["release one step"]
+  TI --> LE["next interval:<br/>learn gain if the fall beats the noise"]
+  LE --> S[("adaptive.json<br/>per platform + unit")]
+```
+
+| Box (live test, 2026-10-24) | Learned gain (C/s per CPU) | Noise band (C/s) |
 |---|---|---|
-| DGX Spark (GB10) | 88 / 91.5 / 93 C on the ACPI zones | measured: resets at ~94.5-95 C |
-| Jetson AGX Thor | 95 / 100 / 104 C | declared from the 109 C passive trip; unmeasured |
-| Jetson AGX Orin | 85 / 90 / 94 C | declared from the 99 C passive trip; unmeasured |
-| anything else | from the lowest critical trip minus 15 C | derived |
+| DGX Spark | about 0.21 | 0.03-0.24 |
+| Thor | about 0.14 | 0.02-0.14 |
+| spark2 | 0.07 | about 0.07 |
+| Orin | 0.02-0.04 | 0.01-0.02 |
 
-Containers opt in by label: `heat-governor.role=batch` (duty-cycled and
-CPU-capped) or `heat-governor.role=serving` (never paused; CPU-capped only
-with `heat-governor.cpu-cap=true`). Unlabelled containers are left alone.
-The daemon only ever undoes a pause it made itself.
+Contract: [`docs/contracts/user-units.md`](docs/contracts/user-units.md).
+Evidence: [`docs/evidence/2026-10-24-adaptive-units-live.md`](docs/evidence/2026-10-24-adaptive-units-live.md).
 
-With the root helper installed and `gpu_clock = true`, it also lowers the GPU
-clock ceiling per band (`nvidia-smi -lgc` on the Spark, devfreq `max_freq` on
-the Jetsons). It does not touch power modes or fans.
+## Measured: GPU clock ceilings (2026-10-24)
+
+| Box | Workload | Decision |
+|---|---|---|
+| DGX Spark, spark2 | decode, prefill up to 128k, LoRA fine-tune | operator ceiling **2200 MHz** |
+| Jetson AGX Thor | worker decode (Qwen3.6-35B-A3B, DFlash) | no ceiling; heat steps only |
+| Jetson AGX Orin | decider (Clef 27B W4A16), mostly prefill | no ceiling; measured steps 1122 / 918 MHz |
+
+### DGX Spark
+
+```mermaid
+xychart-beta
+  title "Long-prompt read speed at 128k context (tok/s)"
+  x-axis "GPU ceiling (MHz)" [1800, 2100, 2200, 2300, "2436 default"]
+  y-axis "tok/s" 900 --> 1250
+  bar [970, 1081, 1122, 1152, 1188]
+```
+
+```mermaid
+xychart-beta
+  title "GPU power while reading long prompts (W)"
+  x-axis "GPU ceiling (MHz)" [1800, 2100, 2200, 2300, "2436 default"]
+  y-axis "W" 0 --> 90
+  bar [37.2, 50.0, 57.2, 63.0, 82.8]
+```
+
+```mermaid
+xychart-beta
+  title "Board zone peak while reading long prompts (C); line = reset level"
+  x-axis "GPU ceiling (MHz)" [1800, 2100, 2200, 2300, "2436 default"]
+  y-axis "C" 60 --> 100
+  bar [73.4, 80.7, 86.3, 89.9, 95.0]
+  line [94.5, 94.5, 94.5, 94.5, 94.5]
+```
+
+```mermaid
+xychart-beta
+  title "Decode, LiveCodeBench, 2 streams (tok/s)"
+  x-axis "GPU ceiling (MHz)" [1400, 1800, 2200, "2436 default"]
+  y-axis "tok/s" 0 --> 45
+  bar [34.9, 36.5, 38.1, 38.2]
+```
+
+| Workload (Spark / spark2) | 1800 | 2100 | **2200** | 2300 | default |
+|---|---|---|---|---|---|
+| decode tok/s (Spark) | 36.5 | | **38.1** | | 38.2 |
+| decode GPU W (Spark) | 17.0 | | **24.2** | | 37.5 |
+| decode tok/s (spark2) | | 39.0 | **39.1** | 39.2 | |
+| decode GPU W (spark2) | | 20.4 | **22.4** | 24.6 | |
+| prefill tok/s, 32k | 1749 | 1902 | **1946** | 1982 | 2005 |
+| prefill tok/s, 128k | 970 | 1081 | **1122** | 1152 | 1188 |
+| prefill GPU W | 37.2 | 50.0 | **57.2** | 63.0 | 82.8 |
+| board z0 peak, prefill (C) | 73.4 | 80.7 | **86.3** | 89.9 | 95.0 |
+| LoRA 300 steps, s | 63.9 | | **57.8** | | 60.1 / 54.8 |
+| LoRA GPU W | 30.8 | | **47.3** | | 63.5 / 67.4 |
+
+### Jetson AGX Orin (decider)
+
+```mermaid
+xychart-beta
+  title "Decider requests/s vs GPU ceiling"
+  x-axis "GPU ceiling (MHz)" [714, 918, 1122, "1300 full"]
+  y-axis "req/s" 0 --> 1
+  bar [0.511, 0.647, 0.780, 0.886]
+```
+
+```mermaid
+xychart-beta
+  title "Orin board peak (C); line = critical"
+  x-axis "GPU ceiling (MHz)" [714, 918, 1122, "1300 full"]
+  y-axis "C" 60 --> 100
+  bar [75.3, 80.2, 83.6, 94.1]
+  line [94, 94, 94, 94]
+```
+
+### Jetson AGX Thor (worker)
+
+```mermaid
+xychart-beta
+  title "Worker decode tok/s (bar) and GPU rail W (line)"
+  x-axis "GPU ceiling (MHz)" [900, 1100, 1300, "1575 full"]
+  y-axis "tok/s or W" 0 --> 110
+  bar [83.2, 93.6, 95.0, 98.4]
+  line [24.3, 26.9, 28.1, 29.0]
+```
+
+Evidence: [`docs/evidence/2026-10-24-gpu-clock-ceiling-spark.md`](docs/evidence/2026-10-24-gpu-clock-ceiling-spark.md),
+[`docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md`](docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md).
 
 ## Configure and tune
 
@@ -105,7 +244,7 @@ heat-governor gpu-clock helper        # the root helper + sudoers line for GPU c
 | `sensors` | Every sensor separately over a window: min, mean, p95, max, seconds above a threshold. |
 | `unit` | Print a systemd user unit. |
 | `config overview\|path\|show\|init\|check` | The config file a running daemon re-reads. |
-| `gpu-clock overview\|status\|helper\|lock\|reset` | The GPU clock ceiling (root helper). |
+| `gpu-clock overview\|status\|helper\|lock\|reset\|hold\|release` | The GPU clock ceiling (root helper); `hold`/`release` declare the operator's ceiling (law). |
 | `whoami`, `learn`, `explain <path>`, `overview`, `doctor`, `cli overview` | Agent verbs. |
 
 Every command supports `--json`. Results go to stdout and errors/diagnostics

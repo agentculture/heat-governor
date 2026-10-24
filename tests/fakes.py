@@ -97,3 +97,85 @@ class FakeDocker:
 
 def container(cid: str, name: str, role: str | None, *, state="running", cap=False, nano=0):
     return Container(cid, name, state, role, cap, nano)
+
+
+class FakeSystemctl:
+    """In-memory ``systemctl --user``: ``units`` maps a unit name to its quota
+    (usec per second, None = no quota); a name not in it does not exist."""
+
+    def __init__(self, units: dict | None = None, *, inactive=(), ledger=None) -> None:
+        from heat_governor.units import UnitInfo
+
+        self._info = UnitInfo
+        self.units: dict[str, int | None] = dict(units or {})
+        self.inactive = set(inactive)
+        self.calls: list[tuple] = []
+        self.ledger_path = ledger  # when set: what was on disk at each set_quota
+        self.on_disk: list[dict] = []
+        self.usage: dict[str, int] = {}  # unit -> cumulative CPU usec (settable)
+        self.usage_reads = 0  # how often cpu_usage_usec was called
+
+    def show(self, unit: str):
+        self.calls.append(("show", unit))
+        if unit not in self.units:
+            return self._info(loaded=False, active=False, quota_usec=None)
+        return self._info(True, unit not in self.inactive, self.units[unit])
+
+    def set_quota(self, unit: str, percent: str | None) -> None:
+        from heat_governor.units import UnitMissing
+
+        self.calls.append(("set", unit, percent))
+        if self.ledger_path is not None:
+            import json
+
+            self.on_disk.append(json.loads(self.ledger_path.read_text()))
+        if unit not in self.units:
+            raise UnitMissing(f"Unit {unit} not found.")
+        self.units[unit] = None if percent is None else int(float(percent) * 10_000)
+
+    def cpu_usage_usec(self, unit: str) -> int | None:
+        self.usage_reads += 1
+        return self.usage.get(unit) if unit in self.units else None
+
+
+class FakeGpuClock:
+    """The GPU clock helper, in memory. ``hw`` is the ceiling the hardware shows
+    (what the helper's ``status`` reads back on a Jetson: devfreq max_freq);
+    ``visible=False`` is the DGX Spark (GB10), whose status shows no lock at all.
+    :meth:`hand_lock` is the operator's own ``sudo heat-governor-gpuclock lock``,
+    made behind the daemon's back."""
+
+    def __init__(self, *, hw_max: int = 1300, visible: bool = True, available: bool = True):
+        self.helper = "/fake/heat-governor-gpuclock"
+        self.available = available
+        self.reason = "ok" if available else "helper not installed"
+        self.ceiling_mhz: int | None = None
+        self.hw_max = hw_max
+        self.hw = hw_max
+        self.visible = visible
+        self.calls: list[tuple] = []
+        self.reads = 0
+        self.probes = 0
+
+    def probe(self) -> bool:
+        self.probes += 1
+        return self.available
+
+    def lock(self, mhz: int):
+        self.calls.append(("lock", mhz))
+        self.ceiling_mhz = mhz
+        self.hw = min(mhz, self.hw_max)
+        return True, str(mhz)
+
+    def reset(self):
+        self.calls.append(("reset",))
+        self.ceiling_mhz = None
+        self.hw = self.hw_max
+        return True, "reset"
+
+    def read_ceiling(self) -> int | None:
+        self.reads += 1
+        return self.hw if self.visible else None
+
+    def hand_lock(self, mhz: int) -> None:
+        self.hw = mhz

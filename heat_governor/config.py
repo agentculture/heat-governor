@@ -25,16 +25,35 @@ Layout::
     poll_s = 1.0
     listen = "127.0.0.1:9476"
     apply = true
+    gpu_ceiling_mhz = 2200        # optional: the operator's GPU ceiling -- law
 
     [[containers]]                # for containers started without labels
     name = "model-gear-vllm-primary"
     role = "serving"              # batch | serving
     cpu_cap = true
+
+    [[units]]                     # opt-in: CPUQuota on a systemd --user unit
+    name = "app.slice"            # .slice | .service | .scope
+    warm = 8                      # CPUs at each level (CPUQuota = cpus x 100%);
+    hot = 4                       # omit all three for the platform's default
+    critical = 2                  # (spark: 8 / 4 / 2, declared, unmeasured)
+    dry_run = true                # optional: log only, change nothing
+
+    # or, INSTEAD of the levels entry above (a unit may be listed only once),
+    # a feedback loop that learns the unit's effect:
+    # [[units]]
+    # name = "app.slice"
+    # mode = "adaptive"           # levels (default) | adaptive; no warm/hot/critical
+    # min_cpus = 1                # never cap below this
+    # engage = "warm"             # warm | hot | critical
+    # interval_s = 20             # one evaluation per interval (>= 5)
+    # target_rate_c_min = 0.0     # temperature rate to hold while engaged, C/min
 """
 
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,9 +96,16 @@ DAEMON_KEYS = {
     "fsync": bool,
     "reload": bool,
     "gpu_clock": bool,
+    "gpu_ceiling_mhz": int,
 }
 CONTAINER_KEYS = {"name", "role", "cpu_cap"}
-TOP_KEYS = {"platform", "profile", "daemon", "containers"}
+UNIT_LEVELS = ("warm", "hot", "critical")
+UNIT_MODES = ("levels", "adaptive")
+ADAPTIVE_KEYS = ("min_cpus", "engage", "interval_s", "target_rate_c_min")
+UNIT_KEYS = {"name", "dry_run", "mode", *UNIT_LEVELS, *ADAPTIVE_KEYS}
+# a unit name systemctl cannot read as an option: no leading "-", no spaces
+UNIT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.@\\-]*\.(slice|service|scope)")
+TOP_KEYS = {"platform", "profile", "daemon", "containers", "units"}
 
 
 class ConfigError(ValueError):
@@ -93,6 +119,21 @@ class ContainerRule:
     name: str
     role: str
     cpu_cap: bool = False
+
+
+@dataclass(frozen=True)
+class UnitRule:
+    """A systemd user unit to cap; ``bands`` are ``(level, cpus)`` pairs, empty =
+    the platform's ``unit_bands``."""
+
+    name: str
+    bands: tuple[tuple[str, float], ...] = ()
+    dry_run: bool = False  # log what would be done, change nothing (even with apply)
+    mode: str = "levels"  # levels: fixed CPUs per level; adaptive: the learning loop
+    min_cpus: float = 1.0  # adaptive: never cap below this
+    engage: str = "warm"  # adaptive: the level at which the loop engages
+    interval_s: float = 20.0  # adaptive: one evaluation per interval
+    target_rate_c_min: float = 0.0  # adaptive: temperature rate to hold, C per minute
 
 
 @dataclass
@@ -118,6 +159,22 @@ class Config:
         return [
             ContainerRule(c["name"], c["role"], bool(c.get("cpu_cap", False)))
             for c in self.data.get("containers", [])
+        ]
+
+    @property
+    def units(self) -> list[UnitRule]:
+        return [
+            UnitRule(
+                u["name"],
+                tuple((lv, float(u[lv])) for lv in UNIT_LEVELS if lv in u),
+                bool(u.get("dry_run", False)),
+                u.get("mode", "levels"),
+                float(u.get("min_cpus", 1.0)),
+                u.get("engage", "warm"),
+                float(u.get("interval_s", 20.0)),
+                float(u.get("target_rate_c_min", 0.0)),
+            )
+            for u in self.data.get("units", [])
         ]
 
 
@@ -243,6 +300,9 @@ def _validate_daemon(dmn: dict, problems: list[str]) -> None:
         problems.append("daemon.poll_s must be between 0.1 and 10 seconds")
     if isinstance(dmn.get("listen"), str) and ":" not in dmn["listen"]:
         problems.append("daemon.listen must be HOST:PORT")
+    ceiling = dmn.get("gpu_ceiling_mhz")
+    if _is_num(ceiling) and not 100 <= ceiling <= 5000:
+        problems.append("daemon.gpu_ceiling_mhz must be > 0, a whole MHz within 100-5000")
 
 
 def _validate_container(i: int, c: dict, seen: set[str], problems: list[str]) -> None:
@@ -273,6 +333,76 @@ def _validate_containers(conts: object, problems: list[str]) -> None:
             problems.append(f"containers[{i}] must be a table")
 
 
+def _validate_unit(i: int, u: dict, seen: set[str], problems: list[str]) -> None:
+    for k in u:
+        if k not in UNIT_KEYS:
+            problems.append(
+                f"units[{i}]: unknown key {k!r} (known: {', '.join(sorted(UNIT_KEYS))})"
+            )
+    name = u.get("name")
+    if not isinstance(name, str) or not UNIT_NAME.fullmatch(name):
+        problems.append(f"units[{i}]: name must be a unit name ending .slice, .service or .scope")
+    if "dry_run" in u and not isinstance(u["dry_run"], bool):
+        problems.append(f"units[{i}].dry_run must be true or false")
+    if isinstance(name, str) and name in seen:
+        problems.append(f"units[{i}]: {name!r} is listed twice")
+    elif isinstance(name, str):
+        seen.add(name)
+    mode = u.get("mode", "levels")
+    if mode not in UNIT_MODES:
+        problems.append(f"units[{i}].mode must be levels or adaptive")
+    elif mode == "adaptive":
+        _validate_adaptive(i, u, problems)
+    else:
+        _validate_levels(i, u, problems)
+
+
+def _validate_levels(i: int, u: dict, problems: list[str]) -> None:
+    for k in ADAPTIVE_KEYS:
+        if k in u:
+            problems.append(f"units[{i}].{k} is allowed only with mode = adaptive")
+    given = []
+    for lv in UNIT_LEVELS:
+        if lv not in u:
+            continue
+        if not _is_num(u[lv]):
+            problems.append(f"units[{i}].{lv} must be a number of CPUs")
+        elif u[lv] <= 0:
+            problems.append(f"units[{i}].{lv} must be > 0 CPUs")
+        else:
+            given.append((lv, u[lv]))
+    if any(b[1] > a[1] for a, b in zip(given, given[1:])):
+        problems.append(f"units[{i}]: the CPU count must not rise from warm to hot to critical")
+
+
+def _validate_adaptive(i: int, u: dict, problems: list[str]) -> None:
+    for lv in UNIT_LEVELS:
+        if lv in u:
+            problems.append(
+                f"units[{i}].{lv} is not allowed with mode = adaptive (the loop sizes the cap)"
+            )
+    if "min_cpus" in u and not (_is_num(u["min_cpus"]) and u["min_cpus"] > 0):
+        problems.append(f"units[{i}].min_cpus must be a number of CPUs > 0")
+    if "engage" in u and u["engage"] not in UNIT_LEVELS:
+        problems.append(f"units[{i}].engage must be warm, hot or critical")
+    if "interval_s" in u and not (_is_num(u["interval_s"]) and u["interval_s"] >= 5):
+        problems.append(f"units[{i}].interval_s must be a number of seconds >= 5")
+    if "target_rate_c_min" in u and not _is_num(u["target_rate_c_min"]):
+        problems.append(f"units[{i}].target_rate_c_min must be a number (C per minute)")
+
+
+def _validate_units(units: object, problems: list[str]) -> None:
+    if not isinstance(units, list):
+        problems.append("units must be an array of tables ([[units]])")
+        return
+    seen: set[str] = set()
+    for i, u in enumerate(units):
+        if isinstance(u, dict):
+            _validate_unit(i, u, seen, problems)
+        else:
+            problems.append(f"units[{i}] must be a table")
+
+
 def validate(data: dict) -> list[str]:
     """Every problem in the document, not just the first."""
     problems: list[str] = []
@@ -284,6 +414,7 @@ def validate(data: dict) -> list[str]:
     _validate_profile(_table(data, "profile", problems, "[profile] must be a table"), problems)
     _validate_daemon(_table(data, "daemon", problems, "[daemon] must be a table"), problems)
     _validate_containers(data.get("containers", []), problems)
+    _validate_units(data.get("units", []), problems)
     return problems
 
 
@@ -396,12 +527,39 @@ def template(profile: Profile) -> str:
         '# listen = "127.0.0.1:9476"',
         "# use_labels = true    # govern containers labelled heat-governor.role=...",
         "# gpu_clock = false    # true: lower the GPU clock ceiling per gpu_clock_bands",
+        "# gpu_ceiling_mhz = 2200  # the operator's GPU ceiling: law, applied even with",
+        "#                         # gpu_clock off; the daemon may go below it, never above",
         "",
         "# Containers started without labels:",
         "# [[containers]]",
         '# name = "model-gear-vllm-primary"',
         '# role = "serving"      # batch: duty-cycled + CPU cap; serving: never paused',
         "# cpu_cap = true        # serving only: allow CPU caps",
+        "",
+        "# systemd --user units to CPU-cap by level (off unless listed). Every change is",
+        "# `systemctl --user set-property --runtime` (a reboot drops it) and is undone on exit.",
+        "# CPUs per level; omit warm/hot/critical for the platform default"
+        + (
+            " ("
+            + " / ".join(f"{lv} {c:g}" for lv, c in profile.unit_bands)
+            + ", declared, unmeasured):"
+            if profile.unit_bands
+            else " (none on this platform: give the bands):"
+        ),
+        "# [[units]]",
+        '# name = "app.slice"     # interactive sessions run in app-*.scope under it',
+        "# hot = 4",
+        "# critical = 2",
+        "# Or let a feedback loop size the cap from what it measures: it cuts the unit's CPU",
+        "# while the temperature rises faster than the target, learns how much the rate falls",
+        "# per CPU removed (kept in <data_dir>/adaptive.json) and releases as it cools:",
+        "# [[units]]",
+        '# name = "app.slice"',
+        '# mode = "adaptive"      # levels (default) | adaptive; no warm/hot/critical here',
+        "# min_cpus = 1",
+        '# engage = "warm"        # warm | hot | critical',
+        "# interval_s = 20        # one evaluation per interval, >= 5",
+        "# target_rate_c_min = 0.0  # C per minute to hold while engaged (0 = flat)",
         "",
     ]
     return "\n".join(lines)

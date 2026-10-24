@@ -36,8 +36,9 @@ Commands
   heat-governor unit -- <flags>    Print a systemd user unit (writes nothing).
   heat-governor config <verb>      overview | path | show | init [--write] | check:
                                    the TOML file a running daemon re-reads (~2 s).
-  heat-governor gpu-clock <verb>   overview | status | helper | lock MHZ | reset:
-                                   the GPU clock ceiling (needs the root helper).
+  heat-governor gpu-clock <verb>   overview | status | helper | lock MHZ | reset |
+                                   hold MHZ | release: the GPU clock ceiling (root
+                                   helper); hold = the operator's ceiling, law.
   heat-governor whoami | learn | explain <path> | overview | doctor | cli overview
 
 Containers opt in by label: heat-governor.role=batch (duty-cycled, CPU-capped)

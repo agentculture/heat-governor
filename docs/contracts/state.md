@@ -30,8 +30,11 @@ directory (mount the directory, not the file: an atomic rename does not show thr
 | `concurrency_factor` | float | `1.0` cool, `0.5` warm, `0.0` hot/critical. Allowed in-flight = `max(1, floor(base × factor))` while admitted. |
 | `duty` | float | Fraction of each period batch containers are paused (0-1). |
 | `cpus` | int or null | CPU cap applied to governed containers; `null` = their own limit. |
-| `gpu_ceiling_mhz` | int or null | GPU clock ceiling the daemon set; `null` = none. |
+| `gpu_ceiling_mhz` | int or null | GPU clock ceiling the daemon set (its band, or the operator's); `null` = none. |
 | `gpu_clock` | str | `off`, or the control's status (`ok ...`, `helper not installed ...`). |
+| `gpu_operator_mhz`, `gpu_operator_source` | int or null, str or null | The operator's GPU ceiling in force (law) and where it comes from: `config` (`[daemon] gpu_ceiling_mhz`), `hold` (`gpu-clock hold`) or `observed` (a hand lock seen on a Jetson); `null` = none. See [`gpu-clock.md`](gpu-clock.md). |
+| `gpu_wanted_mhz` | int or null | The policy's band ceiling this tick while `gpu_clock` is on; `null` = it wants no ceiling, or `gpu_clock` is off. |
+| `gpu_held_by_operator` | bool | `true` when the policy wanted a ceiling above the operator's (including none): the operator's held, and this is what would have happened. Also in every per-tick record; `heat-governor sensors` counts the ticks (`gpu_held_by_operator_ticks`). |
 | `config`, `config_error` | str or null | The config file in force, and why the last edit was rejected (if it was). |
 | `temp_c` | float or null | Governing temperature: the hottest readable watched zone. `null` = sensor lost (level is then `hot`). |
 | `effective_c`, `rate_c_s` | float | Temperature plus the lookahead on its rise, and the rise rate. |
@@ -43,8 +46,9 @@ directory (mount the directory, not the file: an atomic rename does not show thr
 | `limits` | object | `warm_c`, `hot_c`, `crit_c` of the active profile. |
 | `applying` | bool | Whether the daemon changes containers (`--apply`) or only signals. |
 | `containers` | list | Governed containers: `name`, `role`, `paused_by_governor`, `cpus`. |
+| `units` | list | Configured systemd user units (`[[units]]`, empty when none): `name`, `mode` (`levels` or `adaptive`), `dry_run` (decisions logged only), `cpus` (the cap the daemon holds — for a dry-run unit, the cap it would hold; `null` = the unit's own quota), `use_cpus` (CPUs the unit used over the last measurement: each tick for `levels`, each evaluation for `adaptive`; `null` until measured or when its cgroup is unreadable), `missing` (`true` while the unit is not found or inactive and therefore skipped). Adaptive units also carry `gain` (learned C/s of temperature rate per CPU removed, `null` until learned) and `samples`. See [`user-units.md`](user-units.md). |
 
-The level, admission and temperatures are this tick's. Actuator results (`containers`, `gpu_ceiling_mhz`)
+The level, admission and temperatures are this tick's. Actuator results (`containers`, `units`, `gpu_ceiling_mhz`)
 are as of the previous tick: the daemon publishes before it touches docker or the GPU helper, so a slow or
 failing actuator can never delay the admission signal.
 
@@ -65,5 +69,6 @@ failing actuator can never delay the admission signal.
  "concurrency_factor":0.5,"duty":0.15,"cpus":8,"temp_c":89.5,"effective_c":89.9,"rate_c_s":0.8,
  "hottest_zone":"4:acpitz","reason":"rising","limits":{"warm_c":88.0,"hot_c":91.5,"crit_c":93.0},
  "applying":true,"containers":[{"name":"model-gear-vllm-primary","role":"serving",
- "paused_by_governor":false,"cpus":8}]}
+ "paused_by_governor":false,"cpus":8}],"units":[{"name":"app.slice","mode":"adaptive","dry_run":false,"cpus":8.0,"use_cpus":7.9,"missing":false,
+ "gain":0.004,"samples":5}]}
 ```
