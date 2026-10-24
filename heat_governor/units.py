@@ -205,10 +205,18 @@ def _shown(usec: int | None) -> str:
     return "none" if usec is None else f"{percent(usec)}%"
 
 
+def _quota_arg(usec: int | None) -> str | None:
+    return None if usec is None else percent(usec)
+
+
+DRY = "dry-run would "
+RETRY_S = 30.0  # how often a missing / failing unit or an unresolved cgroup is tried again
+
+
 class UnitCapper:
     """Holds one CPUQuota per configured user unit, ledger-first."""
 
-    RETRY_S = 30.0  # how often a missing / inactive unit is looked for again
+    RETRY_S = RETRY_S
 
     def __init__(
         self,
@@ -225,14 +233,19 @@ class UnitCapper:
         self.apply = apply
         self.clock = clock
         self.current: dict[str, float | None] = {}
-        self._missing: dict[str, float] = {}  # unit -> when to look again
+        self._retry_at: dict[str, float] = {}  # unit -> when to try again
+        self._missing: set[str] = set()  # not found / inactive
+        self._errors: dict[str, str] = {}  # unit -> the last systemctl error logged
         self.dry: set[str] = set()  # units configured dry_run = true: log only
+        self.would: dict[str, float] = {}  # dry-run: unit -> the cap it would hold
 
     def set_dry(self, units: set[str]) -> None:
         """Mark ``units`` dry-run. A unit whose mode flips forgets what it last
-        "set" (a dry-run cap was never made), so the next level is applied anew."""
+        "set" (a dry-run cap was never made), so the next level is applied anew;
+        a real cap it still holds is restored for real on that next change."""
         for unit in self.dry ^ units:
             self.current.pop(unit, None)
+            self.would.pop(unit, None)
         self.dry = set(units)
 
     def applies(self, unit: str) -> bool:
@@ -242,30 +255,66 @@ class UnitCapper:
     def missing_units(self) -> list[str]:
         return sorted(self._missing)
 
+    def _holds(self, unit: str) -> bool:
+        """Whether a restore of ``unit`` has anything to do."""
+        led = self.ledger
+        return unit in led.unit_quota or unit in led.unit_orphans or unit in self.would
+
     def set(self, unit: str, cpus: float | None) -> None:
         """``cpus=None`` restores the unit's own quota."""
         if self.current.get(unit, "unset") == cpus:
             return
-        if cpus is None and unit not in self.ledger.unit_quota:
+        if cpus is None and not self._holds(unit):
             self.current[unit] = None
             return
         now = self.clock()
-        if unit in self._missing and now < self._missing[unit]:
+        if now < self._retry_at.get(unit, now):
             return
-        prefix = "" if self.applies(unit) else "dry-run would "
         try:
-            if cpus is None:
-                self._restore(unit, prefix)
-            else:
-                self._cap(unit, cpus, prefix)
+            self._change(unit, cpus)
         except UnitMissing as exc:
-            if unit not in self._missing:
-                self.log(f"unit {unit}: {exc}; skipped (looked for again every {self.RETRY_S:g} s)")
-            self._missing[unit] = now + self.RETRY_S
+            self._missed(unit, exc, now)
             return
-        if self._missing.pop(unit, None) is not None:
-            self.log(f"unit {unit} is back: governing it")
+        except UnitError as exc:
+            self._failed(unit, exc, now)
+            return
+        self._answered(unit)
         self.current[unit] = cpus
+
+    def _missed(self, unit: str, exc: UnitError, now: float) -> None:
+        if unit not in self._missing:
+            self.log(f"unit {unit}: {exc}; skipped (looked for again every {self.RETRY_S:g} s)")
+        self._missing.add(unit)
+        self._retry_at[unit] = now + self.RETRY_S
+
+    def _failed(self, unit: str, exc: UnitError, now: float) -> None:
+        """Any other systemctl failure (no user bus, controller not delegated):
+        logged once per distinct message, then tried again every RETRY_S."""
+        if self._errors.get(unit) != str(exc):
+            self._errors[unit] = str(exc)
+            self.log(f"unit {unit}: {exc}; tried again every {self.RETRY_S:g} s")
+        self._retry_at[unit] = now + self.RETRY_S
+
+    def _answered(self, unit: str) -> None:
+        self._retry_at.pop(unit, None)
+        if unit in self._missing:
+            self._missing.discard(unit)
+            self.log(f"unit {unit} is back: governing it")
+        if self._errors.pop(unit, None) is not None:
+            self.log(f"unit {unit}: systemctl answers again: governing it")
+
+    def _change(self, unit: str, cpus: float | None) -> None:
+        if self.apply:
+            self._adopt_orphan(unit)
+        if not self.applies(unit):
+            if self.apply and unit in self.ledger.unit_quota:
+                self._restore(unit)  # a real cap made before the unit turned dry
+            self._dry_change(unit, cpus)
+            return
+        if cpus is not None:
+            self._cap(unit, cpus)
+        elif unit in self.ledger.unit_quota:
+            self._restore(unit)
 
     def _original(self, unit: str) -> int | None:
         """The unit's quota right now, read fresh (never a remembered value)."""
@@ -276,61 +325,121 @@ class UnitCapper:
             raise UnitMissing("inactive")
         return info.quota_usec
 
-    def _cap(self, unit: str, cpus: float, prefix: str) -> None:
+    def _adopt_orphan(self, unit: str) -> None:
+        """A unit that vanished while capped may load again with our ``--runtime``
+        drop-in still under /run: its orphaned original becomes the ledger's
+        original again (so it is restored, and never replaced by our own cap)."""
+        orphans = self.ledger.unit_orphans
+        if unit not in orphans:
+            return
+        if not self.systemctl.show(unit).loaded:
+            raise UnitMissing("not found")
+        self.ledger.unit_quota[unit] = orphans.pop(unit)
+        self.ledger.save()
+        self.log(f"unit {unit} is back: restoring the original it had before it vanished")
+
+    def _want(self, cpus: float, original: int | None) -> str:
+        want = round(cpus * 1_000_000)
+        if original is not None and original < want:
+            want = original  # never raise the unit's own, tighter quota
+        return percent(max(10_000, want))
+
+    def _cap(self, unit: str, cpus: float) -> None:
         if unit in self.ledger.unit_quota:
             original = self.ledger.unit_quota[unit]
         else:
             original = self._original(unit)
-            if self.applies(unit):
-                self.ledger.unit_quota[unit] = original
-                self.ledger.save()  # record BEFORE acting
-        want = round(cpus * 1_000_000)
-        if original is not None and original < want:
-            want = original  # never raise the unit's own, tighter quota
-        pct = percent(max(10_000, want))
-        if self.applies(unit):
-            self.systemctl.set_quota(unit, pct)
-        self.log(f"{prefix}cap unit {unit} CPUQuota={pct}% (cpus={cpus:g})")
+            self.ledger.unit_quota[unit] = original
+            self.ledger.save()  # record BEFORE acting
+        pct = self._want(cpus, original)
+        self.systemctl.set_quota(unit, pct)
+        self.log(f"cap unit {unit} CPUQuota={pct}% (cpus={cpus:g})")
 
-    def _restore(self, unit: str, prefix: str) -> None:
+    def _dry_change(self, unit: str, cpus: float | None) -> None:
+        """Dry-run: read the original fresh, log what would happen, write nothing."""
+        if cpus is None:
+            if unit in self.would:
+                original = self._original(unit)
+                del self.would[unit]
+                self.log(f"{DRY}restore unit {unit} CPUQuota={_shown(original)}")
+            return
+        pct = self._want(cpus, self._original(unit))
+        self.would[unit] = cpus
+        self.log(f"{DRY}cap unit {unit} CPUQuota={pct}% (cpus={cpus:g})")
+
+    def _restore(self, unit: str) -> None:
+        """Put the ledger's original back. A ledger entry means a real change was
+        made, so this is real whenever the daemon applies, whatever ``dry_run``
+        says. A unit gone meanwhile keeps its original as an orphan."""
         original = self.ledger.unit_quota[unit]
-        if self.applies(unit):
-            try:
-                self.systemctl.set_quota(unit, None if original is None else percent(original))
-            except UnitMissing:
-                self.ledger.unit_quota.pop(unit, None)
-                self.ledger.save()
-                self.log(f"unit {unit} is gone: nothing to restore")
-                return
-            self.ledger.unit_quota.pop(unit, None)
-            self.ledger.save()
-        self.log(f"{prefix}restore unit {unit} CPUQuota={_shown(original)}")
+        if not self.apply:
+            self.log(f"{DRY}restore unit {unit} CPUQuota={_shown(original)}")
+            return
+        try:
+            self.systemctl.set_quota(unit, _quota_arg(original))
+        except UnitMissing:
+            orphan(self.ledger, unit)
+            self.log(f"unit {unit} is gone: its original is kept until it appears again")
+            raise
+        self.ledger.unit_quota.pop(unit, None)
+        self.ledger.save()
+        self.log(f"restore unit {unit} CPUQuota={_shown(original)}")
 
     def release(self, units) -> None:
         """Restore ``units`` (they left the configuration, or the daemon stops)."""
         for unit in sorted(units):
             try:
                 if unit in self.ledger.unit_quota:
-                    self._restore(unit, "" if self.applies(unit) else "dry-run would ")
+                    self._restore(unit)
+                elif unit in self.would:
+                    self._dry_change(unit, None)
+            except UnitMissing:
+                pass  # logged by _restore; the original is kept as an orphan
             except UnitError as exc:
                 self.log(f"restore unit {unit} failed: {exc} (kept on record)")
             self.current.pop(unit, None)
-            self._missing.pop(unit, None)
+            self.would.pop(unit, None)
+            self._missing.discard(unit)
+            self._retry_at.pop(unit, None)
+            self._errors.pop(unit, None)
 
     def release_all(self) -> None:
-        self.release(set(self.ledger.unit_quota) | set(self.current))
+        self.release(set(self.ledger.unit_quota) | set(self.current) | set(self.would))
+
+
+def orphan(ledger, unit: str) -> None:
+    """Move ``unit``'s original from the ledger to its orphans (persisted): the
+    unit vanished before it could be restored, but our ``--runtime`` drop-in can
+    still apply when it loads again."""
+    ledger.unit_orphans[unit] = ledger.unit_quota.pop(unit)
+    ledger.save()
 
 
 def recover_units(ledger, systemctl: SystemctlLike, log: Log) -> None:
     """Restore every unit quota a previous (crashed) run left on record; drop an
-    entry once restored or when the unit is gone, keep it when the call failed."""
+    entry once restored, keep it when the call failed, and keep a missing unit's
+    original as an orphan. An orphan whose unit is loaded again is restored."""
     for unit, original in sorted(ledger.unit_quota.items()):
         try:
-            systemctl.set_quota(unit, None if original is None else percent(original))
+            systemctl.set_quota(unit, _quota_arg(original))
             log(f"recover: restored unit {unit} CPUQuota={_shown(original)}")
             del ledger.unit_quota[unit]
         except UnitMissing:
-            del ledger.unit_quota[unit]
-            log(f"recover: unit {unit} is gone")
+            orphan(ledger, unit)
+            log(f"recover: unit {unit} is gone: its original is kept until it appears again")
         except UnitError as exc:
             log(f"recover: unit {unit}: {exc} (kept on record)")
+    for unit, original in sorted(ledger.unit_orphans.items()):
+        _recover_orphan(ledger, systemctl, log, unit, original)
+
+
+def _recover_orphan(ledger, systemctl: SystemctlLike, log: Log, unit: str, original) -> None:
+    try:
+        if not systemctl.show(unit).loaded:
+            return
+        systemctl.set_quota(unit, _quota_arg(original))
+    except UnitError as exc:
+        log(f"recover: orphaned unit {unit}: {exc} (kept on record)")
+        return
+    del ledger.unit_orphans[unit]
+    log(f"recover: restored orphaned unit {unit} CPUQuota={_shown(original)}")

@@ -546,7 +546,7 @@ class Daemon:
             )
         if self.opts.apply:
             units = self.systemctl
-            if units is None and self.ledger.unit_quota:
+            if units is None and (self.ledger.unit_quota or self.ledger.unit_orphans):
                 units = self.systemctl = Systemctl()
             self.ledger.recover(
                 self.docker, self._log, gpu=self.gpuclock or GpuClock(), units=units

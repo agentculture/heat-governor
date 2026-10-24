@@ -187,7 +187,10 @@ def test_dry_run_reads_but_changes_nothing(tmp_path: Path) -> None:
     cap.set("app.slice", None)
     assert [c for c in sc.calls if c[0] == "set"] == []
     assert led.unit_quota == {}
-    assert logs == ["dry-run would cap unit app.slice CPUQuota=400% (cpus=4)"]
+    assert logs == [
+        "dry-run would cap unit app.slice CPUQuota=400% (cpus=4)",
+        "dry-run would restore unit app.slice CPUQuota=none",
+    ]
 
 
 def test_a_dry_run_unit_changes_nothing_even_with_apply(tmp_path: Path) -> None:
@@ -226,13 +229,14 @@ def test_inactive_unit_counts_as_missing(tmp_path: Path) -> None:
     assert "inactive" in logs[0]
 
 
-def test_a_unit_gone_before_restore_drops_its_entry(tmp_path: Path) -> None:
+def test_a_unit_gone_before_restore_moves_its_entry_to_the_orphans(tmp_path: Path) -> None:
     cap, sc, led, logs, _ = _capper(tmp_path, {"x.scope": None})
     cap.set("x.scope", 4.0)
     del sc.units["x.scope"]
     cap.set("x.scope", None)
     assert led.unit_quota == {}
-    assert "gone" in logs[-1]
+    assert led.unit_orphans == {"x.scope": None}
+    assert any("is gone" in m for m in logs)
 
 
 def test_recover_restores_what_a_crashed_run_left(tmp_path: Path) -> None:
@@ -244,6 +248,7 @@ def test_recover_restores_what_a_crashed_run_left(tmp_path: Path) -> None:
     Ledger(tmp_path / "l.json").recover(None, logs.append, units=sc)
     assert sc.units == {"app.slice": None, "y.slice": 3_000_000}
     assert Ledger(tmp_path / "l.json").unit_quota == {}
+    assert Ledger(tmp_path / "l.json").unit_orphans == {"gone.scope": None}
 
 
 def test_recover_keeps_a_failed_restore_on_record(tmp_path: Path) -> None:

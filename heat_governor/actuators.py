@@ -46,9 +46,15 @@ def restore_value(nano: int) -> int:
     return nano if nano > 0 else (os.cpu_count() or 1) * 1_000_000_000
 
 
+def _quotas(raw) -> dict[str, int | None]:
+    return {k: None if v is None else int(v) for k, v in (raw or {}).items()}
+
+
 class Ledger:
     """``{"paused": [ids], "nano_cpus": {id: original}, "gpu_locked": bool,
-    "unit_quota": {unit: original usec per s, or null for none}}``, written atomically."""
+    "unit_quota": {unit: original usec per s, or null for none},
+    "unit_orphans": {unit: original}}`` (originals of units that vanished before
+    they could be restored), written atomically."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -56,6 +62,7 @@ class Ledger:
         self.nano_cpus: dict[str, int] = {}
         self.gpu_locked = False
         self.unit_quota: dict[str, int | None] = {}
+        self.unit_orphans: dict[str, int | None] = {}
         self._lock = threading.Lock()
         self._load()
 
@@ -67,9 +74,8 @@ class Ledger:
         self.paused = set(data.get("paused", []))
         self.nano_cpus = {k: int(v) for k, v in (data.get("nano_cpus") or {}).items()}
         self.gpu_locked = bool(data.get("gpu_locked", False))
-        self.unit_quota = {
-            k: None if v is None else int(v) for k, v in (data.get("unit_quota") or {}).items()
-        }
+        self.unit_quota = _quotas(data.get("unit_quota"))
+        self.unit_orphans = _quotas(data.get("unit_orphans"))
 
     def save(self) -> None:
         with self._lock:
@@ -82,6 +88,7 @@ class Ledger:
                         "nano_cpus": self.nano_cpus,
                         "gpu_locked": self.gpu_locked,
                         "unit_quota": self.unit_quota,
+                        "unit_orphans": self.unit_orphans,
                     }
                 )
             )
@@ -101,7 +108,7 @@ class Ledger:
             # a failed restore keeps the original limit on record for the next try
             self._recover_paused(docker, log)
             self._recover_caps(docker, log)
-        if units is not None and self.unit_quota:
+        if units is not None and (self.unit_quota or self.unit_orphans):
             from heat_governor.units import recover_units
 
             recover_units(self, units, log)
