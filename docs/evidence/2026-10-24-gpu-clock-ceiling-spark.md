@@ -75,6 +75,24 @@ the default clock, long prefill took the board zone to 95.0 C, the level at
 which the Spark hard-resets. The depth-0 cells are excluded: the first setting
 started cold.
 
+### Between 2100 and 2300 (spark2, same session)
+
+Measured after the decision, to check the neighbours. Same prefill matrix,
+then the decode load (LiveCodeBench, temperature 1.0, thinking on, 2 streams,
+10 min per setting). The repeated 2200 run matches the first one within 0.3%
+(1946 / 1122 against 1941 / 1121 tok/s), so the two sessions compare.
+
+| Ceiling | pp tok/s 32k | pp tok/s 128k | prefill GPU W | board z0 max (C) | decode tok/s | decode GPU W |
+|---|---|---|---|---|---|---|
+| 2100 | 1902 | 1081 | 50.0 | 80.7 | 39.0 | 20.4 |
+| 2200 | 1946 | 1122 | 57.2 | 86.3 | 39.1 | 22.4 |
+| 2300 | 1982 | 1152 | 63.0 | 89.9 | 39.2 | 24.6 |
+
+Each 100 MHz moves prefill by 1.5-2.5%, prefill power by 6-7 W and the
+board peak by 4-5 C. Decode stays flat. 2300 recovers half of the prefill
+loss but peaks at 89.9 C, about 4.5 C from the reset level, against about 8 C
+at 2200. The operator kept 2200.
+
 ## Fine-tuning (the Spark)
 
 The `unsloth-cli` LoRA ran on LiquidAI/LFM2.5-1.2B-Instruct, the `hand` base,
