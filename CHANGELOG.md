@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-10-24
+
+### Added
+
+- User-unit CPU quota (opt-in): `[[units]]` in the config names systemd user units (for example `app.slice`, where interactive terminal sessions and their test runs live) to cap by level with `systemctl --user set-property --runtime` (no root; a reboot drops it). Optional warm / hot / critical CPU counts per unit, else the platform default (spark 8 / 4 / 2 CPUs, declared, unmeasured; none elsewhere). The unit's original quota is read fresh and written to the ledger (`unit_quota`) before the first change, restored on exit, on removal from the config and by the next start's recovery; a band never raises a tighter original; dry-run logs only; a missing or inactive unit is reported once and retried every 30 s. The state document gains `units` (name, cpus, missing). Contract: docs/contracts/user-units.md.
+
+### Fixed
+
+- A container's original CPU limit is read with a fresh `docker inspect` right before the first cap, never taken from the discovery snapshot: right after a restore that snapshot still showed the previous cap, which then became the recorded original (DGX Spark 2026-10-23: model-gear-vllm-primary held at 12 CPUs for ~27 h, across a reboot). No cap is made when the limit cannot be read.
+- An original of no limit (NanoCpus 0) survives a restore -> cap cycle as 0 (logged `cpus=unlimited`) instead of turning into every host CPU; on exit a failed restore of a container that left keeps its ledger entry.
+
 ## [0.12.0] - 2026-10-23
 
 ### Added

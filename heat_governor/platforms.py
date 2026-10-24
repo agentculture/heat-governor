@@ -68,6 +68,9 @@ class Profile:
     # gpu-thermal zone is already watched). Whichever input is closer to its own
     # limit governs.
     gpu_temp_limits: "Limits | None" = None
+    # CPU cap for configured systemd user units ([[units]]) per level: (level, cpus)
+    # for any of warm / hot / critical. Empty = a unit is capped only by its own bands.
+    unit_bands: tuple[tuple[str, float], ...] = ()
     lookahead_s: float = 1.5  # effective temp = temp + lookahead * rising rate
     rate_window_s: float = 3.0
     ramp_s: float = 60.0  # a CPU cap rises one band per ramp_s; drops are immediate
@@ -90,6 +93,8 @@ SPARK = Profile(
     gpu_clock_bands=((90.0, 2200), (91.5, 1800), (93.0, 1400)),  # declared, unmeasured
     # GB10 reports ~21 C of headroom (T.Limit) at 73 C: its own limit is near 94 C.
     gpu_temp_limits=Limits(warm_c=82.0, hot_c=87.0, crit_c=91.0),  # declared, unmeasured
+    # of 20 CPUs, for the operator's own sessions (app.slice): declared, unmeasured
+    unit_bands=(("warm", 8.0), ("hot", 4.0), ("critical", 2.0)),
     lookahead_s=0.5,
     rate_window_s=2.0,
     gpu="nvidia-smi",

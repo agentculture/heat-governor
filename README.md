@@ -65,6 +65,12 @@ CPU-capped) or `heat-governor.role=serving` (never paused; CPU-capped only
 with `heat-governor.cpu-cap=true`). Unlabelled containers are left alone.
 The daemon only ever undoes a pause it made itself.
 
+Opt-in, it also caps the CPU quota of the operator's own systemd **user**
+units by level, for example `app.slice`, where interactive terminal sessions
+and their test runs live (`[[units]]` in the config; every change is
+`systemctl --user set-property --runtime`, so a reboot drops it; contract in
+[`docs/contracts/user-units.md`](docs/contracts/user-units.md)).
+
 With the root helper installed and `gpu_clock = true`, it also lowers the GPU
 clock ceiling per band (`nvidia-smi -lgc` on the Spark, devfreq `max_freq` on
 the Jetsons). It does not touch power modes or fans.

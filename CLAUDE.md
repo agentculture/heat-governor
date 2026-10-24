@@ -25,6 +25,7 @@ files, and a CI/deploy pipeline. It is a sibling to
 | Platform profiles: Spark (measured), Thor + Orin (declared), generic (`platforms.py`) | Implemented |
 | Pure controller: levels, lookahead, hysteresis, duty, CPU ramp, sensor loss (`policy.py`) | Implemented |
 | Actuators: duty-cycle pause + CPU caps over the docker socket, own-pause ledger (`actuators.py`, `docker.py`) | Implemented, unit-tested; not yet run with `--apply` on a real window |
+| User-unit CPU quota (`[[units]]`, e.g. `app.slice`) via `systemctl --user set-property --runtime` (`units.py`) | Implemented, unit-tested with a fake; opt-in; Spark bands declared, unmeasured |
 | Admission signal: state file, `GET /state`, client `read`/`wait`/`Gate` (`state.py`, `client.py`) | Implemented |
 | Records, reboot report, trace replay (`recorder.py`; `report`, `replay`) | Implemented |
 | Live validation on a batch window (duty vs peak temperature vs throughput) | (planned) |
@@ -37,7 +38,8 @@ contract) and `docs/integration.md` (how lobes, sparkrun and mjolnir use it) bef
 
 ### Working on the governing domain
 
-- `run --apply` pauses and CPU-caps real containers, and anything that writes
+- `run --apply` pauses and CPU-caps real containers (and, when the config lists
+  `[[units]]`, sets a CPUQuota on real systemd user units), and anything that writes
   cpufreq / fan / CPU-hotplug controls changes the **live machine**, not the repo.
   Don't run it without the user's go-ahead, and keep tests off the real
   `/sys` (point code at a configurable root and use `tmp_path` fixtures).

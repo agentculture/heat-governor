@@ -97,3 +97,36 @@ class FakeDocker:
 
 def container(cid: str, name: str, role: str | None, *, state="running", cap=False, nano=0):
     return Container(cid, name, state, role, cap, nano)
+
+
+class FakeSystemctl:
+    """In-memory ``systemctl --user``: ``units`` maps a unit name to its quota
+    (usec per second, None = no quota); a name not in it does not exist."""
+
+    def __init__(self, units: dict | None = None, *, inactive=(), ledger=None) -> None:
+        from heat_governor.units import UnitInfo
+
+        self._info = UnitInfo
+        self.units: dict[str, int | None] = dict(units or {})
+        self.inactive = set(inactive)
+        self.calls: list[tuple] = []
+        self.ledger_path = ledger  # when set: what was on disk at each set_quota
+        self.on_disk: list[dict] = []
+
+    def show(self, unit: str):
+        self.calls.append(("show", unit))
+        if unit not in self.units:
+            return self._info(loaded=False, active=False, quota_usec=None)
+        return self._info(True, unit not in self.inactive, self.units[unit])
+
+    def set_quota(self, unit: str, percent: str | None) -> None:
+        from heat_governor.units import UnitMissing
+
+        self.calls.append(("set", unit, percent))
+        if self.ledger_path is not None:
+            import json
+
+            self.on_disk.append(json.loads(self.ledger_path.read_text()))
+        if unit not in self.units:
+            raise UnitMissing(f"Unit {unit} not found.")
+        self.units[unit] = None if percent is None else int(float(percent) * 10_000)

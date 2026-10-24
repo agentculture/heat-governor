@@ -10,7 +10,10 @@ Rules every actuator here keeps:
 * **Crash safety.** Every pause and every first CPU change is written to a
   ledger file *before* it is made. A restarted governor calls :meth:`Ledger.recover`
   and undoes exactly what the ledger says it did: unpause its own pauses,
-  restore the original ``NanoCpus``.
+  restore the original ``NanoCpus`` (and user-unit quotas, :mod:`heat_governor.units`).
+* **The original is read fresh.** The limit recorded as a container's original
+  comes from a ``docker inspect`` made right before the first cap, never from the
+  discovery snapshot, which can still show a cap this process just removed.
 * **Dry run** (``apply=False``) logs what it would do and changes nothing.
 """
 
@@ -44,13 +47,15 @@ def restore_value(nano: int) -> int:
 
 
 class Ledger:
-    """``{"paused": [ids], "nano_cpus": {id: original}}``, written atomically."""
+    """``{"paused": [ids], "nano_cpus": {id: original}, "gpu_locked": bool,
+    "unit_quota": {unit: original usec per s, or null for none}}``, written atomically."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self.paused: set[str] = set()
         self.nano_cpus: dict[str, int] = {}
         self.gpu_locked = False
+        self.unit_quota: dict[str, int | None] = {}
         self._lock = threading.Lock()
         self._load()
 
@@ -62,6 +67,9 @@ class Ledger:
         self.paused = set(data.get("paused", []))
         self.nano_cpus = {k: int(v) for k, v in (data.get("nano_cpus") or {}).items()}
         self.gpu_locked = bool(data.get("gpu_locked", False))
+        self.unit_quota = {
+            k: None if v is None else int(v) for k, v in (data.get("unit_quota") or {}).items()
+        }
 
     def save(self) -> None:
         with self._lock:
@@ -73,6 +81,7 @@ class Ledger:
                         "paused": sorted(self.paused),
                         "nano_cpus": self.nano_cpus,
                         "gpu_locked": self.gpu_locked,
+                        "unit_quota": self.unit_quota,
                     }
                 )
             )
@@ -80,8 +89,9 @@ class Ledger:
                 os.fsync(fh.fileno())
             os.replace(tmp, self.path)
 
-    def recover(self, docker: DockerLike | None, log: Log, *, gpu=None) -> None:
-        """Undo what a previous (crashed) run left behind -- only its own actions."""
+    def recover(self, docker: DockerLike | None, log: Log, *, gpu=None, units=None) -> None:
+        """Undo what a previous (crashed) run left behind -- only its own actions.
+        ``units`` is a :class:`heat_governor.units.SystemctlLike`."""
         if self.gpu_locked and gpu is not None:
             ok, out = gpu.reset()
             log(f"recover: gpu ceiling {'removed' if ok else 'reset FAILED: ' + out}")
@@ -91,6 +101,10 @@ class Ledger:
             # a failed restore keeps the original limit on record for the next try
             self._recover_paused(docker, log)
             self._recover_caps(docker, log)
+        if units is not None and self.unit_quota:
+            from heat_governor.units import recover_units
+
+            recover_units(self, units, log)
         self.save()
 
     def _recover_paused(self, docker: DockerLike, log: Log) -> None:

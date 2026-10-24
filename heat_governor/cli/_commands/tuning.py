@@ -40,6 +40,7 @@ def cmd_config_overview(args: argparse.Namespace) -> None:
         try:
             cfg = cfgmod.load(path)
             doc |= {"valid": True, "platform": cfg.platform, "containers": len(cfg.containers)}
+            doc["units"] = [u.name for u in cfg.units]
             doc["profile_keys"] = sorted(cfg.profile)
             doc["daemon_keys"] = sorted(cfg.daemon)
         except cfgmod.ConfigError as exc:
@@ -54,7 +55,9 @@ def cmd_config_overview(args: argparse.Namespace) -> None:
         text = (
             f"{path}: valid; platform {doc['platform'] or '(detected)'}; overrides "
             f"{', '.join(doc['profile_keys']) or 'none'}; daemon "
-            f"{', '.join(doc['daemon_keys']) or 'defaults'}; {doc['containers']} container rule(s)"
+            f"{', '.join(doc['daemon_keys']) or 'defaults'}; "
+            f"{doc['containers']} container rule(s); "
+            f"user units {', '.join(doc['units']) or 'none'}"
         )
     else:
         text = f"{path}: INVALID\n" + "\n".join(f"  - {p}" for p in doc["problems"])
@@ -76,6 +79,7 @@ def cmd_config_show(args: argparse.Namespace) -> None:
         "profile": _profile_dict(prof),
         "daemon": cfg.daemon,
         "containers": [c.__dict__ for c in cfg.containers],
+        "units": [{"name": u.name, "bands": dict(u.bands)} for u in cfg.units],
     }
     if args.json:
         emit_result(doc, json_mode=True)

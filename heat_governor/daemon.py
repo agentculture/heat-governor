@@ -8,6 +8,9 @@ Which containers it touches:
 * plus any the operator names with ``--batch`` / ``--serving`` (for containers
   started without labels). Everything else is left alone.
 
+And, only when the config lists them (``[[units]]``), systemd user units such
+as ``app.slice``: a CPUQuota by level (:mod:`heat_governor.units`).
+
 Without ``apply`` the loop still senses, publishes the admission signal and
 records -- all harmless -- but changes no container (it logs what it would do).
 """
@@ -25,17 +28,18 @@ from typing import Callable
 
 from heat_governor import __version__, platforms
 from heat_governor.actuators import CpuCapper, DutyCycler, Ledger
-from heat_governor.config import Config, ConfigError, ContainerRule
+from heat_governor.config import Config, ConfigError, ContainerRule, UnitRule
 from heat_governor.config import changed as config_changed
 from heat_governor.config import diff as config_diff
 from heat_governor.config import load as load_config
 from heat_governor.docker import Container, Docker, DockerError
 from heat_governor.gpuclock import GpuClock
 from heat_governor.platforms import Profile
-from heat_governor.policy import Controller, Decision
+from heat_governor.policy import Controller, Decision, unit_cpus
 from heat_governor.recorder import Recorder, boot_id
 from heat_governor.sense import Reading, Sensor
 from heat_governor.state import SCHEMA, StateServer, write_state
+from heat_governor.units import Systemctl, SystemctlLike, UnitCapper, containing
 
 
 @dataclass
@@ -51,6 +55,7 @@ class Options:
     use_labels: bool = True
     discover_every_s: float = 5.0
     containers: tuple[ContainerRule, ...] = ()  # from the config file
+    units: tuple[UnitRule, ...] = ()  # systemd user units to CPU-cap (config [[units]])
     gpu_clock: bool = False  # lower the GPU clock ceiling per gpu_clock_bands
     platform: str | None = None  # explicit --platform (else config, else detected)
     config: Config | None = None  # re-read while running when it changes
@@ -75,6 +80,7 @@ class Daemon:
         sensor: Sensor | None = None,
         docker: Docker | None = None,
         gpuclock: GpuClock | None = None,
+        systemctl: SystemctlLike | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self.profile = profile
@@ -115,6 +121,11 @@ class Daemon:
         self._reload_at = 0.0
         self._gpu_retry_at = 0.0
         self.config_error: str | None = None
+        self.systemctl = systemctl
+        self.unit_capper: UnitCapper | None = None
+        self._unbanded: set[str] = set()
+        if opts.units:
+            self._ensure_unit_capper()
 
     # -- logging: to the log sink and into the record
     def _log(self, msg: str) -> None:
@@ -170,6 +181,47 @@ class Daemon:
     def capped(self) -> list[Container]:
         return [c for c in self.containers.values() if c.role == "batch" or c.cpu_cap]
 
+    # -- systemd user units
+    def _ensure_unit_capper(self) -> UnitCapper:
+        if self.unit_capper is None:
+            if self.systemctl is None:
+                self.systemctl = Systemctl()
+            self.unit_capper = UnitCapper(
+                self.systemctl, self.ledger, self._log, apply=self.opts.apply
+            )
+        return self.unit_capper
+
+    def unit_bands(self, rule: UnitRule) -> tuple[tuple[str, float], ...]:
+        """A unit's own bands replace the platform default entirely."""
+        bands = rule.bands or self.profile.unit_bands
+        if not bands and rule.name not in self._unbanded:
+            self._unbanded.add(rule.name)
+            self._log(
+                f"unit {rule.name}: no bands and platform {self.profile.name} declares none: "
+                "never capped (give warm/hot/critical in [[units]])"
+            )
+        return bands
+
+    def _set_units(self, units: tuple[UnitRule, ...]) -> None:
+        old = {u.name for u in self.opts.units}
+        gone = old - {u.name for u in units}
+        self.opts.units = units
+        if gone and self.unit_capper:
+            self.unit_capper.release(gone)
+        if units:
+            self._ensure_unit_capper()
+            if {u.name for u in units} != old:
+                self._note_self_inside()
+        self._unbanded.clear()  # re-report an unbanded unit after a reload
+
+    def _note_self_inside(self, cgroup_file: Path = Path("/proc/self/cgroup")) -> None:
+        for name in containing([u.name for u in self.opts.units], cgroup_file):
+            self._log(
+                f"note: heat-governor itself runs inside {name}, so that unit's cap bounds it "
+                "too; it needs little CPU, but under heavy contention its share follows "
+                "CPUWeight (e.g. CPUWeight=1000 on heat-governor.service)"
+            )
+
     # -- configuration reload
     def maybe_reload(self, now: float) -> None:
         cfg = self.opts.config
@@ -221,6 +273,7 @@ class Daemon:
         if "gpu_clock" in d and "gpu_clock" not in self.opts.cli_set:
             self.set_gpu_clock(bool(d["gpu_clock"]))
         self.opts.containers = tuple(cfg.containers)
+        self._set_units(tuple(cfg.units))
         self._discovered_at = 0.0  # re-discover on the next tick
 
     RESTART_ONLY = ("apply", "listen", "state", "data_dir", "record", "fsync", "reload")
@@ -341,6 +394,12 @@ class Daemon:
                     lambda c=c: self.capper.set(c, d.cpus, observed_at=self._observed_at),
                 )
         self._fenced("gpu ceiling", lambda: self._gpu(d.gpu_mhz, now))
+        if self.unit_capper:
+            for rule in self.opts.units:
+                cpus = unit_cpus(d.level, self.unit_bands(rule))
+                self._fenced(
+                    f"unit {rule.name}", lambda n=rule.name, c=cpus: self.unit_capper.set(n, c)
+                )
 
     def _fenced(self, what: str, fn) -> None:
         try:
@@ -394,6 +453,16 @@ class Daemon:
                 }
                 for c in self.containers.values()
             ],
+            "units": [
+                {
+                    "name": u.name,
+                    "cpus": self.unit_capper.current.get(u.name) if self.unit_capper else None,
+                    "missing": bool(
+                        self.unit_capper and u.name in self.unit_capper.missing_units()
+                    ),
+                }
+                for u in self.opts.units
+            ],
         }
 
     # -- lifecycle
@@ -411,10 +480,17 @@ class Daemon:
                 }
             )
         if self.opts.apply:
-            self.ledger.recover(self.docker, self._log, gpu=self.gpuclock or GpuClock())
+            units = self.systemctl
+            if units is None and self.ledger.unit_quota:
+                units = self.systemctl = Systemctl()
+            self.ledger.recover(
+                self.docker, self._log, gpu=self.gpuclock or GpuClock(), units=units
+            )
         if self.opts.gpu_clock and self.gpuclock:
             self.gpuclock.probe()
             self._log(f"gpu clock control: {self.gpuclock.reason}")
+        if self.opts.units:
+            self._note_self_inside()
         if self.cycler:
             self.cycler.start()
         if self.server:
@@ -430,10 +506,12 @@ class Daemon:
             self.cycler.stop()
         if self.capper:
             self.capper.release_all(self.containers)
+        if self.unit_capper:
+            self.unit_capper.release_all()
         self._release_gpu("stop")
         if self.server:
             self.server.stop()
-        self._log("stop: own pauses released, CPU limits and GPU ceiling restored")
+        self._log("stop: own pauses released, CPU limits, unit quotas and GPU ceiling restored")
         if self.recorder:
             self.recorder.close()
 

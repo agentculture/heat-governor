@@ -70,6 +70,7 @@ def _profile_dict(prof: platforms.Profile) -> dict[str, object]:
         "duty_curve": [list(x) for x in prof.duty_curve],
         "cpu_bands": [list(x) for x in prof.cpu_bands],
         "gpu_clock_bands": [list(x) for x in prof.gpu_clock_bands],
+        "unit_bands": dict(prof.unit_bands),
         "concurrency": dict(zip(("cool", "warm", "hot", "critical"), prof.concurrency)),
         "lookahead_s": prof.lookahead_s,
         "ramp_s": prof.ramp_s,
@@ -211,6 +212,7 @@ def _run_options(args: argparse.Namespace, cfg):
         use_labels=not args.no_labels and bool(dcfg.get("use_labels", True)),
         discover_every_s=float(dcfg.get("discover_every_s", 5.0)),
         containers=tuple(cfg.containers),
+        units=tuple(cfg.units),
         gpu_clock=bool(gpu_clock),
         platform=getattr(args, "platform", None),
         config=cfg if (cfg.path and dcfg.get("reload", True)) else None,
@@ -222,6 +224,8 @@ def _run_options(args: argparse.Namespace, cfg):
 
 
 def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
+    from heat_governor.policy import unit_cpus
+
     if d.gpuclock and opts.gpu_clock:
         d.gpuclock.probe()
     d.discover()
@@ -229,6 +233,9 @@ def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
     doc = {"dry_run": not opts.apply, "state": str(opts.state_path), **dec.as_dict()}
     doc["config"] = str(cfg.path) if cfg.path and cfg.mtime else None
     doc["containers"] = [{"name": c.name, "role": c.role} for c in d.containers.values()]
+    doc["units"] = [
+        {"name": u.name, "cpus": unit_cpus(dec.level, d.unit_bands(u))} for u in opts.units
+    ]
     emit_result(doc if args.json else _decision_text(doc), json_mode=args.json)
 
 
@@ -261,6 +268,13 @@ def _decision_text(doc: dict) -> str:
         f"temp={doc['temp_c']} eff={doc['effective_c']}\n"
         f"config: {doc.get('config') or 'none (built-in profile)'}\n"
         f"governed containers: {gov}\n"
+        + (
+            "user units: "
+            + ", ".join(f"{u['name']}(cpus={u['cpus']})" for u in doc["units"])
+            + "\n"
+            if doc.get("units")
+            else ""
+        )
         + (">> dry run: nothing was changed; --apply to govern" if doc.get("dry_run") else "")
     )
 
