@@ -36,6 +36,7 @@ Layout::
     warm = 8                      # CPUs at each level (CPUQuota = cpus x 100%);
     hot = 4                       # omit all three for the platform's default
     critical = 2                  # (spark: 8 / 4 / 2, declared, unmeasured)
+    dry_run = true                # optional: log only, change nothing
 """
 
 from __future__ import annotations
@@ -87,7 +88,7 @@ DAEMON_KEYS = {
 }
 CONTAINER_KEYS = {"name", "role", "cpu_cap"}
 UNIT_LEVELS = ("warm", "hot", "critical")
-UNIT_KEYS = {"name", *UNIT_LEVELS}
+UNIT_KEYS = {"name", "dry_run", *UNIT_LEVELS}
 # a unit name systemctl cannot read as an option: no leading "-", no spaces
 UNIT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.@\\-]*\.(slice|service|scope)")
 TOP_KEYS = {"platform", "profile", "daemon", "containers", "units"}
@@ -113,6 +114,7 @@ class UnitRule:
 
     name: str
     bands: tuple[tuple[str, float], ...] = ()
+    dry_run: bool = False  # log what would be done, change nothing (even with apply)
 
 
 @dataclass
@@ -143,7 +145,11 @@ class Config:
     @property
     def units(self) -> list[UnitRule]:
         return [
-            UnitRule(u["name"], tuple((lv, float(u[lv])) for lv in UNIT_LEVELS if lv in u))
+            UnitRule(
+                u["name"],
+                tuple((lv, float(u[lv])) for lv in UNIT_LEVELS if lv in u),
+                bool(u.get("dry_run", False)),
+            )
             for u in self.data.get("units", [])
         ]
 
@@ -309,6 +315,8 @@ def _validate_unit(i: int, u: dict, seen: set[str], problems: list[str]) -> None
     name = u.get("name")
     if not isinstance(name, str) or not UNIT_NAME.fullmatch(name):
         problems.append(f"units[{i}]: name must be a unit name ending .slice, .service or .scope")
+    if "dry_run" in u and not isinstance(u["dry_run"], bool):
+        problems.append(f"units[{i}].dry_run must be true or false")
     elif name in seen:
         problems.append(f"units[{i}]: {name!r} is listed twice")
     else:

@@ -169,6 +169,18 @@ class UnitCapper:
         self.clock = clock
         self.current: dict[str, float | None] = {}
         self._missing: dict[str, float] = {}  # unit -> when to look again
+        self.dry: set[str] = set()  # units configured dry_run = true: log only
+
+    def set_dry(self, units: set[str]) -> None:
+        """Mark ``units`` dry-run. A unit whose mode flips forgets what it last
+        "set" (a dry-run cap was never made), so the next level is applied anew."""
+        for unit in self.dry ^ units:
+            self.current.pop(unit, None)
+        self.dry = set(units)
+
+    def applies(self, unit: str) -> bool:
+        """Whether a change to ``unit`` is made (else logged "dry-run would ...")."""
+        return self.apply and unit not in self.dry
 
     def missing_units(self) -> list[str]:
         return sorted(self._missing)
@@ -183,7 +195,7 @@ class UnitCapper:
         now = self.clock()
         if unit in self._missing and now < self._missing[unit]:
             return
-        prefix = "" if self.apply else "dry-run would "
+        prefix = "" if self.applies(unit) else "dry-run would "
         try:
             if cpus is None:
                 self._restore(unit, prefix)
@@ -212,20 +224,20 @@ class UnitCapper:
             original = self.ledger.unit_quota[unit]
         else:
             original = self._original(unit)
-            if self.apply:
+            if self.applies(unit):
                 self.ledger.unit_quota[unit] = original
                 self.ledger.save()  # record BEFORE acting
         want = round(cpus * 1_000_000)
         if original is not None and original < want:
             want = original  # never raise the unit's own, tighter quota
         pct = percent(max(10_000, want))
-        if self.apply:
+        if self.applies(unit):
             self.systemctl.set_quota(unit, pct)
         self.log(f"{prefix}cap unit {unit} CPUQuota={pct}% (cpus={cpus:g})")
 
     def _restore(self, unit: str, prefix: str) -> None:
         original = self.ledger.unit_quota[unit]
-        if self.apply:
+        if self.applies(unit):
             try:
                 self.systemctl.set_quota(unit, None if original is None else percent(original))
             except UnitMissing:
@@ -242,7 +254,7 @@ class UnitCapper:
         for unit in sorted(units):
             try:
                 if unit in self.ledger.unit_quota:
-                    self._restore(unit, "" if self.apply else "dry-run would ")
+                    self._restore(unit, "" if self.applies(unit) else "dry-run would ")
             except UnitError as exc:
                 self.log(f"restore unit {unit} failed: {exc} (kept on record)")
             self.current.pop(unit, None)

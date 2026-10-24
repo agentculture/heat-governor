@@ -81,6 +81,7 @@ def test_units_config_is_validated_strictly() -> None:
     ok = {"units": [{"name": "app.slice", "warm": 8, "hot": 4, "critical": 2}]}
     assert validate(ok) == []
     assert validate({"units": [{"name": "app.slice"}]}) == []  # platform default bands
+    assert validate({"units": [{"name": "app.slice", "dry_run": True}]}) == []
     bad = [
         ({"units": [{"name": "app.slice", "hot_cpus": 4}]}, "unknown key"),
         ({"units": [{"name": "-.slice"}]}, "name"),
@@ -91,6 +92,7 @@ def test_units_config_is_validated_strictly() -> None:
         ({"units": [{"name": "app.slice", "hot": True}]}, "number"),
         ({"units": [{"name": "app.slice", "warm": 2, "hot": 4}]}, "must not rise"),
         ({"units": {"name": "app.slice"}}, "array of tables"),
+        ({"units": [{"name": "app.slice", "dry_run": "yes"}]}, "dry_run"),
     ]
     for doc, needle in bad:
         problems = validate(doc)
@@ -186,6 +188,16 @@ def test_dry_run_reads_but_changes_nothing(tmp_path: Path) -> None:
     assert [c for c in sc.calls if c[0] == "set"] == []
     assert led.unit_quota == {}
     assert logs == ["dry-run would cap unit app.slice CPUQuota=400% (cpus=4)"]
+
+
+def test_a_dry_run_unit_changes_nothing_even_with_apply(tmp_path: Path) -> None:
+    cap, sc, led, logs, _ = _capper(tmp_path, {"app.slice": None, "x.scope": None})
+    cap.set_dry({"app.slice"})
+    cap.set("app.slice", 4.0)
+    cap.set("x.scope", 4.0)
+    assert [c for c in sc.calls if c[0] == "set"] == [("set", "x.scope", "400")]
+    assert led.unit_quota == {"x.scope": None}
+    assert logs[0] == "dry-run would cap unit app.slice CPUQuota=400% (cpus=4)"
 
 
 def test_missing_unit_is_reported_once_and_skipped(tmp_path: Path) -> None:
@@ -332,7 +344,7 @@ def test_daemon_caps_units_by_level_reports_and_restores(tmp_path: Path) -> None
     assert sc.units["app.slice"] == 4_000_000
     d.tick()
     st = read_state(tmp_path / "state.json")
-    assert st["units"] == [{"name": "app.slice", "cpus": 4.0, "missing": False}]
+    assert st["units"] == [{"name": "app.slice", "dry_run": False, "cpus": 4.0, "missing": False}]
     d.shutdown()
     assert sc.units["app.slice"] is None
     assert Ledger(tmp_path / "data" / "ledger.json").unit_quota == {}
@@ -364,6 +376,23 @@ def test_daemon_dry_run_leaves_units_alone(tmp_path: Path) -> None:
     d.tick()
     d.shutdown()
     assert [c for c in sc.calls if c[0] == "set"] == []
+
+
+def test_daemon_honours_a_units_own_dry_run(tmp_path: Path) -> None:
+    from heat_governor.config import UnitRule
+
+    sc = FakeSystemctl({"app.slice": None})
+    d, sysr = _daemon(tmp_path, sc)
+    d._set_units((UnitRule("app.slice", (), dry_run=True),))
+    set_temp(sysr, 0, 99000)
+    d.tick()
+    assert [c for c in sc.calls if c[0] == "set"] == []
+    assert read_state(tmp_path / "state.json")["units"][0]["dry_run"] is True
+    d._set_units((UnitRule("app.slice", (), dry_run=False),))  # a reload turns it on
+    d.tick()
+    assert sc.units["app.slice"] == 2_000_000
+    d.shutdown()
+    assert sc.units["app.slice"] is None
 
 
 def test_daemon_start_recovers_unit_quotas(tmp_path: Path) -> None:

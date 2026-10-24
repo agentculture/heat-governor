@@ -125,7 +125,7 @@ class Daemon:
         self.unit_capper: UnitCapper | None = None
         self._unbanded: set[str] = set()
         if opts.units:
-            self._ensure_unit_capper()
+            self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
 
     # -- logging: to the log sink and into the record
     def _log(self, msg: str) -> None:
@@ -209,7 +209,7 @@ class Daemon:
         if gone and self.unit_capper:
             self.unit_capper.release(gone)
         if units:
-            self._ensure_unit_capper()
+            self._ensure_unit_capper().set_dry({u.name for u in units if u.dry_run})
             if {u.name for u in units} != old:
                 self._note_self_inside()
         self._unbanded.clear()  # re-report an unbanded unit after a reload
@@ -456,6 +456,7 @@ class Daemon:
             "units": [
                 {
                     "name": u.name,
+                    "dry_run": u.dry_run,
                     "cpus": self.unit_capper.current.get(u.name) if self.unit_capper else None,
                     "missing": bool(
                         self.unit_capper and u.name in self.unit_capper.missing_units()

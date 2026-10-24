@@ -23,11 +23,13 @@ name = "app.slice"     # a unit name ending .slice, .service or .scope
 warm = 8               # CPUs at each level; CPUQuota = cpus x 100%
 hot = 4
 critical = 2
+dry_run = true         # optional: log "dry-run would ..." and change nothing
 ```
 
 | Key | Meaning |
 |---|---|
 | `name` | Required. A `systemctl --user` unit ending `.slice`, `.service` or `.scope`; it may not start with `-`. Listed once. |
+| `dry_run` | Optional, default `false`. When `true` the unit is read and every decision is logged as `dry-run would ...`, but nothing is changed and nothing is written to the ledger, even when the daemon runs with `apply = true`. Use it to watch what a unit cap would do before enabling it; turning it off on a live reload applies the current level at once. The state reports it per unit. |
 | `warm`, `hot`, `critical` | Optional CPU counts (> 0, fractions allowed) per level. They may not rise from warm to hot to critical. |
 
 - The cap at a level is the band of the highest listed level at or below it (only `hot` given: warm is
