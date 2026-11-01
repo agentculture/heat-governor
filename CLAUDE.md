@@ -27,6 +27,7 @@ files, and a CI/deploy pipeline. It is a sibling to
 | Actuators: duty-cycle pause + CPU caps over the docker socket, own-pause ledger (`actuators.py`, `docker.py`) | Implemented, unit-tested; not yet run with `--apply` on a real window |
 | User-unit CPU quota (`[[units]]`, e.g. `app.slice`) via `systemctl --user set-property --runtime` (`units.py`); `mode = "adaptive"` learning loop (`adaptive.py`) | Implemented, unit-tested with a fake; opt-in; Spark bands declared, unmeasured; adaptive constants untuned, not run on a real box |
 | Admission signal: state file, `GET /state`, client `read`/`wait`/`Gate` (`state.py`, `client.py`) | Implemented |
+| Tensor-parallel pair (`[pair]`): read the peer daemon's state, cap the pair's containers by the hotter box, never pause them (`pair.py`) | Implemented, unit-tested with fakes and a localhost server; not run on the two Sparks |
 | Records, reboot report, trace replay (`recorder.py`; `report`, `replay`) | Implemented |
 | Live validation on a batch window (duty vs peak temperature vs throughput) | (planned) |
 | Configuration: one TOML file, strict validation, live reload, `config` verbs (`config.py`) | Implemented |

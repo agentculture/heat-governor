@@ -48,10 +48,19 @@ Layout::
     # engage = "warm"             # warm | hot | critical
     # interval_s = 20             # one evaluation per interval (>= 5)
     # target_rate_c_min = 0.0     # temperature rate to hold while engaged, C/min
+
+    [pair]                        # opt-in: one model across two boxes (TP=2)
+    peer = "10.77.77.2:9476"      # the other box's daemon (its GET /state)
+    containers = ["sparkrun_*"]   # names or fnmatch globs; governed as serving
+    listen = "10.77.77.1:9476"    # optional: also serve /state here for the peer
+    stale_after_s = 10            # peer silent this long -> one band hotter
+    poll_s = 1.0                  # how often the peer is read
+    cpu_cap = true                # CPU-cap pair containers (by the shared band)
 """
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import tomllib
@@ -105,7 +114,16 @@ ADAPTIVE_KEYS = ("min_cpus", "engage", "interval_s", "target_rate_c_min")
 UNIT_KEYS = {"name", "dry_run", "mode", *UNIT_LEVELS, *ADAPTIVE_KEYS}
 # a unit name systemctl cannot read as an option: no leading "-", no spaces
 UNIT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_.@\\-]*\.(slice|service|scope)")
-TOP_KEYS = {"platform", "profile", "daemon", "containers", "units"}
+PAIR_KEYS = {
+    "peer": str,
+    "containers": list,
+    "listen": str,
+    "stale_after_s": (int, float),
+    "poll_s": (int, float),
+    "cpu_cap": bool,
+}
+PAIR_RESTART_ONLY = ("listen",)  # a bound socket: changed only by a restart
+TOP_KEYS = {"platform", "profile", "daemon", "containers", "units", "pair"}
 
 
 class ConfigError(ValueError):
@@ -134,6 +152,22 @@ class UnitRule:
     engage: str = "warm"  # adaptive: the level at which the loop engages
     interval_s: float = 20.0  # adaptive: one evaluation per interval
     target_rate_c_min: float = 0.0  # adaptive: temperature rate to hold, C per minute
+
+
+@dataclass(frozen=True)
+class PairRule:
+    """One half of a tensor-parallel pair (``[pair]``): the peer daemon to read,
+    and the containers (names or fnmatch globs) that are this box's rank."""
+
+    peer: str
+    containers: tuple[str, ...]
+    listen: str | None = None
+    stale_after_s: float = 10.0
+    poll_s: float = 1.0
+    cpu_cap: bool = True
+
+    def matches(self, name: str) -> bool:
+        return any(fnmatch.fnmatchcase(name, pat) for pat in self.containers)
 
 
 @dataclass
@@ -176,6 +210,20 @@ class Config:
             )
             for u in self.data.get("units", [])
         ]
+
+    @property
+    def pair(self) -> PairRule | None:
+        p = self.data.get("pair")
+        if not p:
+            return None
+        return PairRule(
+            p["peer"],
+            tuple(p["containers"]),
+            p.get("listen"),
+            float(p.get("stale_after_s", 10.0)),
+            float(p.get("poll_s", 1.0)),
+            bool(p.get("cpu_cap", True)),
+        )
 
 
 def default_config_path(environ: dict[str, str] | None = None) -> Path:
@@ -403,6 +451,57 @@ def _validate_units(units: object, problems: list[str]) -> None:
             problems.append(f"units[{i}] must be a table")
 
 
+def host_port(spec: str) -> tuple[str, int] | None:
+    """``"host:port"`` as ``(host, port)``; ``None`` when it is not one."""
+    host, sep, port = spec.rpartition(":")
+    if not sep or not host or not port.isdigit() or not 0 < int(port) < 65536:
+        return None
+    return host.strip("[]"), int(port)
+
+
+def _validate_pair_keys(pair: dict, problems: list[str]) -> None:
+    for k, v in pair.items():
+        want = PAIR_KEYS.get(k)
+        if want is None:
+            problems.append(f"unknown key pair.{k!r} (known: {', '.join(sorted(PAIR_KEYS))})")
+        elif not isinstance(v, want) or (want is not bool and isinstance(v, bool)):
+            problems.append(f"pair.{k} has the wrong type")
+    for k in ("peer", "listen"):
+        if isinstance(pair.get(k), str) and host_port(pair[k]) is None:
+            problems.append(f"pair.{k} must be HOST:PORT")
+    if "peer" not in pair:
+        problems.append("pair.peer is required (HOST:PORT of the peer daemon's state server)")
+    conts = pair.get("containers")
+    if conts is None:
+        problems.append("pair.containers is required (names or globs of this box's rank)")
+    elif isinstance(conts, list) and not (conts and all(isinstance(c, str) and c for c in conts)):
+        problems.append("pair.containers must be a non-empty list of container names or globs")
+
+
+def _validate_pair(pair: dict, data: dict, problems: list[str]) -> None:
+    _validate_pair_keys(pair, problems)
+    poll = pair.get("poll_s", 1.0)
+    stale = pair.get("stale_after_s", 10.0)
+    if _is_num(poll) and not 0.2 <= poll <= 10:
+        problems.append("pair.poll_s must be between 0.2 and 10 seconds")
+    if _is_num(stale) and _is_num(poll) and not 2 * poll <= stale <= 600:
+        problems.append("pair.stale_after_s must be at least 2 x pair.poll_s and at most 600")
+    pats = pair.get("containers")
+    if not (isinstance(pats, list) and all(isinstance(c, str) for c in pats)):
+        return
+    for i, c in enumerate(data.get("containers") or []):
+        name = c.get("name") if isinstance(c, dict) else None
+        if (
+            isinstance(name, str)
+            and c.get("role") == "batch"
+            and any(fnmatch.fnmatchcase(name, p) for p in pats)
+        ):
+            problems.append(
+                f"containers[{i}]: {name!r} is a pair container and must not be batch "
+                "(pausing one rank hangs the other)"
+            )
+
+
 def validate(data: dict) -> list[str]:
     """Every problem in the document, not just the first."""
     problems: list[str] = []
@@ -415,6 +514,9 @@ def validate(data: dict) -> list[str]:
     _validate_daemon(_table(data, "daemon", problems, "[daemon] must be a table"), problems)
     _validate_containers(data.get("containers", []), problems)
     _validate_units(data.get("units", []), problems)
+    if "pair" in data:
+        pair = _table(data, "pair", problems, "[pair] must be a table")
+        _validate_pair(pair, data, problems)
     return problems
 
 
@@ -560,6 +662,17 @@ def template(profile: Profile) -> str:
         '# engage = "warm"        # warm | hot | critical',
         "# interval_s = 20        # one evaluation per interval, >= 5",
         "# target_rate_c_min = 0.0  # C per minute to hold while engaged (0 = flat)",
+        "",
+        "# One model across two boxes (tensor parallel, e.g. sparkrun TP=2): each box runs a",
+        "# daemon; the pair's containers are capped by the HOTTER box's band (one band hotter",
+        "# than local when the peer is silent), and are never paused. Mirror it on the peer.",
+        "# [pair]",
+        '# peer = "10.77.77.2:9476"     # the peer daemon\'s state server (its [pair] listen)',
+        '# containers = ["sparkrun_*"]  # names or fnmatch globs of this box\'s rank',
+        '# listen = "10.77.77.1:9476"   # also serve GET /state here (restart to change)',
+        "# stale_after_s = 10           # peer silent this long -> one band hotter",
+        "# poll_s = 1.0",
+        "# cpu_cap = true               # cap the pair containers by the shared band",
         "",
     ]
     return "\n".join(lines)

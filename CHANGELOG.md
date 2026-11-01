@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-11-02
+
+### Added
+
+- Tensor-parallel pair (opt-in `[pair]`): when one model runs across two boxes (sparkrun TP=2, one container per box in lockstep over NCCL), each box's daemon reads the peer's `GET /state` every `poll_s` (default 1 s, background thread, timeout min(1 s, poll_s), so a dead peer never delays a tick) and governs the containers `[pair] containers` names (names or fnmatch globs) by the HOTTER of the two boxes: the pair's CPU cap is the tighter of the two daemons' decided caps and its level the higher of the two levels. Both daemons compute the same function of the same two inputs, so they choose the same band within one poll. Non-pair containers, user units and the host's own `level`/`admit` stay local.
+- A pair container is always serving: never paused (a paused rank hangs NCCL on the other box). A `[[containers]]` entry with role batch that matches a pair pattern is a config error; a container named `--batch` or labelled `heat-governor.role=batch` that matches is governed as serving and logged once. Pair containers are CPU-capped by the shared band unless `[pair] cpu_cap = false`.
+- A peer that cannot be read, or whose document stops advancing for `stale_after_s` (default 10 s, our clock, so clock skew between boxes does not matter), is treated as one band hotter than local (one level up; one CPU band down, the loosest band when local has no cap). Loss and recovery are logged once each.
+- The state document gains `pair` (null without `[pair]`): peer, peer_status (ok / stale / unreachable), peer_error, peer_age_s, peer_host, peer_level, peer_cpus, peer_effective_c, peer_gpu_operator_mhz, gpu_operator_match, level, admit, concurrency_factor, cpus, basis (local / peer / equal / peer_lost), containers; each `containers` entry gains `pair`. Per-tick records gain pair_level, pair_cpus, peer_status. Additive: schema stays 1.
+- `[pair] listen` (restart-only) binds a second state server, e.g. on the private link, so the peer can read this daemon while `[daemon] listen` stays on localhost.
+- When the two boxes' operator GPU ceilings (`gpu_operator_mhz`) differ, a warning is logged once per change (and once when they agree again); no clock is changed because of the peer.
+- Pair admission: `client.read/wait/Gate(..., pair=True)` and `heat-governor state|wait --pair` read the pair's signal (the hotter box) instead of the host's; without `[pair]` they fall back to the host signal with reason `no-pair`. `state`, `run --once` and `config overview|show` show the pair.
+
 ## [0.13.0] - 2026-10-24
 
 ### Added

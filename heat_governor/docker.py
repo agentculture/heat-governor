@@ -102,6 +102,16 @@ class Docker:
                 continue  # gone between list and inspect
         return out
 
+    def names(self) -> list[str]:
+        """Names of the running (and paused) containers, for glob rules."""
+        rows = self._ok("GET", "/containers/json")
+        out = []
+        for row in rows if isinstance(rows, list) else []:
+            names = row.get("Names") if isinstance(row, dict) else None
+            if names:
+                out.append(str(names[0]).lstrip("/"))
+        return out
+
     def pause(self, ref: str) -> None:
         self._ok("POST", f"/containers/{urllib.parse.quote(ref)}/pause")
 
