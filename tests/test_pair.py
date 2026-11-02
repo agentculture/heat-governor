@@ -3,6 +3,7 @@ daemon governing a rank by the hotter box (no real network but localhost)."""
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -585,7 +586,9 @@ def test_cli_run_once_with_pair_reads_the_peer(tmp_path: Path, capsys, monkeypat
         assert (doc["pair"]["level"], doc["pair"]["cpus"]) == ("hot", 4)
         assert doc["pair"]["containers"] == ["sparkrun_qwen"]
         rc, out, _ = _cli(capsys, "run", "--once", *common)
-        assert "pair: level=hot admit=False cpus=4 basis=peer" in out
+        # The local level comes from this host's real sensors (a CI runner has none and
+        # reads hot), so the basis is "peer" or "equal" depending on where the test runs.
+        assert re.search(r"pair: level=hot admit=False cpus=4 basis=(peer|equal)\b", out), out
         assert "containers: sparkrun_qwen" in out
     finally:
         srv.stop()
@@ -760,25 +763,28 @@ def test_2_batch_filters_pair_containers_by_name_too(tmp_path: Path) -> None:
 
 
 def test_3_turning_pair_cpu_cap_off_restores_the_rank(tmp_path: Path) -> None:
-    dk, peer = _docker(), FakePeer(peer_doc("hot", 4))
+    # An explicit 7-CPU original, so "released" can never equal the 4-CPU cap,
+    # whatever the host's CPU count (an unlimited original restores to os.cpu_count()).
+    dk = FakeDocker(container("r0", "sparkrun_qwen_rank0", "batch", nano=7_000_000_000))
+    peer = FakePeer(peer_doc("hot", 4))
     d, _, clk, logs = _pair_daemon(tmp_path, dk, peer)
     d.discover()
     d.tick()
     assert dk.c["r0"].nano_cpus == 4_000_000_000
     d.set_pair(PairRule(PAIR["peer"], ("sparkrun_*",), cpu_cap=False))
     d.discover()
-    assert dk.c["r0"].nano_cpus != 4_000_000_000  # its own limit is back
+    assert dk.c["r0"].nano_cpus == 7_000_000_000  # its own limit is back
     assert "r0" not in d.ledger.nano_cpus
     assert any("no longer CPU-capped" in m for m in logs)
     clk.t += 1
     d.tick()
-    assert dk.c["r0"].nano_cpus != 4_000_000_000  # and stays released
+    assert dk.c["r0"].nano_cpus == 7_000_000_000  # and stays released
 
 
 def test_3_rule_cpu_cap_off_on_reload_restores_a_serving_container(tmp_path: Path) -> None:
     from heat_governor.config import ContainerRule
 
-    dk = FakeDocker(container("s1", "lane", None, nano=0))
+    dk = FakeDocker(container("s1", "lane", None, nano=7_000_000_000))
     d, sysr, clk, _ = _pair_daemon(tmp_path, dk, FakePeer())
     d.opts.use_labels = False
     d.opts.containers = (ContainerRule("lane", "serving", True),)
@@ -788,7 +794,7 @@ def test_3_rule_cpu_cap_off_on_reload_restores_a_serving_container(tmp_path: Pat
     assert dk.c["s1"].nano_cpus == 4_000_000_000
     d.opts.containers = (ContainerRule("lane", "serving", False),)
     d.discover()
-    assert dk.c["s1"].nano_cpus != 4_000_000_000 and "s1" not in d.ledger.nano_cpus
+    assert dk.c["s1"].nano_cpus == 7_000_000_000 and "s1" not in d.ledger.nano_cpus
 
 
 @pytest.mark.parametrize(
