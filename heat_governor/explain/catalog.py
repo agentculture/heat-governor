@@ -173,6 +173,12 @@ with `--listen`); record the tick; and with `--apply`:
   how the temperature rate responds to the CPU it takes away, learns that
   per unit (kept in `<data_dir>/adaptive.json`) and releases as it cools.
 
+- with `[pair]` in the config (one model across two boxes, tensor
+  parallel), read the peer daemon's `GET /state` and cap the pair's
+  containers by the HOTTER box (the tighter of the two decided caps); a
+  silent peer counts as one band hotter than local. Pair containers are
+  serving: never paused. Everything else stays local.
+
 Serving containers are never paused. Only pauses this daemon made are ever
 undone; a restart releases what its ledger recorded. On exit it unpauses its
 own pauses and restores every CPU limit it changed.
@@ -188,8 +194,10 @@ _STATE = """\
 Reads the admission state a daemon published (local file by default, or
 `--source http://host:port/state`). Missing or stale state is `unknown` and
 admits unless `--if-unknown hold`. Contract: `docs/contracts/state.md`.
+`--pair` reads the tensor-parallel pair's signal (the hotter of the two
+boxes) instead of the host's; without `[pair]` it falls back to the host's.
 
-    heat-governor state [--source PATH|URL] [--json]
+    heat-governor state [--source PATH|URL] [--pair] [--json]
 """
 
 _WAIT = """\
@@ -198,7 +206,9 @@ _WAIT = """\
 Blocks until the host admits new work. Exit 0 when admitted, 3 when
 `--timeout` passes while still held. For scripts: `heat-governor wait && job`.
 
-    heat-governor wait [--source PATH|URL] [--timeout S] [--poll S] [--json]
+`--pair` waits on the tensor-parallel pair's signal instead of the host's.
+
+    heat-governor wait [--source PATH|URL] [--pair] [--timeout S] [--poll S] [--json]
 """
 
 _REPORT = """\
@@ -260,7 +270,9 @@ discover_every_s, record, fsync, reload, gpu_clock, gpu_ceiling_mhz), `[[contain
 user unit, plus optional warm / hot / critical CPU counts; without them the
 platform default: spark 8 / 4 / 2, declared, unmeasured; or `mode =
 "adaptive"` with min_cpus, engage, interval_s, target_rate_c_min). Units are
-off unless listed; contract: `docs/contracts/user-units.md`.
+off unless listed; contract: `docs/contracts/user-units.md`. `[pair]`
+(peer, containers, listen, stale_after_s, poll_s, cpu_cap) makes this box one
+half of a tensor-parallel pair; `listen` needs a restart.
 """
 
 _GPU_CLOCK = """\

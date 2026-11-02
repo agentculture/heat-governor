@@ -43,7 +43,7 @@ def api(tmp_path: Path):
         def do_GET(self) -> None:  # noqa: N802
             calls.append(("GET", self.path, None))
             if self.path.startswith("/containers/json"):
-                self._send(200, [{"Id": "abc123"}])
+                self._send(200, [{"Id": "abc123", "Names": ["/job"]}, {"Id": "x"}])
             elif self.path == "/containers/abc123/json":
                 self._send(200, INFO)
             else:
@@ -71,6 +71,12 @@ def test_inspect_and_labelled(api) -> None:
     c = d.inspect("abc123")
     assert (c.name, c.state, c.role, c.nano_cpus) == ("job", "running", "batch", 4000000000)
     assert [x.id for x in d.labelled()] == ["abc123"]
+
+
+def test_names_lists_running_containers_for_glob_rules(api) -> None:
+    d, calls = api
+    assert d.names() == ["job"]  # a row without Names is skipped
+    assert ("GET", "/containers/json", None) in calls
 
 
 def test_actions_hit_the_engine_api(api) -> None:

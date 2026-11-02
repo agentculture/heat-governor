@@ -15,6 +15,11 @@ rather not depend on heat-governor can cite (copy) it. Three ways to use it::
 The source is the state file the daemon writes (``$HEAT_GOVERNOR_STATE`` or
 the default path) or an ``http://host:port/state`` URL for a remote host.
 
+For work that runs on a tensor-parallel pair (one model across two boxes),
+pass ``pair=True``: the pair's own signal (the hotter of the two boxes, see
+``docs/contracts/state.md``) is read instead of this box's alone; a daemon
+without ``[pair]`` falls back to its host signal (reason ``no-pair``).
+
 Missing or stale state means no governor is running there; the default is to
 admit (``if_unknown="admit"``) so a job never hangs on a host that simply has
 no governor. Pass ``if_unknown="hold"`` where running ungoverned is worse than
@@ -79,6 +84,7 @@ def read(
     if_unknown: str = "admit",
     now: float | None = None,
     timeout: float = 2.0,
+    pair: bool = False,
 ) -> Admission:
     src = source or _default_source()
     doc = _load(src, timeout)
@@ -93,11 +99,19 @@ def read(
         return Admission(
             unknown_admit, "unknown", 1.0 if unknown_admit else 0.0, "stale", None, doc
         )
+    reason = str(doc.get("reason", ""))
+    sig = doc
+    if pair:
+        p = doc.get("pair")
+        if isinstance(p, dict) and p.get("level") is not None:
+            sig, reason = p, f"pair:{p.get('basis', '')}"
+        else:
+            reason = "no-pair"
     return Admission(
-        bool(doc.get("admit", True)),
-        str(doc.get("level", "unknown")),
-        float(doc.get("concurrency_factor", 1.0)),
-        str(doc.get("reason", "")),
+        bool(sig.get("admit", True)),
+        str(sig.get("level", "unknown")),
+        float(sig.get("concurrency_factor", 1.0)),
+        reason,
         doc.get("temp_c"),
         doc,
     )
@@ -109,11 +123,12 @@ def wait(
     timeout: float | None = None,
     poll_s: float = 1.0,
     if_unknown: str = "admit",
+    pair: bool = False,
 ) -> Admission:
     """Block until new work is admitted; raise ``TimeoutError`` after ``timeout``."""
     deadline = None if timeout is None else time.monotonic() + timeout
     while True:
-        adm = read(source, if_unknown=if_unknown)
+        adm = read(source, if_unknown=if_unknown, pair=pair)
         if adm.admit:
             return adm
         if deadline is not None and time.monotonic() >= deadline:
@@ -135,8 +150,10 @@ class Gate:
         *,
         poll_s: float = 1.0,
         if_unknown: str = "admit",
+        pair: bool = False,
     ) -> None:
         self.base = base_concurrency
+        self.pair = pair
         self.source = source
         self.poll_s = poll_s
         self.if_unknown = if_unknown
@@ -145,7 +162,7 @@ class Gate:
         self.last: Admission | None = None
 
     def _allowed(self) -> int:
-        self.last = read(self.source, if_unknown=self.if_unknown)
+        self.last = read(self.source, if_unknown=self.if_unknown, pair=self.pair)
         return self.last.allowed(self.base)
 
     @contextmanager

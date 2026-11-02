@@ -50,6 +50,79 @@ for a benchmark or quantization job. A serving recipe that clients depend on sho
 `heat-governor.role=serving` (optionally with `heat-governor.cpu-cap=true`). Nothing else changes: the
 host's daemon picks the container up within 5 seconds.
 
+### sparkrun tensor-parallel pair
+
+When sparkrun runs ONE model across two boxes with tensor parallelism (TP=2), each box runs one container
+(a rank) and the two step in lockstep over NCCL. Each box keeps its own daemon, but the ranks are one job:
+
+- a CPU cap on one rank slows both (every token waits for the slower rank) and cools only one box;
+- a thermal reset of either box kills the job on both, so the pair's risk is the hotter box's;
+- pausing a rank hangs NCCL on the other box.
+
+So `[pair]` makes the two daemons govern the ranks together. Each reads the other's `GET /state` every
+`poll_s` and caps its rank by the **hotter** box: the tighter of the two daemons' decided CPU caps (the
+band after lookahead, hysteresis and ramp), with the pair's level the higher of the two. Both compute the
+same thing from the same two documents, so they move to the same band within about one poll. A peer that
+cannot be read, or whose document stops advancing for `stale_after_s`, counts as one band hotter than
+local, and loss and recovery are logged once each. Pair containers are always governed as `serving` (never
+paused): a `[[containers]]` rule with role `batch` that matches a pair pattern is a config error, and a
+`batch` label or `--batch` on one is overridden (logged once). Every other container, user unit and the
+host's own signal keep using local readings only.
+
+Two DGX Spark GB10 boxes, `spark` (10.77.77.1) and `spark2` (10.77.77.2), on a private management link.
+On `spark`:
+
+```toml
+platform = "spark"
+
+[daemon]
+apply = true
+listen = "127.0.0.1:9476"     # local clients, unchanged
+gpu_ceiling_mhz = 2200        # keep it the same on both boxes
+
+[pair]
+peer = "10.77.77.2:9476"      # spark2's [pair] listen
+listen = "10.77.77.1:9476"    # this daemon's state, for spark2 to read
+containers = ["sparkrun_*"]   # the rank's container name or a glob; check `docker ps`
+stale_after_s = 10            # peer silent this long -> one band hotter
+poll_s = 1.0
+cpu_cap = true                # cap the rank by the shared band
+```
+
+On `spark2`, the mirror image:
+
+```toml
+[pair]
+peer = "10.77.77.1:9476"
+listen = "10.77.77.2:9476"
+containers = ["sparkrun_*"]
+```
+
+Notes:
+
+- `peer` and `listen` are plain `HOST:PORT` (no `http://`, no path). A wildcard `[daemon] listen`
+  (`0.0.0.0:9476`) already serves the peer: then leave `[pair] listen` out, or use another port, since the
+  same port with a wildcard on either side is rejected (the second bind would fail). `run --once` binds no
+  listener, so a preview works next to the running daemon.
+- The peer counts as lost when its document has not changed for the larger of `stale_after_s` and the
+  peer's own published `stale_after_s`, timed on this box's clock.
+- `[pair] listen` binds a second state server and needs a daemon restart to change; every other `[pair]`
+  key reloads live. The state server is read-only and unauthenticated (temperatures and container names),
+  so bind it only on the private link. Port 9476 must be reachable between the two boxes on that link.
+- sparkrun names its containers itself; match them with a glob on a stable part of the name (the job or
+  recipe name). `heat-governor run --once` lists the pair containers it found.
+- The operator GPU ceiling should be the same on both boxes: the slower rank sets the pair's pace. A
+  mismatch is logged once per change (`pair: WARNING operator GPU ceiling differs ...`) and shown as
+  `pair.gpu_operator_match = false`; the daemon never changes a clock because of the peer.
+- Admission for the pair's work: the top-level `admit` stays this box's own signal. A client sending
+  requests to the pair reads the pair's signal instead (the hotter box): `heat-governor wait --pair`,
+  `client.wait(pair=True)`, `client.Gate(n, pair=True)`, or `pair.admit` in the document. Either box
+  publishes the same pair decision.
+- `heat-governor state` prints a `pair:` line: the pair's level, cap, basis (`local`, `peer`, `equal`,
+  `peer_lost`) and the peer's status.
+
+The fields are in [`contracts/state.md`](contracts/state.md#the-pair-section).
+
 ### lobes
 
 The lobes fleet lanes are **serving** containers (never paused). Today they are named at the daemon
