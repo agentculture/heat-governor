@@ -100,6 +100,12 @@ containers = ["sparkrun_*"]
 
 Notes:
 
+- `peer` and `listen` are plain `HOST:PORT` (no `http://`, no path). A wildcard `[daemon] listen`
+  (`0.0.0.0:9476`) already serves the peer: then leave `[pair] listen` out, or use another port, since the
+  same port with a wildcard on either side is rejected (the second bind would fail). `run --once` binds no
+  listener, so a preview works next to the running daemon.
+- The peer counts as lost when its document has not changed for the larger of `stale_after_s` and the
+  peer's own published `stale_after_s`, timed on this box's clock.
 - `[pair] listen` binds a second state server and needs a daemon restart to change; every other `[pair]`
   key reloads live. The state server is read-only and unauthenticated (temperatures and container names),
   so bind it only on the private link. Port 9476 must be reachable between the two boxes on that link.

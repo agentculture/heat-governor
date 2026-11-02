@@ -47,6 +47,7 @@ from heat_governor.config import changed as config_changed
 from heat_governor.config import diff as config_diff
 from heat_governor.config import (
     host_port,
+    listen_conflict,
 )
 from heat_governor.config import load as load_config
 from heat_governor.docker import Container, Docker, DockerError
@@ -55,6 +56,7 @@ from heat_governor.gpulaw import GpuGovernor, Plan
 from heat_governor.operator_ceiling import OperatorCeiling, hold_path
 from heat_governor.pair import PairDecision, PeerLink, PeerStatus
 from heat_governor.pair import decide as pair_decide
+from heat_governor.pair import lost
 from heat_governor.platforms import Profile
 from heat_governor.policy import Controller, Decision, unit_cpus
 from heat_governor.recorder import Recorder, boot_id
@@ -70,6 +72,7 @@ class Options:
     state_path: Path | None = None
     data_dir: Path | None = None
     listen: tuple[str, int] | None = None
+    listeners: bool = True  # False (run --once): bind no state server at all
     batch: tuple[str, ...] = ()
     serving: tuple[str, ...] = ()
     serving_cpu_cap: bool = False  # cap named --serving containers too
@@ -133,12 +136,12 @@ class Daemon:
         self.recorder = (
             Recorder(data / "records", fsync=opts.fsync) if (data and opts.record) else None
         )
-        self.server = StateServer(*opts.listen) if opts.listen else None
+        self.server = StateServer(*opts.listen) if (opts.listen and opts.listeners) else None
         # -- the tensor-parallel pair ([pair]); None without one
         self.pair_link: PeerLink | None = peer_link
         if self.pair_link is None and opts.pair is not None:
             self.pair_link = PeerLink(opts.pair)
-        self.pair_server = self._pair_server(opts.pair)
+        self.pair_server = self._pair_server(opts.pair) if opts.listeners else None
         self.pair_ids: set[str] = set()  # ids of this box's rank containers
         self._pair_forced: set[str] = set()  # pair containers found as batch, logged once
         self._pair: PairDecision | None = None
@@ -195,6 +198,9 @@ class Daemon:
         gone = set(self.containers) - set(found)
         for cid in gone:
             self._left(self.containers[cid])
+        for cid in set(found) & set(self.containers):
+            if _is_capped(self.containers[cid]) and not _is_capped(found[cid]):
+                self._uncapped(found[cid])
         for cid in set(found) - set(self.containers):
             c = found[cid]
             capped = "yes" if c.cpu_cap or c.role == "batch" else "no"
@@ -225,49 +231,80 @@ class Daemon:
         return found
 
     def _find_pair(self, found: dict[str, Container]) -> None:
-        """This box's rank: every running container a ``[pair]`` pattern names,
-        governed as serving (pausing a rank hangs NCCL on the other box)."""
+        """This box's rank: every container a ``[pair]`` pattern names, governed as
+        serving (pausing a rank hangs NCCL on the other box).
+
+        Membership is decided by NAME. A container already in ``found`` (by label or
+        a named rule) is converted in place, with no second inspect that could fail
+        and leave a labelled-batch rank to the duty cycler. Only matching names not
+        yet in ``found`` (unlabelled ranks) are listed and inspected."""
         pair = self.opts.pair
         ids: set[str] = set()
+        for cid, c in list(found.items()):
+            if pair.matches(c.name):
+                found[cid] = self._as_pair(c, had=c)
+                ids.add(cid)
+        known = {c.name for c in found.values()}
         try:
-            names = [n for n in self.docker.names() if pair.matches(n)]
+            names = [n for n in self.docker.names() if pair.matches(n) and n not in known]
         except DockerError as exc:
             self._log(f"discover pair: {exc}")
-            names = [c.name for c in found.values() if pair.matches(c.name)]
+            names = []
         for name in names:
             try:
                 c = self.docker.inspect(name)
             except DockerError:
-                continue
-            had = found.get(c.id)
-            if (had and had.role == "batch") or c.role == "batch":
-                if c.id not in self._pair_forced:
-                    self._pair_forced.add(c.id)
-                    self._log(
-                        f"pair: {c.name} is a pair container: governed as serving, never "
-                        "paused (it was named or labelled batch)"
-                    )
-            cap = pair.cpu_cap or c.cpu_cap or bool(had and had.role == "serving" and had.cpu_cap)
-            found[c.id] = Container(c.id, c.name, c.state, "serving", cap, c.nano_cpus)
+                continue  # not governed at all this round: nothing will pause it
+            found[c.id] = self._as_pair(c, had=found.get(c.id))
             ids.add(c.id)
         self.pair_ids = ids
+
+    def _as_pair(self, c: Container, *, had: Container | None) -> Container:
+        """``c`` as a pair container: serving, capped by the pair band when allowed."""
+        if (c.role == "batch" or (had is not None and had.role == "batch")) and (
+            c.id not in self._pair_forced
+        ):
+            self._pair_forced.add(c.id)
+            self._log(
+                f"pair: {c.name} is a pair container: governed as serving, never "
+                "paused (it was named or labelled batch)"
+            )
+        own_cap = c.cpu_cap if c.role != "batch" else False
+        cap = self.opts.pair.cpu_cap or own_cap
+        return Container(c.id, c.name, c.state, "serving", cap, c.nano_cpus)
 
     def _left(self, old: Container) -> None:
         """``old`` left the governed set: give back any CPU cap we put on it."""
         self._log(f"container {old.name} left the governed set")
-        cid = old.id
+        self._release_cap(old)
+
+    def _uncapped(self, c: Container) -> None:
+        """``c`` stays governed but may no longer be capped (a reload turned its
+        cpu_cap off, or dropped ``[pair]``): give back the cap we put on it."""
+        self._log(f"{c.name}: no longer CPU-capped -- restoring its own limit")
+        self._release_cap(c)
+
+    def _release_cap(self, c: Container) -> None:
+        cid = c.id
         if self.capper and (cid in self.ledger.nano_cpus or self.capper.current.get(cid)):
-            self._fenced(f"release {old.name}", lambda: self.capper.set(old, None))
+            self._fenced(f"release {c.name}", lambda: self.capper.set(c, None))
             self.capper.current.pop(cid, None)
 
     def batch(self) -> dict[str, Container]:
         """Duty-cycled containers. A pair container is never one, whatever it says."""
         return {
-            k: c for k, c in self.containers.items() if c.role == "batch" and k not in self.pair_ids
+            k: c for k, c in self.containers.items() if c.role == "batch" and not self.is_pair(c)
         }
 
     def capped(self) -> list[Container]:
-        return [c for c in self.containers.values() if c.role == "batch" or c.cpu_cap]
+        return [c for c in self.containers.values() if _is_capped(c)]
+
+    def is_pair(self, c: Container) -> bool:
+        """A pair container by id OR by name: never paused, even when a discovery
+        could not inspect it again."""
+        return c.id in self.pair_ids or (
+            self.opts.pair is not None and self.opts.pair.matches(c.name)
+        )
 
     # -- systemd user units
     def _ensure_unit_capper(self) -> UnitCapper:
@@ -448,7 +485,18 @@ class Daemon:
         """The extra state server the peer reads (``[pair] listen``), unless it is
         the same address as ``--listen``."""
         addr = host_port(pair.listen) if pair and pair.listen else None
-        if addr is None or addr == self.opts.listen:
+        if addr is None:
+            return None
+        how = listen_conflict(addr, self.opts.listen) if self.opts.listen else None
+        if how == "same":
+            return None
+        if how == "clash":
+            self._log(
+                f"pair: listen {pair.listen} shares port {addr[1]} with --listen "
+                f"{self.opts.listen[0]}:{self.opts.listen[1]} and one is a wildcard: not "
+                "binding it (the wildcard already serves that port; drop [pair] listen "
+                "or use another port)"
+            )
             return None
         return StateServer(*addr)
 
@@ -475,26 +523,22 @@ class Daemon:
 
     def _pair_step(self, d: Decision, now: float) -> None:
         """Read the peer's last snapshot, log health / ceiling transitions, and
-        decide the pair's level and CPU cap."""
+        decide the pair's level and CPU cap. Never leaves the decision frozen: any
+        failure here counts as a lost peer (one band hotter than local)."""
         link = self.pair_link
         if link is None:
             return
-        if not link.running:
-            link.poll_once()  # --once, tests, or before start(): read it in-line
-        peer = self._peer = link.status(now)
-        if peer.ok != self._peer_ok:
-            self._log_peer_health(peer)
-            self._peer_ok = peer.ok
-        if peer.ok and peer.reading is not None:
-            self._check_ceilings(peer.reading)
+        peer = self._peer = self._peer_status(link, now)
+        try:
+            if peer.ok != self._peer_ok:
+                self._log_peer_health(peer)
+                self._peer_ok = peer.ok
+            if peer.ok and peer.reading is not None:
+                self._check_ceilings(peer.reading)
+        except Exception as exc:  # noqa: BLE001 - logging must not freeze the decision
+            self._log(f"pair: {exc!r}")
         prev = self._pair
-        self._pair = pair_decide(
-            d.level,
-            d.cpus,
-            peer,
-            cpu_bands=sorted({c for _, c in self.profile.cpu_bands}),
-            concurrency=self.profile.concurrency,
-        )
+        self._pair = self._decide_pair(d, peer)
         if prev is None or prev.level != self._pair.level:
             peer_level = peer.reading.level if peer.ok and peer.reading else "?"
             self._log(
@@ -502,6 +546,27 @@ class Daemon:
                 f"(here {d.level}, peer {peer_level}, {self._pair.basis}) "
                 f"cpus={self._pair.cpus}"
             )
+
+    def _peer_status(self, link: PeerLink, now: float) -> PeerStatus:
+        try:
+            if not link.started:
+                link.poll_once()  # --once, tests, or before start(): read it in-line
+            elif not link.running:
+                link.start()  # the poller died: restart it, never poll in the tick
+            return link.status(now)
+        except Exception as exc:  # noqa: BLE001 - a broken read is a lost peer
+            return lost(f"pair read failed: {exc!r}"[:200])
+
+    def _decide_pair(self, d: Decision, peer: PeerStatus) -> PairDecision:
+        kw = {
+            "cpu_bands": sorted({c for _, c in self.profile.cpu_bands}),
+            "concurrency": self.profile.concurrency,
+        }
+        try:
+            return pair_decide(d.level, d.cpus, peer, **kw)
+        except Exception as exc:  # noqa: BLE001 - fall through to the conservative answer
+            self._log(f"pair: decision failed ({exc!r}) -- treating the peer as lost")
+            return pair_decide(d.level, d.cpus, lost(repr(exc)), **kw)
 
     def _log_peer_health(self, peer: PeerStatus) -> None:
         rule = self.opts.pair
@@ -545,6 +610,7 @@ class Daemon:
             "peer_status": peer.status if peer else "unreachable",
             "peer_error": peer.error if peer and not peer.ok else None,
             "peer_age_s": peer.age_s if peer else None,
+            "stale_after_s": self.pair_link.stale_after(r) if self.pair_link else None,
             "peer_host": r.host if r else None,
             "peer_level": r.level if r else None,
             "peer_cpus": r.cpus if r else None,
@@ -861,3 +927,7 @@ class Daemon:
 
 def _mhz(v: int | None) -> str:
     return "none" if v is None else f"{v} MHz"
+
+
+def _is_capped(c: Container) -> bool:
+    return c.role == "batch" or c.cpu_cap

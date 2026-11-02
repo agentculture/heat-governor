@@ -25,7 +25,13 @@ feed each other's pair result back.
 
 A peer that cannot be read, or whose document stops advancing for
 ``stale_after_s``, is treated as one band hotter than local: the cooler box
-cannot know the hotter one is still cool.
+cannot know the hotter one is still cool. "Advancing" means the peer's ``at``
+changed; the age is measured on this box's clock from when it last changed, so
+clock skew between the boxes does not matter, and a frozen peer that still
+answers goes stale. The window is the larger of ``[pair] stale_after_s`` and the
+peer's own published ``stale_after_s`` (which follows its poll interval, capped
+at :data:`MAX_PEER_STALE_S`), so a peer that publishes slowly is not declared
+lost between two of its own publishes.
 
 Stdlib only. The fetch runs on a background thread; the control loop only ever
 reads the last snapshot, so a slow or dead peer never delays a tick.
@@ -34,6 +40,7 @@ reads the last snapshot, so a slow or dead peer never delays a tick.
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 import urllib.request
@@ -41,9 +48,10 @@ from dataclasses import dataclass
 from typing import Callable
 
 from heat_governor.config import PairRule
+from heat_governor.policy import LEVELS
 
-LEVELS = ("cool", "warm", "hot", "critical")
 MAX_DOC_BYTES = 1 << 20  # a state document is a few KiB; refuse anything absurd
+MAX_PEER_STALE_S = 600.0  # a peer's own stale_after_s is honoured up to this
 
 Fetch = Callable[[str, float], dict]
 
@@ -75,6 +83,11 @@ class PeerReading:
     gpu_operator_mhz: int | None
     gpu_ceiling_mhz: int | None
     has_gpu_operator: bool  # an older peer publishes no gpu_operator_mhz at all
+    stale_after_s: float | None = None  # the peer's own published window (its cadence)
+
+
+def _finite(v: object) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 def parse(doc: dict, seen: float) -> PeerReading:
@@ -83,11 +96,12 @@ def parse(doc: dict, seen: float) -> PeerReading:
     at = doc.get("at")
     if level not in LEVELS:
         raise ValueError(f"peer level {level!r} (daemon not ticking yet?)")
-    if not isinstance(at, (int, float)) or isinstance(at, bool):
-        raise ValueError("peer document has no 'at'")
+    if not _finite(at):
+        raise ValueError("peer document has no finite 'at'")
     cpus = doc.get("cpus")
-    if cpus is not None and (not isinstance(cpus, (int, float)) or cpus < 1):
+    if cpus is not None and (not _finite(cpus) or cpus < 1):
         raise ValueError(f"peer cpus {cpus!r}")
+    stale = doc.get("stale_after_s")
     return PeerReading(
         host=str(doc.get("host", "?")),
         level=level,
@@ -99,6 +113,9 @@ def parse(doc: dict, seen: float) -> PeerReading:
         gpu_operator_mhz=doc.get("gpu_operator_mhz"),
         gpu_ceiling_mhz=doc.get("gpu_ceiling_mhz"),
         has_gpu_operator="gpu_operator_mhz" in doc,
+        stale_after_s=(
+            min(float(stale), MAX_PEER_STALE_S) if _finite(stale) and stale > 0 else None
+        ),
     )
 
 
@@ -135,10 +152,17 @@ class PeerLink:
         self._error: str | None = "not read yet"
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self.started = False  # start() was called: the thread, not the caller, polls
 
     @property
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    def stale_after(self, reading: PeerReading | None) -> float:
+        """The staleness window: ours, or the peer's own when that is longer."""
+        own = self.rule.stale_after_s
+        peer = reading.stale_after_s if reading else None
+        return max(own, peer) if peer is not None else own
 
     def configure(self, rule: PairRule) -> None:
         """A reload: a new peer address forgets what the old one said."""
@@ -151,43 +175,57 @@ class PeerLink:
         return min(1.0, self.rule.poll_s)
 
     def poll_once(self) -> None:
-        rule = self.rule
+        """One read. Never raises: any failure (network, HTTP framing, a document
+        that is no decision) is recorded as a failed read. A result for a peer
+        that a reload has since replaced is discarded."""
+        with self._lock:
+            peer, timeout = self.rule.peer, self.timeout()
         try:
-            doc = self.fetch(rule.peer, self.timeout())
+            doc = self.fetch(peer, timeout)
             now = self.clock()
             with self._lock:
+                if peer != self.rule.peer:
+                    return  # the peer changed while we read: not the current peer's state
                 prev = self._reading
+                # fresh only when the peer's `at` CHANGED: re-reading a frozen document
+                # keeps the time it was first seen, so a stuck peer ages and goes stale
                 seen = prev.seen if prev and prev.at == doc.get("at") else now
                 self._reading = parse(doc, seen)
                 self._failing, self._error = False, None
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - a bad read must never kill the poller
             with self._lock:
-                self._failing, self._error = True, _short(exc)
+                if peer == self.rule.peer:
+                    self._failing, self._error = True, _short(exc)
 
     def status(self, now: float) -> PeerStatus:
         with self._lock:
             r, failing, err = self._reading, self._failing, self._error
-        age = None if r is None else round(max(0.0, now - r.seen), 1)
         if r is None:
             return PeerStatus("unreachable", None, None, err)
-        if age is not None and age > self.rule.stale_after_s:
+        age = round(max(0.0, now - r.seen), 1)
+        if age > self.stale_after(r):
             return PeerStatus("unreachable" if failing else "stale", r, age, err)
         return PeerStatus("ok", r, age, err)
 
     # -- the background thread
     def start(self) -> None:
+        self.started = True
         if self.running:
             return
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="heat-governor-pair", daemon=True)
         self._thread.start()
 
-    def _loop(self) -> None:  # pragma: no cover - thread shell around poll_once
+    def _loop(self) -> None:
         while not self._stop.is_set():
-            self.poll_once()
+            try:
+                self.poll_once()
+            except Exception:  # noqa: BLE001  # nosec B110 - poll_once records its own failures
+                pass
             self._stop.wait(self.rule.poll_s)
 
     def stop(self) -> None:
+        self.started = False
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=self.timeout() + 1.0)
@@ -198,6 +236,11 @@ def _short(exc: BaseException) -> str:
     reason = getattr(exc, "reason", None)  # urllib.error.URLError
     text = str(reason if reason is not None else exc) or type(exc).__name__
     return text[:200]
+
+
+def lost(error: str) -> PeerStatus:
+    """A peer status that can only mean "not known": the pair goes one band hotter."""
+    return PeerStatus("unreachable", None, None, error)
 
 
 # -- the shared decision (pure) -------------------------------------------------

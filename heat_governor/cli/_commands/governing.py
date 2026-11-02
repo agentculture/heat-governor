@@ -136,13 +136,18 @@ def cmd_capabilities(args: argparse.Namespace) -> None:
 
 
 def _listen(spec: str | None) -> tuple[str, int] | None:
+    """``--listen`` / ``[daemon] listen`` by the one HOST:PORT rule set
+    (:func:`heat_governor.config.host_port`; an empty host means 127.0.0.1)."""
     if not spec:
         return None
-    host, _, port = spec.rpartition(":")
-    try:
-        return (host or "127.0.0.1", int(port))
-    except ValueError as exc:
-        raise CliError(EXIT_USER_ERROR, f"bad --listen {spec!r}", "use HOST:PORT") from exc
+    from heat_governor.config import host_port
+
+    addr = host_port(spec, default_host="127.0.0.1")
+    if addr is None:
+        raise CliError(
+            EXIT_USER_ERROR, f"bad --listen {spec!r}", "use HOST:PORT (no scheme or path)"
+        )
+    return addr
 
 
 class _Pick:
@@ -206,6 +211,7 @@ def _run_options(args: argparse.Namespace, cfg):
         state_path=Path(state_s) if state_s else default_state_path(),
         data_dir=data,
         listen=_listen(pick("listen", "listen", None)),
+        listeners=not args.once,  # a one-shot preview binds nothing: the daemon may hold it
         batch=tuple(args.batch or ()),
         serving=tuple(args.serving or ()),
         serving_cpu_cap=args.serving_cpu_cap,

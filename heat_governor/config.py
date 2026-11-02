@@ -346,8 +346,8 @@ def _validate_daemon(dmn: dict, problems: list[str]) -> None:
             problems.append(f"daemon.{k} has the wrong type")
     if _is_num(dmn.get("poll_s")) and not 0.1 <= dmn["poll_s"] <= 10:
         problems.append("daemon.poll_s must be between 0.1 and 10 seconds")
-    if isinstance(dmn.get("listen"), str) and ":" not in dmn["listen"]:
-        problems.append("daemon.listen must be HOST:PORT")
+    if isinstance(dmn.get("listen"), str) and host_port(dmn["listen"]) is None:
+        problems.append("daemon.listen must be HOST:PORT (no scheme or path)")
     ceiling = dmn.get("gpu_ceiling_mhz")
     if _is_num(ceiling) and not 100 <= ceiling <= 5000:
         problems.append("daemon.gpu_ceiling_mhz must be > 0, a whole MHz within 100-5000")
@@ -451,12 +451,42 @@ def _validate_units(units: object, problems: list[str]) -> None:
             problems.append(f"units[{i}] must be a table")
 
 
-def host_port(spec: str) -> tuple[str, int] | None:
-    """``"host:port"`` as ``(host, port)``; ``None`` when it is not one."""
+# compared against, never bound: the hosts that listen on every interface
+WILDCARD_HOSTS = ("0.0.0.0", "::", "")  # nosec B104
+
+
+def host_port(spec: str, *, default_host: str | None = None) -> tuple[str, int] | None:
+    """``"host:port"`` as ``(host, port)``; ``None`` when it is not one. The one
+    HOST:PORT rule set for every address (``[daemon] listen``, ``[pair] peer`` /
+    ``listen``, ``run --listen``): no scheme, no path, a port 1-65535, an IPv6
+    host in brackets. An empty host is allowed only where ``default_host`` is given."""
+    if not isinstance(spec, str) or "/" in spec or any(c.isspace() for c in spec):
+        return None  # "http://h:1" or "h:1/state": an address, not a URL
     host, sep, port = spec.rpartition(":")
-    if not sep or not host or not port.isdigit() or not 0 < int(port) < 65536:
+    if not sep or not port.isdigit() or not 0 < int(port) < 65536:
         return None
-    return host.strip("[]"), int(port)
+    if host.startswith("["):
+        if not host.endswith("]") or len(host) < 3:
+            return None
+        host = host[1:-1]
+    elif ":" in host:
+        return None  # a bare IPv6 address is ambiguous: bracket it
+    if not host:
+        if default_host is None:
+            return None
+        host = default_host
+    return host, int(port)
+
+
+def listen_conflict(a: tuple[str, int], b: tuple[str, int]) -> str | None:
+    """How two listen addresses relate: ``"same"`` (one socket serves both),
+    ``"clash"`` (same port and one is a wildcard: the second bind fails with
+    address in use), or ``None`` (independent)."""
+    if a == b:
+        return "same"
+    if a[1] == b[1] and (a[0] in WILDCARD_HOSTS or b[0] in WILDCARD_HOSTS):
+        return "clash"
+    return None
 
 
 def _validate_pair_keys(pair: dict, problems: list[str]) -> None:
@@ -468,7 +498,7 @@ def _validate_pair_keys(pair: dict, problems: list[str]) -> None:
             problems.append(f"pair.{k} has the wrong type")
     for k in ("peer", "listen"):
         if isinstance(pair.get(k), str) and host_port(pair[k]) is None:
-            problems.append(f"pair.{k} must be HOST:PORT")
+            problems.append(f"pair.{k} must be HOST:PORT (no scheme or path, e.g. 10.0.0.2:9476)")
     if "peer" not in pair:
         problems.append("pair.peer is required (HOST:PORT of the peer daemon's state server)")
     conts = pair.get("containers")
@@ -476,6 +506,19 @@ def _validate_pair_keys(pair: dict, problems: list[str]) -> None:
         problems.append("pair.containers is required (names or globs of this box's rank)")
     elif isinstance(conts, list) and not (conts and all(isinstance(c, str) and c for c in conts)):
         problems.append("pair.containers must be a non-empty list of container names or globs")
+
+
+def _validate_pair_listen(pair: dict, data: dict, problems: list[str]) -> None:
+    dmn = data.get("daemon") if isinstance(data.get("daemon"), dict) else {}
+    a = host_port(dmn["listen"]) if isinstance(dmn.get("listen"), str) else None
+    b = host_port(pair["listen"]) if isinstance(pair.get("listen"), str) else None
+    if a and b and listen_conflict(a, b) == "clash":
+        problems.append(
+            f"pair.listen {pair['listen']} and daemon.listen {dmn['listen']} share port {b[1]} "
+            "and one is a wildcard: the second bind would fail (address in use). Drop "
+            "pair.listen when daemon.listen is a wildcard (it already serves the peer), "
+            "or use another port"
+        )
 
 
 def _validate_pair(pair: dict, data: dict, problems: list[str]) -> None:
@@ -486,6 +529,7 @@ def _validate_pair(pair: dict, data: dict, problems: list[str]) -> None:
         problems.append("pair.poll_s must be between 0.2 and 10 seconds")
     if _is_num(stale) and _is_num(poll) and not 2 * poll <= stale <= 600:
         problems.append("pair.stale_after_s must be at least 2 x pair.poll_s and at most 600")
+    _validate_pair_listen(pair, data, problems)
     pats = pair.get("containers")
     if not (isinstance(pats, list) and all(isinstance(c, str) for c in pats)):
         return

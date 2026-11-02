@@ -65,9 +65,10 @@ separately:
 | Field | Type | Meaning |
 |---|---|---|
 | `peer` | str | `HOST:PORT` of the peer daemon's state server (`[pair] peer`). |
-| `peer_status` | str | `ok`; `stale` (the peer answers but its `at` has not advanced for `stale_after_s`, measured on this box's clock); `unreachable` (never read, or the last read failed and the last good one is older than `stale_after_s`). |
+| `peer_status` | str | `ok`; `stale` (the peer answers but its `at` has not changed for `stale_after_s`, measured on this box's clock from when it last changed); `unreachable` (never read, or the last read failed and the last good one is older than `stale_after_s`). Any read that fails, or a document that is no decision (no level, a non-finite `at` or `cpus`), counts as a failed read. |
 | `peer_error` | str or null | The last read failure while not `ok`. |
 | `peer_age_s` | float or null | Seconds since the peer's document last advanced (this box's clock). |
+| `stale_after_s` | float or null | The staleness window in force: the larger of `[pair] stale_after_s` and the peer's own published `stale_after_s` (its cadence, honoured up to 600 s). |
 | `peer_host`, `peer_level`, `peer_cpus`, `peer_effective_c` | | The peer's own `host`, `level`, `cpus` and `effective_c`, as last read (kept while stale). |
 | `peer_gpu_operator_mhz`, `gpu_operator_match` | int or null, bool or null | The peer's operator GPU ceiling, and whether it equals this box's `gpu_operator_mhz` (`null` when the peer is not `ok` or does not publish it). A mismatch is logged, never acted on. |
 | `level`, `admit`, `concurrency_factor` | str, bool, float | The pair's level: the higher of the two boxes' levels; admission and factor from it, by this box's `concurrency`. |

@@ -608,3 +608,362 @@ def test_cli_config_show_and_overview_carry_pair(tmp_path: Path, capsys) -> None
     assert rc == 0 and json.loads(out)["pair"]["peer"] == "10.77.77.2:9476"
     rc, out, _ = _cli(capsys, "config", "overview", "--config", str(cfg))
     assert rc == 0 and "pair peer 10.77.77.2:9476" in out
+
+
+# -- review fixes (PR #6) -----------------------------------------------------------
+
+
+class InspectCounting(FakeDocker):
+    """A FakeDocker that counts inspects and can fail them (a transient daemon error)."""
+
+    def __init__(self, *containers, fail_inspect: bool = False) -> None:
+        super().__init__(*containers)
+        self.inspects: list[str] = []
+        self.fail_inspect = fail_inspect
+
+    def inspect(self, ref: str):
+        from heat_governor.docker import DockerError
+
+        self.inspects.append(ref)
+        if self.fail_inspect:
+            raise DockerError("transient")
+        return super().inspect(ref)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        __import__("http.client").client.IncompleteRead(b"x"),
+        __import__("http.client").client.BadStatusLine("x"),
+        RuntimeError("anything"),
+    ],
+)
+def test_1_poll_once_never_raises(error: Exception) -> None:
+    clk, peer = Clock(), FakePeer()
+    link = PeerLink(PairRule("p:1", ("x",)), fetch=peer, clock=clk)
+    peer.error = error
+    link.poll_once()  # must not raise
+    assert link.status(clk()).status == "unreachable"
+
+
+def test_1_non_finite_peer_values_are_a_failed_read() -> None:
+    clk = Clock()
+    for doc in (peer_doc("cool", float("inf")), peer_doc("cool", None, at=float("nan"))):
+        link = PeerLink(PairRule("p:1", ("x",)), fetch=FakePeer(doc), clock=clk)
+        link.poll_once()
+        assert link.status(clk()).status == "unreachable"
+
+
+def test_1_poller_thread_survives_any_error() -> None:
+    import time
+
+    calls = {"n": 0}
+
+    def fetch(peer: str, timeout: float) -> dict:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("boom")
+        return peer_doc("warm", 8, at=time.time())
+
+    link = PeerLink(PairRule("p:1", ("x",), poll_s=0.2, stale_after_s=5.0), fetch=fetch)
+    link.poll_once = _wrap_raising(link.poll_once)  # even a raising poll_once
+    link.start()
+    try:
+        deadline = time.time() + 5
+        while time.time() < deadline and not link.status(time.time()).ok:
+            time.sleep(0.05)
+        assert link.running and link.status(time.time()).ok
+    finally:
+        link.stop()
+
+
+def _wrap_raising(fn):
+    state = {"first": True}
+
+    def wrapped() -> None:
+        if state["first"]:
+            state["first"] = False
+            raise RuntimeError("poll_once itself raised")
+        fn()
+
+    return wrapped
+
+
+def test_1_broken_link_falls_through_to_peer_lost(tmp_path: Path, monkeypatch) -> None:
+    dk, peer = _docker(), FakePeer(peer_doc("cool", None))
+    d, _, clk, logs = _pair_daemon(tmp_path, dk, peer)
+    d.discover()
+    d.tick()
+    assert d._pair.basis == "equal"
+
+    def broken(now):
+        raise RuntimeError("status broke")
+
+    monkeypatch.setattr(d.pair_link, "status", broken)
+    clk.t += 1
+    d.tick()
+    assert (d._pair.basis, d._pair.level, d._pair.cpus) == ("peer_lost", "warm", 12)
+    assert dk.c["r0"].nano_cpus == 12_000_000_000  # not frozen at the last value
+
+
+def test_1_failing_decision_falls_through_to_peer_lost(tmp_path: Path, monkeypatch) -> None:
+    from heat_governor import daemon as daemon_mod
+    from heat_governor.pair import decide as real
+
+    def flaky(level, cpus, peer, **kw):
+        if peer.ok:
+            raise OverflowError("bad peer value")
+        return real(level, cpus, peer, **kw)
+
+    monkeypatch.setattr(daemon_mod, "pair_decide", flaky)
+    d, _, _, logs = _pair_daemon(tmp_path, _docker(), FakePeer(peer_doc("cool", None)))
+    d.tick()
+    assert d._pair.basis == "peer_lost"
+    assert any("decision failed" in m for m in logs)
+
+
+def test_1_dead_poller_is_restarted_not_polled_in_the_tick(tmp_path: Path) -> None:
+    peer = FakePeer(peer_doc("cool", None))
+    d, _, _, _ = _pair_daemon(tmp_path, _docker(), peer)
+    d.pair_link.started = True  # start() ran, but the thread is gone
+    restarted = []
+    d.pair_link.start = lambda: restarted.append(True)
+    d.tick()
+    assert restarted == [True] and peer.calls == []
+
+
+def test_2_labelled_batch_rank_never_reaches_the_cycler_when_inspect_fails(
+    tmp_path: Path,
+) -> None:
+    dk = InspectCounting(
+        container("r0", "sparkrun_qwen_rank0", "batch"),
+        container("b1", "job", "batch"),
+        fail_inspect=True,
+    )
+    d, sysr, _, _ = _pair_daemon(tmp_path, dk, FakePeer())
+    d.discover()
+    assert "r0" in d.pair_ids and d.containers["r0"].role == "serving"
+    assert set(d.batch()) == {"b1"}
+    set_temp(sysr, 0, 99000)
+    d.tick()
+    d.cycler.cycle()
+    assert ("pause", "r0") not in dk.calls
+    d.cycler.stop()
+
+
+def test_2_batch_filters_pair_containers_by_name_too(tmp_path: Path) -> None:
+    dk = _docker()
+    d, _, _, _ = _pair_daemon(tmp_path, dk, FakePeer())
+    d.containers = {"r0": dk.c["r0"], "b1": dk.c["b1"]}  # r0 still role=batch, not in pair_ids
+    assert d.pair_ids == set()
+    assert set(d.batch()) == {"b1"}
+
+
+def test_3_turning_pair_cpu_cap_off_restores_the_rank(tmp_path: Path) -> None:
+    dk, peer = _docker(), FakePeer(peer_doc("hot", 4))
+    d, _, clk, logs = _pair_daemon(tmp_path, dk, peer)
+    d.discover()
+    d.tick()
+    assert dk.c["r0"].nano_cpus == 4_000_000_000
+    d.set_pair(PairRule(PAIR["peer"], ("sparkrun_*",), cpu_cap=False))
+    d.discover()
+    assert dk.c["r0"].nano_cpus != 4_000_000_000  # its own limit is back
+    assert "r0" not in d.ledger.nano_cpus
+    assert any("no longer CPU-capped" in m for m in logs)
+    clk.t += 1
+    d.tick()
+    assert dk.c["r0"].nano_cpus != 4_000_000_000  # and stays released
+
+
+def test_3_rule_cpu_cap_off_on_reload_restores_a_serving_container(tmp_path: Path) -> None:
+    from heat_governor.config import ContainerRule
+
+    dk = FakeDocker(container("s1", "lane", None, nano=0))
+    d, sysr, clk, _ = _pair_daemon(tmp_path, dk, FakePeer())
+    d.opts.use_labels = False
+    d.opts.containers = (ContainerRule("lane", "serving", True),)
+    set_temp(sysr, 0, 91000)
+    d.discover()
+    d.tick()
+    assert dk.c["s1"].nano_cpus == 4_000_000_000
+    d.opts.containers = (ContainerRule("lane", "serving", False),)
+    d.discover()
+    assert dk.c["s1"].nano_cpus != 4_000_000_000 and "s1" not in d.ledger.nano_cpus
+
+
+@pytest.mark.parametrize(
+    "spec",
+    ["http://10.77.77.2:9476", "10.77.77.2:9476/state", "::1:9476", "h:0", "h: 1", "[]:1", ""],
+)
+def test_4_host_port_rejects_urls_and_junk(spec: str) -> None:
+    from heat_governor.config import host_port
+
+    assert host_port(spec) is None
+
+
+def test_4_host_port_rules() -> None:
+    from heat_governor.config import host_port
+
+    assert host_port("[::1]:9476") == ("::1", 9476)
+    assert host_port("10.77.77.2:9476") == ("10.77.77.2", 9476)
+    assert host_port(":9476") is None
+    assert host_port(":9476", default_host="127.0.0.1") == ("127.0.0.1", 9476)
+    problems = validate({"pair": {**PAIR, "peer": "http://10.77.77.2:9476"}})
+    assert any("pair.peer must be HOST:PORT (no scheme or path" in p for p in problems)
+    assert "daemon.listen must be HOST:PORT (no scheme or path)" in validate(
+        {"daemon": {"listen": "http://127.0.0.1:9476"}}
+    )
+
+
+@pytest.mark.parametrize(
+    ("daemon_listen", "pair_listen", "clash"),
+    [
+        ("0.0.0.0:9476", "10.77.77.1:9476", True),
+        ("127.0.0.1:9476", "0.0.0.0:9476", True),
+        ("[::]:9476", "10.77.77.1:9476", True),
+        ("10.77.77.1:9476", "10.77.77.1:9476", False),  # same: served once
+        ("127.0.0.1:9476", "10.77.77.1:9476", False),
+        ("0.0.0.0:9476", "10.77.77.1:9477", False),
+    ],
+)
+def test_5_wildcard_listen_clash_is_a_config_error(daemon_listen, pair_listen, clash) -> None:
+    problems = validate(
+        {"daemon": {"listen": daemon_listen}, "pair": {**PAIR, "listen": pair_listen}}
+    )
+    assert any("would fail (address in use)" in p for p in problems) is clash
+
+
+def test_5_wildcard_cli_listen_skips_the_pair_server(tmp_path: Path) -> None:
+    logs: list[str] = []
+    rule = PairRule("h:1", ("x",), listen="10.77.77.1:9476")
+    d = Daemon.__new__(Daemon)
+    d.opts = Options(listen=("0.0.0.0", 9476), pair=rule, log=logs.append)
+    d.recorder = None
+    assert d._pair_server(rule) is None
+    assert any("shares port 9476" in m for m in logs)
+
+
+def test_6_run_once_binds_no_listener(tmp_path: Path, capsys, monkeypatch) -> None:
+    import socket
+
+    from heat_governor.cli._commands import governing
+
+    busy = socket.socket()
+    busy.bind(("127.0.0.1", 0))
+    busy.listen()
+    port = busy.getsockname()[1]
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f'platform = "spark"\n[daemon]\nlisten = "127.0.0.1:{port}"\n'
+        f'[pair]\npeer = "127.0.0.1:1"\ncontainers = ["x"]\nlisten = "127.0.0.2:{port}"\n'
+    )
+    monkeypatch.setattr(governing, "_docker", lambda args, cfg: FakeDocker())
+    try:
+        rc, out, err = _cli(
+            capsys,
+            "run",
+            "--once",
+            "--config",
+            str(cfg),
+            "--state",
+            str(tmp_path / "s.json"),
+            "--data-dir",
+            str(tmp_path / "d"),
+        )
+    finally:
+        busy.close()
+    assert rc == 0, err  # the live daemon's ports are busy: a preview must still run
+    assert "pair: level=" in out
+
+
+def test_7_peer_published_stale_window_is_honoured() -> None:
+    clk = Clock()
+    peer = FakePeer(peer_doc("cool", None, stale_after_s=30.0))
+    link = PeerLink(PairRule("p:1", ("x",), stale_after_s=5.0), fetch=peer, clock=clk)
+    link.poll_once()
+    clk.t += 10
+    st = link.status(clk())
+    assert st.ok and link.stale_after(st.reading) == 30.0  # its cadence, not ours
+    clk.t += 21
+    assert link.status(clk()).status == "stale"
+    capped = PeerLink(
+        PairRule("p:1", ("x",)), fetch=FakePeer(peer_doc("cool", None, stale_after_s=1e9))
+    )
+    capped.poll_once()
+    assert capped.stale_after(capped.status(0).reading) == 600.0
+    short = PeerLink(
+        PairRule("p:1", ("x",), stale_after_s=10.0),
+        fetch=FakePeer(peer_doc("cool", None, stale_after_s=5.0)),
+    )
+    short.poll_once()
+    assert short.stale_after(short.status(0).reading) == 10.0  # ours when longer
+
+
+def test_7_pair_doc_publishes_the_effective_window(tmp_path: Path) -> None:
+    peer = FakePeer(peer_doc("cool", None, stale_after_s=30.0))
+    d, _, _, _ = _pair_daemon(tmp_path, _docker(), peer)
+    d.tick()
+    assert read_state(tmp_path / "state.json")["pair"]["stale_after_s"] == 30.0
+
+
+def test_8_result_for_a_replaced_peer_is_discarded() -> None:
+    clk = Clock()
+    link: PeerLink
+
+    def fetch(peer: str, timeout: float) -> dict:
+        link.configure(PairRule("b:2", ("x",)))  # a reload lands mid-read
+        return peer_doc("hot", 4)
+
+    link = PeerLink(PairRule("a:1", ("x",)), fetch=fetch, clock=clk)
+    link.poll_once()
+    st = link.status(clk())
+    assert st.status == "unreachable" and st.reading is None  # A's doc is not B's
+
+
+def test_8_failure_for_a_replaced_peer_is_not_recorded() -> None:
+    link: PeerLink
+
+    def fetch(peer: str, timeout: float) -> dict:
+        link.configure(PairRule("b:2", ("x",)))
+        raise OSError("a is down")
+
+    link = PeerLink(PairRule("a:1", ("x",)), fetch=fetch, clock=Clock())
+    link.poll_once()
+    assert link.status(0).error == "not read yet"
+
+
+def test_8_frozen_peer_ages_although_it_answers() -> None:
+    clk, peer = Clock(), FakePeer(peer_doc("cool", None, at=5.0))
+    link = PeerLink(PairRule("p:1", ("x",), stale_after_s=5.0), fetch=peer, clock=clk)
+    for _ in range(7):
+        link.poll_once()  # every read succeeds, but `at` never changes
+        clk.t += 1
+    st = link.status(clk())
+    assert (st.status, st.age_s, st.error) == ("stale", 7.0, None)
+    peer.doc = peer_doc("cool", None, at=6.0)
+    link.poll_once()
+    assert link.status(clk()).ok
+
+
+def test_9_one_level_list_and_one_address_parser() -> None:
+    from heat_governor import pair, policy
+    from heat_governor.cli._commands.governing import _listen
+    from heat_governor.cli._errors import CliError
+
+    assert pair.LEVELS is policy.LEVELS
+    assert _listen(":9476") == ("127.0.0.1", 9476)
+    assert _listen("[::1]:9476") == ("::1", 9476)
+    with pytest.raises(CliError):
+        _listen("http://127.0.0.1:9476")
+
+
+def test_10_discovery_inspects_only_ranks_not_already_found(tmp_path: Path) -> None:
+    dk = InspectCounting(
+        container("r0", "sparkrun_qwen_rank0", "batch"),  # labelled: found by labels
+        container("r1", "sparkrun_qwen_rank1", None),  # unlabelled: must be inspected
+        container("o1", "other", None),
+    )
+    d, _, _, _ = _pair_daemon(tmp_path, dk, FakePeer())
+    d.discover()
+    assert d.pair_ids == {"r0", "r1"}
+    assert dk.inspects == ["sparkrun_qwen_rank1"]

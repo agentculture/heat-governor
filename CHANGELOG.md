@@ -16,6 +16,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `[pair] listen` (restart-only) binds a second state server, e.g. on the private link, so the peer can read this daemon while `[daemon] listen` stays on localhost.
 - When the two boxes' operator GPU ceilings (`gpu_operator_mhz`) differ, a warning is logged once per change (and once when they agree again); no clock is changed because of the peer.
 - Pair admission: `client.read/wait/Gate(..., pair=True)` and `heat-governor state|wait --pair` read the pair's signal (the hotter box) instead of the host's; without `[pair]` they fall back to the host signal with reason `no-pair`. `state`, `run --once` and `config overview|show` show the pair.
+- The peer's staleness window is the larger of `[pair] stale_after_s` and the peer's own published `stale_after_s` (which follows its poll interval; honoured up to 600 s), so a peer that publishes slowly is not declared lost between two of its own publishes; the window in force is published as `pair.stale_after_s`. "Advancing" means the peer's `at` changed, timed on this box's clock from when it last changed: a frozen peer that still answers goes stale.
+
+### Changed
+
+- One HOST:PORT rule set (`config.host_port`) for `[daemon] listen`, `run --listen`, `[pair] peer` and `[pair] listen`: no scheme, no path, a port 1-65535, IPv6 in brackets (`--listen :PORT` still means 127.0.0.1). `[daemon] listen = "http://..."` used to pass validation; it is now a config error.
+- `[daemon] listen` and `[pair] listen` on the same port with either one a wildcard (`0.0.0.0`, `::`) is a config error (the second bind would fail); identical addresses are served by one socket. With a wildcard `--listen`, the pair server is not bound and that is logged.
+- `run --once` binds no state server (neither `--listen` nor `[pair] listen`), so a one-shot preview works on a box whose daemon holds those ports.
+
+### Fixed
+
+- A peer read can never stop the poller: any failure (HTTP framing errors such as IncompleteRead or BadStatusLine, non-finite values, anything else) is a failed read, the polling loop itself cannot die, a dead poller is restarted instead of polled inside the tick, and any failure in the pair step falls through to `peer_lost` (one band hotter) instead of leaving the pair's last decision frozen.
+- A peer read that finishes after a reload changed the peer is discarded, never stored as the new peer's state.
+- Pair membership is decided by name: a rank already found by its label or a named rule is converted to serving without a second `docker inspect`, so a transient docker error can no longer hand a `batch`-labelled rank to the duty cycler; the duty cycler also skips any container whose name matches a pair pattern. Discovery lists names once and inspects only matching names not already found.
+- A container that stays governed but loses its CPU cap on a reload (`[pair] cpu_cap = false`, `[pair]` removed, or a `[[containers]]` rule's `cpu_cap` turned off) gets its own limit back at once instead of keeping the last cap until exit.
 
 ## [0.13.0] - 2026-10-24
 
