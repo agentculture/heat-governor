@@ -47,6 +47,7 @@ def cmd_config_overview(args: argparse.Namespace) -> None:
             doc["units"] = [u.name for u in cfg.units]
             doc["profile_keys"] = sorted(cfg.profile)
             doc["daemon_keys"] = sorted(cfg.daemon)
+            doc["pair_peer"] = cfg.pair.peer if cfg.pair else None
         except cfgmod.ConfigError as exc:
             doc |= {"valid": False, "problems": exc.problems}
     if args.json:
@@ -61,7 +62,8 @@ def cmd_config_overview(args: argparse.Namespace) -> None:
             f"{', '.join(doc['profile_keys']) or 'none'}; daemon "
             f"{', '.join(doc['daemon_keys']) or 'defaults'}; "
             f"{doc['containers']} container rule(s); "
-            f"user units {', '.join(doc['units']) or 'none'}"
+            f"user units {', '.join(doc['units']) or 'none'}; "
+            f"pair peer {doc['pair_peer'] or 'none'}"
         )
     else:
         text = f"{path}: INVALID\n" + "\n".join(f"  - {p}" for p in doc["problems"])
@@ -84,6 +86,7 @@ def cmd_config_show(args: argparse.Namespace) -> None:
         "daemon": cfg.daemon,
         "containers": [c.__dict__ for c in cfg.containers],
         "units": [{"name": u.name, "bands": dict(u.bands)} for u in cfg.units],
+        "pair": cfg.data.get("pair"),
     }
     if args.json:
         emit_result(doc, json_mode=True)
