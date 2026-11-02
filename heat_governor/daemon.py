@@ -12,6 +12,11 @@ And, only when the config lists them (``[[units]]``), systemd user units such
 as ``app.slice``: a CPUQuota by level (:mod:`heat_governor.units`), or sized by
 the learning loop of :mod:`heat_governor.adaptive` (``mode = "adaptive"``).
 
+With ``[pair]`` (one model across two boxes, :mod:`heat_governor.pair`), the
+containers it names are this box's rank: governed as serving (never paused),
+CPU-capped by the hotter of the two boxes' decisions. Everything else keeps
+using this box's readings only.
+
 Without ``apply`` the loop still senses, publishes the admission signal and
 records -- all harmless -- but changes no container (it logs what it would do).
 """
@@ -30,14 +35,28 @@ from typing import Callable
 from heat_governor import __version__, platforms
 from heat_governor.actuators import CpuCapper, DutyCycler, Ledger
 from heat_governor.adaptive import AdaptiveLoop, ModelStore, Trend, UsageMeter
-from heat_governor.config import Config, ConfigError, ContainerRule, UnitRule
+from heat_governor.config import (
+    PAIR_RESTART_ONLY,
+    Config,
+    ConfigError,
+    ContainerRule,
+    PairRule,
+    UnitRule,
+)
 from heat_governor.config import changed as config_changed
 from heat_governor.config import diff as config_diff
+from heat_governor.config import (
+    host_port,
+    listen_conflict,
+)
 from heat_governor.config import load as load_config
 from heat_governor.docker import Container, Docker, DockerError
 from heat_governor.gpuclock import GpuClock
 from heat_governor.gpulaw import GpuGovernor, Plan
 from heat_governor.operator_ceiling import OperatorCeiling, hold_path
+from heat_governor.pair import PairDecision, PeerLink, PeerStatus
+from heat_governor.pair import decide as pair_decide
+from heat_governor.pair import lost
 from heat_governor.platforms import Profile
 from heat_governor.policy import Controller, Decision, unit_cpus
 from heat_governor.recorder import Recorder, boot_id
@@ -53,6 +72,7 @@ class Options:
     state_path: Path | None = None
     data_dir: Path | None = None
     listen: tuple[str, int] | None = None
+    listeners: bool = True  # False (run --once): bind no state server at all
     batch: tuple[str, ...] = ()
     serving: tuple[str, ...] = ()
     serving_cpu_cap: bool = False  # cap named --serving containers too
@@ -60,6 +80,7 @@ class Options:
     discover_every_s: float = 5.0
     containers: tuple[ContainerRule, ...] = ()  # from the config file
     units: tuple[UnitRule, ...] = ()  # systemd user units to CPU-cap (config [[units]])
+    pair: PairRule | None = None  # one half of a tensor-parallel pair (config [pair])
     gpu_clock: bool = False  # lower the GPU clock ceiling per gpu_clock_bands
     gpu_ceiling_mhz: int | None = None  # the operator's ceiling from the config (law)
     platform: str | None = None  # explicit --platform (else config, else detected)
@@ -88,6 +109,7 @@ class Daemon:
         systemctl: SystemctlLike | None = None,
         clock: Callable[[], float] = time.time,
         host_cpus: int | None = None,
+        peer_link: PeerLink | None = None,
     ) -> None:
         self.profile = profile
         self.opts = opts
@@ -114,7 +136,19 @@ class Daemon:
         self.recorder = (
             Recorder(data / "records", fsync=opts.fsync) if (data and opts.record) else None
         )
-        self.server = StateServer(*opts.listen) if opts.listen else None
+        self.server = StateServer(*opts.listen) if (opts.listen and opts.listeners) else None
+        # -- the tensor-parallel pair ([pair]); None without one
+        self.pair_link: PeerLink | None = peer_link
+        if self.pair_link is None and opts.pair is not None:
+            self.pair_link = PeerLink(opts.pair)
+        self.pair_server = self._pair_server(opts.pair) if opts.listeners else None
+        self.pair_ids: set[str] = set()  # ids of this box's rank containers
+        self._pair_forced: set[str] = set()  # pair containers found as batch, logged once
+        self._pair: PairDecision | None = None
+        self._peer: PeerStatus | None = None
+        self._peer_ok: bool | None = None  # last logged peer health
+        self._ceilings: tuple | None = None  # (ours, the peer's) operator ceiling, last logged
+        self._started = False
         self.containers: dict[str, Container] = {}
         self._discovered_at = 0.0
         self._observed_at = 0.0
@@ -164,10 +198,14 @@ class Daemon:
         gone = set(self.containers) - set(found)
         for cid in gone:
             self._left(self.containers[cid])
+        for cid in set(found) & set(self.containers):
+            if _is_capped(self.containers[cid]) and not _is_capped(found[cid]):
+                self._uncapped(found[cid])
         for cid in set(found) - set(self.containers):
             c = found[cid]
             capped = "yes" if c.cpu_cap or c.role == "batch" else "no"
-            self._log(f"governing {c.name} role={c.role} cpu-cap={capped}")
+            pair = " pair=yes" if cid in self.pair_ids else ""
+            self._log(f"governing {c.name} role={c.role} cpu-cap={capped}{pair}")
         self.containers = found
 
     def _find_containers(self) -> dict[str, Container]:
@@ -188,21 +226,85 @@ class Daemon:
                 continue
             cap = rule.role == "batch" or rule.cpu_cap or c.cpu_cap
             found[c.id] = Container(c.id, c.name, c.state, rule.role, cap, c.nano_cpus)
+        if self.opts.pair is not None:
+            self._find_pair(found)
         return found
+
+    def _find_pair(self, found: dict[str, Container]) -> None:
+        """This box's rank: every container a ``[pair]`` pattern names, governed as
+        serving (pausing a rank hangs NCCL on the other box).
+
+        Membership is decided by NAME. A container already in ``found`` (by label or
+        a named rule) is converted in place, with no second inspect that could fail
+        and leave a labelled-batch rank to the duty cycler. Only matching names not
+        yet in ``found`` (unlabelled ranks) are listed and inspected."""
+        pair = self.opts.pair
+        ids: set[str] = set()
+        for cid, c in list(found.items()):
+            if pair.matches(c.name):
+                found[cid] = self._as_pair(c, had=c)
+                ids.add(cid)
+        known = {c.name for c in found.values()}
+        try:
+            names = [n for n in self.docker.names() if pair.matches(n) and n not in known]
+        except DockerError as exc:
+            self._log(f"discover pair: {exc}")
+            names = []
+        for name in names:
+            try:
+                c = self.docker.inspect(name)
+            except DockerError:
+                continue  # not governed at all this round: nothing will pause it
+            found[c.id] = self._as_pair(c, had=found.get(c.id))
+            ids.add(c.id)
+        self.pair_ids = ids
+
+    def _as_pair(self, c: Container, *, had: Container | None) -> Container:
+        """``c`` as a pair container: serving, capped by the pair band when allowed."""
+        if (c.role == "batch" or (had is not None and had.role == "batch")) and (
+            c.id not in self._pair_forced
+        ):
+            self._pair_forced.add(c.id)
+            self._log(
+                f"pair: {c.name} is a pair container: governed as serving, never "
+                "paused (it was named or labelled batch)"
+            )
+        own_cap = c.cpu_cap if c.role != "batch" else False
+        cap = self.opts.pair.cpu_cap or own_cap
+        return Container(c.id, c.name, c.state, "serving", cap, c.nano_cpus)
 
     def _left(self, old: Container) -> None:
         """``old`` left the governed set: give back any CPU cap we put on it."""
         self._log(f"container {old.name} left the governed set")
-        cid = old.id
+        self._release_cap(old)
+
+    def _uncapped(self, c: Container) -> None:
+        """``c`` stays governed but may no longer be capped (a reload turned its
+        cpu_cap off, or dropped ``[pair]``): give back the cap we put on it."""
+        self._log(f"{c.name}: no longer CPU-capped -- restoring its own limit")
+        self._release_cap(c)
+
+    def _release_cap(self, c: Container) -> None:
+        cid = c.id
         if self.capper and (cid in self.ledger.nano_cpus or self.capper.current.get(cid)):
-            self._fenced(f"release {old.name}", lambda: self.capper.set(old, None))
+            self._fenced(f"release {c.name}", lambda: self.capper.set(c, None))
             self.capper.current.pop(cid, None)
 
     def batch(self) -> dict[str, Container]:
-        return {k: c for k, c in self.containers.items() if c.role == "batch"}
+        """Duty-cycled containers. A pair container is never one, whatever it says."""
+        return {
+            k: c for k, c in self.containers.items() if c.role == "batch" and not self.is_pair(c)
+        }
 
     def capped(self) -> list[Container]:
-        return [c for c in self.containers.values() if c.role == "batch" or c.cpu_cap]
+        return [c for c in self.containers.values() if _is_capped(c)]
+
+    def is_pair(self, c: Container) -> bool:
+        """A pair container by id OR by name: never paused, even when a discovery
+        could not inspect it again."""
+        return c.id in self.pair_ids or (
+            self.opts.pair is not None and self.opts.pair.matches(c.name)
+        )
 
     # -- systemd user units
     def _ensure_unit_capper(self) -> UnitCapper:
@@ -340,6 +442,8 @@ class Daemon:
             return
         changes = config_diff(cfg.data, new.data)
         later = self._restart_only_changes(cfg.daemon, new.daemon)
+        old_pair, new_pair = cfg.data.get("pair") or {}, new.data.get("pair") or {}
+        later += [f"pair.{k}" for k in PAIR_RESTART_ONLY if old_pair.get(k) != new_pair.get(k)]
         self.apply_config(new, profile)
         self.config_error = None
         self._log(
@@ -347,7 +451,7 @@ class Daemon:
         )
         if later:
             self._log(
-                "these [daemon] keys take effect only after a restart "
+                "these keys take effect only after a restart "
                 f"(systemctl --user restart heat-governor): {', '.join(later)}"
             )
 
@@ -368,12 +472,170 @@ class Daemon:
         self.set_gpu_ceiling(d.get("gpu_ceiling_mhz"))
         self.opts.containers = tuple(cfg.containers)
         self._set_units(tuple(cfg.units))
+        self.set_pair(cfg.pair)
         self._discovered_at = 0.0  # re-discover on the next tick
 
     RESTART_ONLY = ("apply", "listen", "state", "data_dir", "record", "fsync", "reload")
 
     def _restart_only_changes(self, old: dict, new: dict) -> list[str]:
         return [k for k in self.RESTART_ONLY if old.get(k) != new.get(k)]
+
+    # -- the tensor-parallel pair
+    def _pair_server(self, pair: PairRule | None) -> StateServer | None:
+        """The extra state server the peer reads (``[pair] listen``), unless it is
+        the same address as ``--listen``."""
+        addr = host_port(pair.listen) if pair and pair.listen else None
+        if addr is None:
+            return None
+        how = listen_conflict(addr, self.opts.listen) if self.opts.listen else None
+        if how == "same":
+            return None
+        if how == "clash":
+            self._log(
+                f"pair: listen {pair.listen} shares port {addr[1]} with --listen "
+                f"{self.opts.listen[0]}:{self.opts.listen[1]} and one is a wildcard: not "
+                "binding it (the wildcard already serves that port; drop [pair] listen "
+                "or use another port)"
+            )
+            return None
+        return StateServer(*addr)
+
+    def set_pair(self, pair: PairRule | None) -> None:
+        """A reload: adopt, change or drop the pair (its ``listen`` waits for a restart)."""
+        if pair == self.opts.pair:
+            return
+        self.opts.pair = pair
+        if pair is None:
+            if self.pair_link:
+                self.pair_link.stop()
+            self.pair_link, self.pair_ids, self._pair, self._peer = None, set(), None, None
+            self._peer_ok = self._ceilings = None
+            self._log("pair: off -- pair containers follow this box's readings again")
+            return
+        if self.pair_link is None:
+            self.pair_link = PeerLink(pair)
+            if self._started:
+                self.pair_link.poll_once()
+                self.pair_link.start()
+        else:
+            self.pair_link.configure(pair)
+        self._log(f"pair: peer {pair.peer}, containers {', '.join(pair.containers)}")
+
+    def _pair_step(self, d: Decision, now: float) -> None:
+        """Read the peer's last snapshot, log health / ceiling transitions, and
+        decide the pair's level and CPU cap. Never leaves the decision frozen: any
+        failure here counts as a lost peer (one band hotter than local)."""
+        link = self.pair_link
+        if link is None:
+            return
+        peer = self._peer = self._peer_status(link, now)
+        try:
+            if peer.ok != self._peer_ok:
+                self._log_peer_health(peer)
+                self._peer_ok = peer.ok
+            if peer.ok and peer.reading is not None:
+                self._check_ceilings(peer.reading)
+        except Exception as exc:  # noqa: BLE001 - logging must not freeze the decision
+            self._log(f"pair: {exc!r}")
+        prev = self._pair
+        self._pair = self._decide_pair(d, peer)
+        if prev is None or prev.level != self._pair.level:
+            peer_level = peer.reading.level if peer.ok and peer.reading else "?"
+            self._log(
+                f"pair level {prev.level if prev else '-'} -> {self._pair.level} "
+                f"(here {d.level}, peer {peer_level}, {self._pair.basis}) "
+                f"cpus={self._pair.cpus}"
+            )
+
+    def _peer_status(self, link: PeerLink, now: float) -> PeerStatus:
+        try:
+            if not link.started:
+                link.poll_once()  # --once, tests, or before start(): read it in-line
+            elif not link.running:
+                link.start()  # the poller died: restart it, never poll in the tick
+            return link.status(now)
+        except Exception as exc:  # noqa: BLE001 - a broken read is a lost peer
+            return lost(f"pair read failed: {exc!r}"[:200])
+
+    def _decide_pair(self, d: Decision, peer: PeerStatus) -> PairDecision:
+        kw = {
+            "cpu_bands": sorted({c for _, c in self.profile.cpu_bands}),
+            "concurrency": self.profile.concurrency,
+        }
+        try:
+            return pair_decide(d.level, d.cpus, peer, **kw)
+        except Exception as exc:  # noqa: BLE001 - fall through to the conservative answer
+            self._log(f"pair: decision failed ({exc!r}) -- treating the peer as lost")
+            return pair_decide(d.level, d.cpus, lost(repr(exc)), **kw)
+
+    def _log_peer_health(self, peer: PeerStatus) -> None:
+        rule = self.opts.pair
+        if peer.ok:
+            host = peer.reading.host if peer.reading else "?"
+            self._log(f"pair: peer {rule.peer} ({host}) reached -- sharing the hotter band")
+            return
+        why = peer.error or f"no new state for {peer.age_s} s"
+        self._log(
+            f"pair: peer {rule.peer} {peer.status} ({why}) -- pair containers held one "
+            "band hotter than local until it is back"
+        )
+
+    def _check_ceilings(self, r) -> None:
+        """Warn (once per change) when the two boxes' operator GPU ceilings differ:
+        the slower rank sets the pair's pace. Never changes a clock."""
+        if not r.has_gpu_operator:
+            return
+        pair = (self.operator.mhz, r.gpu_operator_mhz)
+        if pair == self._ceilings:
+            return
+        was = self._ceilings
+        self._ceilings = pair
+        if pair[0] != pair[1]:
+            self._log(
+                f"pair: WARNING operator GPU ceiling differs: here {_mhz(pair[0])}, peer "
+                f"{r.host} {_mhz(pair[1])} -- the slower rank sets the pair's pace; "
+                "not changing clocks (set the same [daemon] gpu_ceiling_mhz on both)"
+            )
+        elif was is not None and was[0] != was[1]:
+            self._log(f"pair: operator GPU ceilings agree again ({_mhz(pair[0])})")
+
+    def pair_doc(self) -> dict | None:
+        rule = self.opts.pair
+        if rule is None:
+            return None
+        peer, dec = self._peer, self._pair
+        r = peer.reading if peer else None
+        return {
+            "peer": rule.peer,
+            "peer_status": peer.status if peer else "unreachable",
+            "peer_error": peer.error if peer and not peer.ok else None,
+            "peer_age_s": peer.age_s if peer else None,
+            "stale_after_s": self.pair_link.stale_after(r) if self.pair_link else None,
+            "peer_host": r.host if r else None,
+            "peer_level": r.level if r else None,
+            "peer_cpus": r.cpus if r else None,
+            "peer_effective_c": r.effective_c if r else None,
+            "peer_gpu_operator_mhz": r.gpu_operator_mhz if r else None,
+            "gpu_operator_match": (
+                self.operator.mhz == r.gpu_operator_mhz
+                if (r and r.has_gpu_operator and peer.ok)
+                else None
+            ),
+            "level": dec.level if dec else None,
+            "admit": dec.admit if dec else None,
+            "concurrency_factor": dec.concurrency_factor if dec else None,
+            "cpus": dec.cpus if dec else None,
+            "basis": dec.basis if dec else None,
+            "containers": sorted(
+                c.name for cid, c in self.containers.items() if cid in self.pair_ids
+            ),
+        }
+
+    def cpus_for(self, c: Container, d: Decision) -> int | None:
+        """A pair container follows the pair's band; everything else, this box's."""
+        if c.id in self.pair_ids and self._pair is not None:
+            return self._pair.cpus
+        return d.cpus
 
     @property
     def gpuclock(self) -> GpuClock | None:
@@ -426,12 +688,15 @@ class Daemon:
                 f"temp={d.temp_c} eff={d.effective_c} source={d.source} ({d.reason})"
             )
         self.last = d
+        self._fenced("pair", lambda: self._pair_step(d, now))
         self._gpu_plan = self.gpu.plan(d.gpu_mhz)
         doc = self.state_doc(d, reading, now)
         if self.opts.state_path:
             write_state(self.opts.state_path, doc)
         if self.server:
             self.server.doc = doc
+        if self.pair_server:
+            self.pair_server.doc = doc
         self._act(d, now)
         if self.recorder:
             self.recorder.write(
@@ -447,6 +712,7 @@ class Daemon:
                     "gpu_mhz": d.gpu_mhz,
                     **self._gpu_record(),
                     "source": d.source,
+                    **self._pair_record(),
                     "zones": {z.key: z.temp_c for z in reading.zones},
                     "fans": reading.fans,
                     "gpu": reading.gpu,
@@ -467,7 +733,9 @@ class Daemon:
             for c in self.capped():
                 self._fenced(
                     f"cap {c.name}",
-                    lambda c=c: self.capper.set(c, d.cpus, observed_at=self._observed_at),
+                    lambda c=c: self.capper.set(
+                        c, self.cpus_for(c, d), observed_at=self._observed_at
+                    ),
                 )
         self._fenced("gpu ceiling", lambda: self.gpu.step(d.gpu_mhz, d.level, now))
         if self.unit_capper:
@@ -522,10 +790,21 @@ class Daemon:
                     "role": c.role,
                     "paused_by_governor": bool(self.cycler and c.id in self.cycler.held),
                     "cpus": self.capper.current.get(c.id) if self.capper else None,
+                    "pair": c.id in self.pair_ids,
                 }
                 for c in self.containers.values()
             ],
             "units": [self._unit_doc(u) for u in self.opts.units],
+            "pair": self.pair_doc(),
+        }
+
+    def _pair_record(self) -> dict:
+        if self._pair is None:
+            return {}
+        return {
+            "pair_level": self._pair.level,
+            "pair_cpus": self._pair.cpus,
+            "peer_status": self._peer.status if self._peer else None,
         }
 
     def _gpu_record(self) -> dict:
@@ -577,6 +856,16 @@ class Daemon:
             self.cycler.start()
         if self.server:
             self.server.start()
+        if self.pair_server:
+            self.pair_server.start()
+        if self.pair_link:
+            self.pair_link.poll_once()  # the first tick then knows the peer already
+            self.pair_link.start()
+            self._log(
+                f"pair: peer {self.opts.pair.peer}, containers "
+                f"{', '.join(self.opts.pair.containers)}"
+            )
+        self._started = True
         self._log(
             f"start platform={self.profile.name} apply={self.opts.apply} poll={self.opts.poll_s}s "
             f"limits warm/hot/crit={self.profile.limits.warm_c}/{self.profile.limits.hot_c}/"
@@ -608,6 +897,10 @@ class Daemon:
         self.gpu.release("stop")
         if self.server:
             self.server.stop()
+        if self.pair_link:
+            self.pair_link.stop()
+        if self.pair_server:
+            self.pair_server.stop()
         self._log("stop: own pauses released, CPU limits, unit quotas and GPU ceiling restored")
         if self.recorder:
             self.recorder.close()
@@ -630,3 +923,11 @@ class Daemon:
                 self._stop.wait(max(0.0, self.opts.poll_s - (time.monotonic() - t0)))
         finally:
             self.shutdown()
+
+
+def _mhz(v: int | None) -> str:
+    return "none" if v is None else f"{v} MHz"
+
+
+def _is_capped(c: Container) -> bool:
+    return c.role == "batch" or c.cpu_cap

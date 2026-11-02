@@ -76,6 +76,9 @@ class FakeDocker:
     def labelled(self) -> list[Container]:
         return [c for c in self.c.values() if c.role]
 
+    def names(self) -> list[str]:
+        return [c.name for c in self.c.values()]
+
     def _set(self, ref: str, **kw) -> None:
         c = self._get(ref)
         self.c[c.id] = Container(**{**c.__dict__, **kw})

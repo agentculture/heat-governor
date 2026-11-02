@@ -136,13 +136,18 @@ def cmd_capabilities(args: argparse.Namespace) -> None:
 
 
 def _listen(spec: str | None) -> tuple[str, int] | None:
+    """``--listen`` / ``[daemon] listen`` by the one HOST:PORT rule set
+    (:func:`heat_governor.config.host_port`; an empty host means 127.0.0.1)."""
     if not spec:
         return None
-    host, _, port = spec.rpartition(":")
-    try:
-        return (host or "127.0.0.1", int(port))
-    except ValueError as exc:
-        raise CliError(EXIT_USER_ERROR, f"bad --listen {spec!r}", "use HOST:PORT") from exc
+    from heat_governor.config import host_port
+
+    addr = host_port(spec, default_host="127.0.0.1")
+    if addr is None:
+        raise CliError(
+            EXIT_USER_ERROR, f"bad --listen {spec!r}", "use HOST:PORT (no scheme or path)"
+        )
+    return addr
 
 
 class _Pick:
@@ -177,7 +182,7 @@ def _docker(args: argparse.Namespace, cfg):
 
     sock = args.docker_socket or DEFAULT_SOCKET
     docker = None if args.no_docker or not Path(sock).exists() else Docker(sock)
-    if (args.batch or args.serving or cfg.containers) and docker is None:
+    if (args.batch or args.serving or cfg.containers or cfg.pair) and docker is None:
         raise CliError(
             EXIT_ENV_ERROR,
             f"no docker socket at {sock}",
@@ -206,6 +211,7 @@ def _run_options(args: argparse.Namespace, cfg):
         state_path=Path(state_s) if state_s else default_state_path(),
         data_dir=data,
         listen=_listen(pick("listen", "listen", None)),
+        listeners=not args.once,  # a one-shot preview binds nothing: the daemon may hold it
         batch=tuple(args.batch or ()),
         serving=tuple(args.serving or ()),
         serving_cpu_cap=args.serving_cpu_cap,
@@ -213,6 +219,7 @@ def _run_options(args: argparse.Namespace, cfg):
         discover_every_s=float(dcfg.get("discover_every_s", 5.0)),
         containers=tuple(cfg.containers),
         units=tuple(cfg.units),
+        pair=cfg.pair,
         gpu_clock=bool(gpu_clock),
         gpu_ceiling_mhz=dcfg.get("gpu_ceiling_mhz"),
         platform=getattr(args, "platform", None),
@@ -245,6 +252,7 @@ def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
         }
         for u in opts.units
     ]
+    doc["pair"] = d.pair_doc()
     emit_result(doc if args.json else _decision_text(doc), json_mode=args.json)
 
 
@@ -284,7 +292,24 @@ def _decision_text(doc: dict) -> str:
             if doc.get("units")
             else ""
         )
+        + (_pair_text(doc["pair"]) + "\n" if doc.get("pair") else "")
         + (">> dry run: nothing was changed; --apply to govern" if doc.get("dry_run") else "")
+    )
+
+
+def _pair_text(p: dict) -> str:
+    """One line on the tensor-parallel pair (the ``pair`` section of the state)."""
+    peer = f"peer {p.get('peer')} {p.get('peer_status')}"
+    if p.get("peer_status") == "ok":
+        peer += f" ({p.get('peer_host')}: {p.get('peer_level')}, cpus={p.get('peer_cpus')})"
+    elif p.get("peer_error"):
+        peer += f" ({p['peer_error']})"
+    match = p.get("gpu_operator_match")
+    ceiling = "" if match is not False else "; GPU operator ceilings DIFFER"
+    ranks = ", ".join(p.get("containers") or []) or "none found"
+    return (
+        f"pair: level={p.get('level')} admit={p.get('admit')} cpus={p.get('cpus')} "
+        f"basis={p.get('basis')}; {peer}{ceiling}; containers: {ranks}"
     )
 
 
@@ -292,7 +317,7 @@ def _decision_text(doc: dict) -> str:
 
 
 def cmd_state(args: argparse.Namespace) -> None:
-    adm = client.read(args.source, if_unknown=args.if_unknown)
+    adm = client.read(args.source, if_unknown=args.if_unknown, pair=args.pair)
     doc = {
         "admit": adm.admit,
         "level": adm.level,
@@ -304,17 +329,24 @@ def cmd_state(args: argparse.Namespace) -> None:
     if args.json:
         emit_result(doc, json_mode=True)
         return
-    emit_result(
+    text = (
         f"{adm.level}: admit={adm.admit} factor={adm.concurrency_factor} "
-        f"temp={adm.temp_c} ({adm.reason or 'ok'})",
-        json_mode=False,
+        f"temp={adm.temp_c} ({adm.reason or 'ok'})"
     )
+    pair = (adm.state or {}).get("pair")
+    if isinstance(pair, dict):
+        text += "\n" + _pair_text(pair)
+    emit_result(text, json_mode=False)
 
 
 def cmd_wait(args: argparse.Namespace) -> int:
     try:
         adm = client.wait(
-            args.source, timeout=args.timeout, poll_s=args.poll, if_unknown=args.if_unknown
+            args.source,
+            timeout=args.timeout,
+            poll_s=args.poll,
+            if_unknown=args.if_unknown,
+            pair=args.pair,
         )
     except TimeoutError as exc:
         if args.json:
@@ -456,6 +488,11 @@ def _source_args(p: argparse.ArgumentParser) -> None:
         choices=("admit", "hold"),
         default="admit",
         help="What a missing or stale state means (default admit: no governor there).",
+    )
+    p.add_argument(
+        "--pair",
+        action="store_true",
+        help="Read the tensor-parallel pair's signal (the hotter box) instead of the host's.",
     )
 
 
