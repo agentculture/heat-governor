@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-11-02
+
+### Fixed
+
+- Pair tests no longer depend on the host: two cap-release tests assumed more than 4 CPUs (an unlimited original restores to os.cpu_count()), and the run --once text test assumed the local sensors read cool. CI runners have 4 CPUs and no thermal zones, so main 0.14.0 failed its tests and its PyPI publish.
+
 ## [0.14.0] - 2026-11-02
 
 ### Added
