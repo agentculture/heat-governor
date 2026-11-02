@@ -70,6 +70,7 @@ def _profile_dict(prof: platforms.Profile) -> dict[str, object]:
         "duty_curve": [list(x) for x in prof.duty_curve],
         "cpu_bands": [list(x) for x in prof.cpu_bands],
         "gpu_clock_bands": [list(x) for x in prof.gpu_clock_bands],
+        "unit_bands": dict(prof.unit_bands),
         "concurrency": dict(zip(("cool", "warm", "hot", "critical"), prof.concurrency)),
         "lookahead_s": prof.lookahead_s,
         "ramp_s": prof.ramp_s,
@@ -211,7 +212,9 @@ def _run_options(args: argparse.Namespace, cfg):
         use_labels=not args.no_labels and bool(dcfg.get("use_labels", True)),
         discover_every_s=float(dcfg.get("discover_every_s", 5.0)),
         containers=tuple(cfg.containers),
+        units=tuple(cfg.units),
         gpu_clock=bool(gpu_clock),
+        gpu_ceiling_mhz=dcfg.get("gpu_ceiling_mhz"),
         platform=getattr(args, "platform", None),
         config=cfg if (cfg.path and dcfg.get("reload", True)) else None,
         cli_set=frozenset(pick.cli_set | ({"use_labels"} if args.no_labels else set())),
@@ -222,13 +225,26 @@ def _run_options(args: argparse.Namespace, cfg):
 
 
 def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
-    if d.gpuclock and opts.gpu_clock:
-        d.gpuclock.probe()
+    from heat_governor.policy import unit_cpus
+
+    d.gpu.ensure()
     d.discover()
     dec = d.tick()
     doc = {"dry_run": not opts.apply, "state": str(opts.state_path), **dec.as_dict()}
     doc["config"] = str(cfg.path) if cfg.path and cfg.mtime else None
     doc["containers"] = [{"name": c.name, "role": c.role} for c in d.containers.values()]
+    doc["units"] = [
+        {
+            "name": u.name,
+            "mode": u.mode,
+            "cpus": (
+                d.adaptive[u.name].cap
+                if u.name in d.adaptive
+                else unit_cpus(dec.level, d.unit_bands(u))
+            ),
+        }
+        for u in opts.units
+    ]
     emit_result(doc if args.json else _decision_text(doc), json_mode=args.json)
 
 
@@ -261,6 +277,13 @@ def _decision_text(doc: dict) -> str:
         f"temp={doc['temp_c']} eff={doc['effective_c']}\n"
         f"config: {doc.get('config') or 'none (built-in profile)'}\n"
         f"governed containers: {gov}\n"
+        + (
+            "user units: "
+            + ", ".join(f"{u['name']}(cpus={u['cpus']})" for u in doc["units"])
+            + "\n"
+            if doc.get("units")
+            else ""
+        )
         + (">> dry run: nothing was changed; --apply to govern" if doc.get("dry_run") else "")
     )
 
@@ -357,6 +380,11 @@ def cmd_sensors(args: argparse.Namespace) -> None:
         if "s_at_or_above" in r:
             line += f"  {r['s_at_or_above']:>5}"
         lines.append(line)
+    if res.get("gpu_held_by_operator_ticks"):
+        lines.append(
+            f"gpu: the operator ceiling held a higher policy ceiling on "
+            f"{res['gpu_held_by_operator_ticks']} ticks"
+        )
     emit_result("\n".join(lines), json_mode=False)
 
 

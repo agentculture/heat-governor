@@ -68,6 +68,9 @@ class Profile:
     # gpu-thermal zone is already watched). Whichever input is closer to its own
     # limit governs.
     gpu_temp_limits: "Limits | None" = None
+    # CPU cap for configured systemd user units ([[units]]) per level: (level, cpus)
+    # for any of warm / hot / critical. Empty = a unit is capped only by its own bands.
+    unit_bands: tuple[tuple[str, float], ...] = ()
     lookahead_s: float = 1.5  # effective temp = temp + lookahead * rising rate
     rate_window_s: float = 3.0
     ramp_s: float = 60.0  # a CPU cap rises one band per ramp_s; drops are immediate
@@ -90,6 +93,8 @@ SPARK = Profile(
     gpu_clock_bands=((90.0, 2200), (91.5, 1800), (93.0, 1400)),  # declared, unmeasured
     # GB10 reports ~21 C of headroom (T.Limit) at 73 C: its own limit is near 94 C.
     gpu_temp_limits=Limits(warm_c=82.0, hot_c=87.0, crit_c=91.0),  # declared, unmeasured
+    # of 20 CPUs, for the operator's own sessions (app.slice): declared, unmeasured
+    unit_bands=(("warm", 8.0), ("hot", 4.0), ("critical", 2.0)),
     lookahead_s=0.5,
     rate_window_s=2.0,
     gpu="nvidia-smi",
@@ -106,7 +111,10 @@ THOR = Profile(
     limits=Limits(warm_c=95.0, hot_c=100.0, crit_c=104.0),
     duty_curve=((95.0, 0.0), (98.0, 0.2), (101.0, 0.5), (104.0, 1.0)),
     cpu_bands=((95.0, 10), (100.0, 6)),
-    gpu_clock_bands=((98.0, 1300), (101.0, 1000)),  # declared, unmeasured
+    # measured 2026-10-24 (docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md): worker
+    # decode loses 3-15% at 1300-900 MHz for only 1-5 W, so no default ceiling; these
+    # heat steps stay declared
+    gpu_clock_bands=((98.0, 1300), (101.0, 1000)),
     gpu="jetson",
     provenance="declared: passive trip 109 C minus margin; unmeasured",
     notes="gpu-thermal returns EAGAIN while the GPU is idle; that zone is skipped, not hot.",
@@ -125,9 +133,15 @@ ORIN = Profile(
     limits=Limits(warm_c=85.0, hot_c=90.0, crit_c=94.0),
     duty_curve=((85.0, 0.0), (88.0, 0.2), (91.0, 0.5), (94.0, 1.0)),
     cpu_bands=((85.0, 8), (90.0, 4)),
-    gpu_clock_bands=((88.0, 1100), (91.0, 900)),  # declared, unmeasured
+    # measured 2026-10-24 (docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md): the
+    # decider at 2 concurrent, full 1300 MHz -> board 94.1 C max; 1122 MHz -> 83.6 C max for
+    # -12% req/s and -25% GPU rail; 918 MHz -> 80.2 C for -27%. Steps are devfreq steps.
+    gpu_clock_bands=((85.0, 1122), (88.0, 918)),
     gpu="jetson",
-    provenance="declared: passive trip 99 C minus margin; unmeasured",
+    provenance=(
+        "declared limits: passive trip 99 C minus margin; GPU clock steps measured "
+        "2026-10-24 (decider sweep)"
+    ),
     notes="cv0-2 zones return ENODATA (no DLA load); skipped.",
 )
 

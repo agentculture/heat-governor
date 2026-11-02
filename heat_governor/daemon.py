@@ -8,6 +8,10 @@ Which containers it touches:
 * plus any the operator names with ``--batch`` / ``--serving`` (for containers
   started without labels). Everything else is left alone.
 
+And, only when the config lists them (``[[units]]``), systemd user units such
+as ``app.slice``: a CPUQuota by level (:mod:`heat_governor.units`), or sized by
+the learning loop of :mod:`heat_governor.adaptive` (``mode = "adaptive"``).
+
 Without ``apply`` the loop still senses, publishes the admission signal and
 records -- all harmless -- but changes no container (it logs what it would do).
 """
@@ -25,17 +29,21 @@ from typing import Callable
 
 from heat_governor import __version__, platforms
 from heat_governor.actuators import CpuCapper, DutyCycler, Ledger
-from heat_governor.config import Config, ConfigError, ContainerRule
+from heat_governor.adaptive import AdaptiveLoop, ModelStore, Trend, UsageMeter
+from heat_governor.config import Config, ConfigError, ContainerRule, UnitRule
 from heat_governor.config import changed as config_changed
 from heat_governor.config import diff as config_diff
 from heat_governor.config import load as load_config
 from heat_governor.docker import Container, Docker, DockerError
 from heat_governor.gpuclock import GpuClock
+from heat_governor.gpulaw import GpuGovernor, Plan
+from heat_governor.operator_ceiling import OperatorCeiling, hold_path
 from heat_governor.platforms import Profile
-from heat_governor.policy import Controller, Decision
+from heat_governor.policy import Controller, Decision, unit_cpus
 from heat_governor.recorder import Recorder, boot_id
 from heat_governor.sense import Reading, Sensor
 from heat_governor.state import SCHEMA, StateServer, write_state
+from heat_governor.units import Systemctl, SystemctlLike, UnitCapper, containing
 
 
 @dataclass
@@ -51,7 +59,9 @@ class Options:
     use_labels: bool = True
     discover_every_s: float = 5.0
     containers: tuple[ContainerRule, ...] = ()  # from the config file
+    units: tuple[UnitRule, ...] = ()  # systemd user units to CPU-cap (config [[units]])
     gpu_clock: bool = False  # lower the GPU clock ceiling per gpu_clock_bands
+    gpu_ceiling_mhz: int | None = None  # the operator's ceiling from the config (law)
     platform: str | None = None  # explicit --platform (else config, else detected)
     config: Config | None = None  # re-read while running when it changes
     cli_set: frozenset = frozenset()  # option names given on the command line (win over the file)
@@ -75,7 +85,9 @@ class Daemon:
         sensor: Sensor | None = None,
         docker: Docker | None = None,
         gpuclock: GpuClock | None = None,
+        systemctl: SystemctlLike | None = None,
         clock: Callable[[], float] = time.time,
+        host_cpus: int | None = None,
     ) -> None:
         self.profile = profile
         self.opts = opts
@@ -109,12 +121,34 @@ class Daemon:
         self._stop = threading.Event()
         self.last: Decision | None = None
         self.host = socket.gethostname()
-        if gpuclock is None and opts.gpu_clock:
+        self.operator = OperatorCeiling(hold_path(data) if data else None, opts.gpu_ceiling_mhz)
+        if gpuclock is None and (opts.gpu_clock or self.operator.mhz is not None):
             gpuclock = GpuClock()
-        self.gpuclock = gpuclock
+        self.gpu = GpuGovernor(
+            gpuclock,
+            self.ledger,
+            self.operator,
+            self._log,
+            apply=opts.apply,
+            enabled=opts.gpu_clock,
+        )
+        self._gpu_plan = Plan(False, None, None, False)
         self._reload_at = 0.0
-        self._gpu_retry_at = 0.0
+        self._operator_at = 0.0
         self.config_error: str | None = None
+        self.systemctl = systemctl
+        self.unit_capper: UnitCapper | None = None
+        self._unbanded: set[str] = set()
+        self.host_cpus = host_cpus or os.cpu_count() or 1
+        self.adaptive: dict[str, AdaptiveLoop] = {}  # unit -> its loop (mode = adaptive)
+        self.trends: dict[str, Trend] = {}  # unit -> temperature readings since its last step
+        self._adaptive_store: ModelStore | None = None
+        self.unit_use: dict[str, float | None] = {}  # unit -> CPUs used, last measured
+        self._use_sampled: dict[str, float] = {}  # levels-mode unit -> when use was last read
+        self.meter = UsageMeter(self._unit_usage)
+        if opts.units:
+            self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
+            self._sync_adaptive(opts.units)
 
     # -- logging: to the log sink and into the record
     def _log(self, msg: str) -> None:
@@ -170,6 +204,117 @@ class Daemon:
     def capped(self) -> list[Container]:
         return [c for c in self.containers.values() if c.role == "batch" or c.cpu_cap]
 
+    # -- systemd user units
+    def _ensure_unit_capper(self) -> UnitCapper:
+        if self.unit_capper is None:
+            if self.systemctl is None:
+                self.systemctl = Systemctl()
+            self.unit_capper = UnitCapper(
+                self.systemctl, self.ledger, self._log, apply=self.opts.apply
+            )
+        return self.unit_capper
+
+    @property
+    def adaptive_store(self) -> ModelStore:
+        """What the adaptive loops learned, ``<data_dir>/adaptive.json`` (read on
+        first use, written after each accepted sample)."""
+        if self._adaptive_store is None:
+            path = (self.opts.data_dir or Path(".")) / "adaptive.json"
+            self._adaptive_store = ModelStore(path, self._log)
+        return self._adaptive_store
+
+    def _unit_usage(self, unit: str) -> int | None:
+        return self.systemctl.cpu_usage_usec(unit) if self.systemctl else None
+
+    def _sync_adaptive(self, units: tuple[UnitRule, ...]) -> None:
+        """One loop per adaptive unit; a reload keeps each loop's cap and model."""
+        want = {u.name: u for u in units if u.mode == "adaptive"}
+        for name in set(self.adaptive) - set(want):
+            del self.adaptive[name]
+            self.trends.pop(name, None)
+        for name, r in want.items():
+            self.trends.setdefault(name, Trend())
+            loop = self.adaptive.setdefault(name, AdaptiveLoop())
+            loop.configure(r.min_cpus, r.engage, r.interval_s, r.target_rate_c_min)
+            loop.model = self.adaptive_store.model(self.profile.name, name)
+
+    USE_SAMPLE_S = 5.0  # a levels-mode unit's use is read at most this often
+
+    def _unit_step(self, rule: UnitRule, d: Decision, now: float) -> None:
+        """Measure the unit, size its cap (by level or by its loop), hand it to the
+        capper (which applies the ledger, dry-run and missing-unit rules)."""
+        name = rule.name
+        loop = self.adaptive.get(name)
+        if loop is None:
+            if now - self._use_sampled.get(name, float("-inf")) >= self.USE_SAMPLE_S:
+                self._use_sampled[name] = now  # use only feeds the state: no need per tick
+                self.unit_use[name] = self.meter.sample(name, now)
+            self.unit_capper.set(name, unit_cpus(d.level, self.unit_bands(rule)))
+            return
+        trend = self.trends[name]
+        trend.add(now, None if d.reason == "sensor_lost" else d.temp_c, d.source)
+        if loop.due(now):
+            self._evaluate(name, loop, trend, d.level, now)
+        self.unit_capper.set(name, loop.cap)
+
+    def _evaluate(self, name: str, loop: AdaptiveLoop, trend: Trend, level: str, now: float):
+        """One adaptive evaluation: measure use, fit the trend, step the loop, log."""
+        use = self.unit_use[name] = self.meter.sample(name, now)
+        live = self.unit_capper.applies(name)
+        if not live:
+            loop.pending = None  # a change not made has no response to learn from
+        rate = trend.take()
+        step = loop.step(
+            level,
+            rate,
+            use,
+            self.host_cpus,
+            now,
+            learn=live,
+            noise=trend.noise,
+            long=trend.long(),
+            switched=trend.switched,
+        )
+        if step.lesson:
+            self._log(f"adaptive {name}: {step.lesson}")
+        if step.changed:
+            trend.restart_long()  # the readings before a change describe another cap
+            self._log(step.describe(name, dry=not live))
+        if step.learned:
+            self.adaptive_store.save()
+
+    def unit_bands(self, rule: UnitRule) -> tuple[tuple[str, float], ...]:
+        """A unit's own bands replace the platform default entirely."""
+        bands = rule.bands or self.profile.unit_bands
+        if not bands and rule.name not in self._unbanded:
+            self._unbanded.add(rule.name)
+            self._log(
+                f"unit {rule.name}: no bands and platform {self.profile.name} declares none: "
+                "never capped (give warm/hot/critical in [[units]])"
+            )
+        return bands
+
+    def _set_units(self, units: tuple[UnitRule, ...]) -> None:
+        old = {u.name for u in self.opts.units}
+        gone = old - {u.name for u in units}
+        self.opts.units = units
+        if gone and self.unit_capper:
+            self.unit_capper.release(gone)
+        self._sync_adaptive(units)
+        if units:
+            self._ensure_unit_capper().set_dry({u.name for u in units if u.dry_run})
+            if {u.name for u in units} != old:
+                self._note_self_inside()
+        self._unbanded.clear()  # re-report an unbanded unit after a reload
+
+    def _note_self_inside(self, cgroup_file: Path = Path("/proc/self/cgroup")) -> None:
+        for name in containing([u.name for u in self.opts.units], cgroup_file):
+            self._log(
+                f"note: heat-governor itself runs inside {name}, so that unit's cap bounds it "
+                "too; it needs little CPU, but under heavy contention its share follows "
+                "CPUWeight (e.g. CPUWeight=1000 on heat-governor.service)"
+            )
+
     # -- configuration reload
     def maybe_reload(self, now: float) -> None:
         cfg = self.opts.config
@@ -220,7 +365,9 @@ class Daemon:
                 setattr(self.opts, key, d[key])
         if "gpu_clock" in d and "gpu_clock" not in self.opts.cli_set:
             self.set_gpu_clock(bool(d["gpu_clock"]))
+        self.set_gpu_ceiling(d.get("gpu_ceiling_mhz"))
         self.opts.containers = tuple(cfg.containers)
+        self._set_units(tuple(cfg.units))
         self._discovered_at = 0.0  # re-discover on the next tick
 
     RESTART_ONLY = ("apply", "listen", "state", "data_dir", "record", "fsync", "reload")
@@ -228,61 +375,40 @@ class Daemon:
     def _restart_only_changes(self, old: dict, new: dict) -> list[str]:
         return [k for k in self.RESTART_ONLY if old.get(k) != new.get(k)]
 
+    @property
+    def gpuclock(self) -> GpuClock | None:
+        return self.gpu.clock
+
     def set_gpu_clock(self, on: bool) -> None:
         if on == self.opts.gpu_clock:
             return
-        self.opts.gpu_clock = on
+        self.opts.gpu_clock = self.gpu.enabled = on
         if on:
-            self.gpuclock = self.gpuclock or GpuClock()
-            self.gpuclock.probe()
-            self._log(f"gpu clock control on: {self.gpuclock.reason}")
+            self._log(f"gpu clock control on: {self.gpu.probe()}")
         else:
-            self._release_gpu("gpu clock control off")
+            self.gpu.release("gpu clock control off")
 
-    # -- GPU clock ceiling
-    GPU_RETRY_S = 30.0  # after a failed helper call, wait before trying again
+    def set_gpu_ceiling(self, mhz: int | None) -> None:
+        """The config's operator ceiling (``[daemon] gpu_ceiling_mhz``)."""
+        if mhz == self.operator.config_mhz:
+            return
+        self.opts.gpu_ceiling_mhz = self.operator.config_mhz = mhz
+        self._operator_changed()
 
-    def _gpu(self, want: int | None, now: float = 0.0) -> None:
-        g = self.gpuclock
-        if not (self.opts.gpu_clock and g and g.available) or want == g.ceiling_mhz:
+    # -- the operator's GPU ceiling (law)
+    def _poll_operator(self, now: float) -> None:
+        if now - self._operator_at < self.opts.reload_every_s:
             return
-        if now < self._gpu_retry_at:
-            return
-        if not self.opts.apply:
-            if want != getattr(self, "_gpu_would", "unset"):
-                self._gpu_would = want
-                self._log(f"dry-run would set gpu ceiling {want or 'none'}")
-            return
-        if want is None:
-            self._gpu_reset(g, now)
+        self._operator_at = now
+        if self.operator.poll():
+            self._operator_changed()
+
+    def _operator_changed(self) -> None:
+        if self.operator.mhz is None:
+            self._log("gpu: operator ceiling cleared -- the daemon's own ceiling rules again")
         else:
-            self._gpu_lock(g, want, now)
-
-    def _gpu_reset(self, g: GpuClock, now: float) -> None:
-        ok, out = g.reset()
-        if ok:
-            self.ledger.gpu_locked = False
-            self.ledger.save()
-        else:
-            self._gpu_retry_at = now + self.GPU_RETRY_S
-        self._log("gpu ceiling removed" if ok else f"gpu reset FAILED: {out}")
-
-    def _gpu_lock(self, g: GpuClock, want: int, now: float) -> None:
-        self.ledger.gpu_locked = True
-        self.ledger.save()  # record BEFORE acting
-        ok, out = g.lock(want)
-        if not ok:
-            self._gpu_retry_at = now + self.GPU_RETRY_S
-        self._log(f"gpu ceiling {want} MHz" if ok else f"gpu lock {want} FAILED: {out}")
-
-    def _release_gpu(self, why: str) -> None:
-        g = self.gpuclock
-        if g and (g.ceiling_mhz is not None or self.ledger.gpu_locked) and self.opts.apply:
-            ok, out = g.reset()
-            if ok:
-                self.ledger.gpu_locked = False
-                self.ledger.save()
-            self._log(f"{why}: gpu ceiling removed" if ok else f"{why}: gpu reset FAILED: {out}")
+            self._log(f"gpu: operator ceiling {self.operator.describe()} is law")
+        self.gpu.operator_changed()
 
     # -- one tick
     def tick(self) -> Decision:
@@ -291,6 +417,7 @@ class Daemon:
         admission signal clients depend on."""
         now = self.clock()
         self.maybe_reload(now)
+        self._poll_operator(now)
         reading = self.sensor.read()
         d = self.ctrl.step(reading.temp_c, now, reading.gpu_temp_c)
         if self.last is None or d.level != self.last.level:
@@ -299,6 +426,7 @@ class Daemon:
                 f"temp={d.temp_c} eff={d.effective_c} source={d.source} ({d.reason})"
             )
         self.last = d
+        self._gpu_plan = self.gpu.plan(d.gpu_mhz)
         doc = self.state_doc(d, reading, now)
         if self.opts.state_path:
             write_state(self.opts.state_path, doc)
@@ -317,6 +445,7 @@ class Daemon:
                     "duty": d.duty,
                     "cpus": d.cpus,
                     "gpu_mhz": d.gpu_mhz,
+                    **self._gpu_record(),
                     "source": d.source,
                     "zones": {z.key: z.temp_c for z in reading.zones},
                     "fans": reading.fans,
@@ -340,7 +469,10 @@ class Daemon:
                     f"cap {c.name}",
                     lambda c=c: self.capper.set(c, d.cpus, observed_at=self._observed_at),
                 )
-        self._fenced("gpu ceiling", lambda: self._gpu(d.gpu_mhz, now))
+        self._fenced("gpu ceiling", lambda: self.gpu.step(d.gpu_mhz, d.level, now))
+        if self.unit_capper:
+            for rule in self.opts.units:
+                self._fenced(f"unit {rule.name}", lambda r=rule: self._unit_step(r, d, now))
 
     def _fenced(self, what: str, fn) -> None:
         try:
@@ -364,12 +496,11 @@ class Daemon:
             "concurrency_factor": d.concurrency_factor,
             "duty": d.duty,
             "cpus": d.cpus,
-            "gpu_ceiling_mhz": (
-                self.gpuclock.ceiling_mhz if (self.gpuclock and self.opts.gpu_clock) else None
-            ),
+            "gpu_ceiling_mhz": self.gpuclock.ceiling_mhz if self.gpuclock else None,
             "gpu_clock": (
                 self.gpuclock.reason if (self.gpuclock and self.opts.gpu_clock) else "off"
             ),
+            **self.gpu.doc(self._gpu_plan),
             "config": (
                 str(self.opts.config.path) if self.opts.config and self.opts.config.path else None
             ),
@@ -394,7 +525,31 @@ class Daemon:
                 }
                 for c in self.containers.values()
             ],
+            "units": [self._unit_doc(u) for u in self.opts.units],
         }
+
+    def _gpu_record(self) -> dict:
+        p = self._gpu_plan
+        return {
+            "gpu_operator_mhz": self.operator.mhz,
+            "gpu_wanted_mhz": p.wanted,
+            "gpu_held_by_operator": p.held,
+        }
+
+    def _unit_doc(self, u: UnitRule) -> dict:
+        doc = {
+            "name": u.name,
+            "mode": u.mode,
+            "dry_run": u.dry_run,
+            "cpus": self.unit_capper.current.get(u.name) if self.unit_capper else None,
+            "use_cpus": self.unit_use.get(u.name),
+            "missing": bool(self.unit_capper and u.name in self.unit_capper.missing_units()),
+        }
+        loop = self.adaptive.get(u.name)
+        if loop is not None:
+            doc["gain"] = loop.model.gain
+            doc["samples"] = loop.model.samples
+        return doc
 
     # -- lifecycle
     def start(self) -> None:
@@ -411,10 +566,13 @@ class Daemon:
                 }
             )
         if self.opts.apply:
-            self.ledger.recover(self.docker, self._log, gpu=self.gpuclock or GpuClock())
-        if self.opts.gpu_clock and self.gpuclock:
-            self.gpuclock.probe()
-            self._log(f"gpu clock control: {self.gpuclock.reason}")
+            self._recover()
+        if self.gpu.needed():
+            self._log(f"gpu clock control: {self.gpu.probe()}")
+        if self.operator.mhz is not None:
+            self._log(f"gpu: operator ceiling {self.operator.describe()} is law")
+        if self.opts.units:
+            self._note_self_inside()
         if self.cycler:
             self.cycler.start()
         if self.server:
@@ -425,15 +583,32 @@ class Daemon:
             f"{self.profile.limits.crit_c} ({self.profile.provenance})"
         )
 
+    def _recover(self) -> None:
+        """Undo what a crashed run left on the ledger (containers, units, GPU)."""
+        units = self.systemctl
+        if units is None and (self.ledger.unit_quota or self.ledger.unit_orphans):
+            units = self.systemctl = Systemctl()
+        restored = self.ledger.recover(
+            self.docker,
+            self._log,
+            gpu=self.gpuclock or GpuClock(),
+            units=units,
+            gpu_operator_mhz=self.operator.mhz,
+        )
+        if self.capper:
+            self.capper.restored.update(restored)  # so 0 ("no limit") survives as 0
+
     def shutdown(self) -> None:
         if self.cycler:
             self.cycler.stop()
         if self.capper:
             self.capper.release_all(self.containers)
-        self._release_gpu("stop")
+        if self.unit_capper:
+            self.unit_capper.release_all()
+        self.gpu.release("stop")
         if self.server:
             self.server.stop()
-        self._log("stop: own pauses released, CPU limits and GPU ceiling restored")
+        self._log("stop: own pauses released, CPU limits, unit quotas and GPU ceiling restored")
         if self.recorder:
             self.recorder.close()
 

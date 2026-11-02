@@ -42,6 +42,9 @@ class FakeGpu:
         self.ceiling_mhz = None
         return True, "reset"
 
+    def read_ceiling(self):
+        return None  # like the DGX Spark: no lock visible in the helper's status
+
 
 # -- validation ------------------------------------------------------------------
 

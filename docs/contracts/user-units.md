@@ -1,0 +1,173 @@
+# User-unit CPU quota contract
+
+`heat-governor run` can cap the CPU quota of the operator's own **systemd user units** (for example
+`app.slice`, where interactive terminal sessions run). It is **off** unless the config file lists a unit.
+Each unit runs in one of two modes:
+
+- `levels` (the default): a fixed CPU count per temperature level. The band rule is
+  `heat_governor.policy.unit_cpus`.
+- `adaptive`: a feedback loop that measures how the temperature rate responds to the CPU it takes
+  away, learns that response per unit, sizes each change from it, and keeps what it learned across
+  restarts (`heat_governor/adaptive.py`; see [Adaptive mode](#adaptive-mode)).
+
+`heat_governor/units.py` makes the changes in both modes.
+
+## Why
+
+On the DGX Spark, 2026-10-23 night, parallel interactive sessions (Claude Code sessions running test
+suites, `cypher-shell`) pushed the load average to 65-81 and the board zone to 95.2 C; the board
+hard-resets at about 94.5-95 C. A CPU cap on the serving container cannot reach that load: those
+processes run in `app.slice/app-<terminal>-<n>.scope` under the user manager, not in docker.
+The user manager has the `cpu` controller delegated
+(`user@1000.service/cgroup.subtree_control` = `cpu memory pids`), so no root is needed.
+Docker containers live in `system.slice` and are never affected.
+
+## Configuration
+
+```toml
+[[units]]
+name = "app.slice"     # a unit name ending .slice, .service or .scope
+warm = 8               # CPUs at each level; CPUQuota = cpus x 100%
+hot = 4
+critical = 2
+dry_run = true         # optional: log "dry-run would ..." and change nothing
+```
+
+| Key | Meaning |
+|---|---|
+| `name` | Required. A `systemctl --user` unit ending `.slice`, `.service` or `.scope`; it may not start with `-`. Listed once. |
+| `dry_run` | Optional, default `false`. When `true` the unit is read and every decision is logged as `dry-run would ...`, but nothing is changed and nothing is written to the ledger, even when the daemon runs with `apply = true`. Use it to watch what a unit cap would do before enabling it; turning it off on a live reload applies the current level at once. Turning it **on** while the unit holds a real cap restores the unit's original for real on the next change (the ledger entry is dropped), then the unit is only logged. The state reports it per unit. |
+| `mode` | Optional, `levels` (default) or `adaptive`. |
+| `warm`, `hot`, `critical` | `levels` only. Optional CPU counts (> 0, fractions allowed) per level. They may not rise from warm to hot to critical. Not allowed with `mode = "adaptive"`. |
+| `min_cpus`, `engage`, `interval_s`, `target_rate_c_min` | `adaptive` only (an error with `levels`); see [Adaptive mode](#adaptive-mode). |
+
+In `levels` mode:
+
+- The cap at a level is the band of the highest listed level at or below it (only `hot` given: warm is
+  uncapped, hot and critical get the hot band). `cool` never caps.
+- If a unit lists **none** of the three, the platform's default applies. Only `spark` declares one:
+  warm 8 / hot 4 / critical 2 CPUs (of 20), **declared, unmeasured**. On other platforms such a unit is
+  logged once and never capped.
+- A unit's own bands replace the platform default entirely (they are not merged).
+- A band never raises a quota tighter than the unit's own.
+- The level carries the controller's hysteresis and dwell, so a cap falls back one level at a time.
+- A running daemon picks up added and removed units within about 2 s; a removed unit gets its quota back.
+
+## Adaptive mode
+
+```toml
+[[units]]
+name = "app.slice"
+mode = "adaptive"
+min_cpus = 1               # never cap below this (> 0; default 1)
+engage = "warm"            # the level at which the loop engages: warm (default) | hot | critical
+interval_s = 20            # one evaluation per interval (>= 5; default 20)
+target_rate_c_min = 0.0    # temperature rate to hold while engaged, C per minute (default 0 = flat)
+dry_run = true             # optional, as in levels mode
+```
+
+The loop's conditions come from what it measures, not from fixed CPU counts. Its inputs, at most once
+per `interval_s`: the level, the governing temperature's trend over that interval (the least-squares slope
+of every 1 s reading since the last evaluation; not the state's `rate_c_s`, whose 2 s window on the Spark
+is mostly zone jitter), the unit's measured CPU use over the last interval, and the host CPU count.
+
+**The trend is fitted per source.** `source` (`board`, or `gpu` when the GPU's reading, mapped onto the
+board's scale, governs) can switch between two readings, and the two series differ (on the Spark often
+by about 8 C). A switch starts a new trend window: readings of the old source are dropped, so the step
+is never read as a fast rise. An evaluation with fewer than three readings of the new source holds,
+saying `governing source switched: new trend window`; it is not treated as a sensor loss (no cold-start
+step), and a pending learning sample is counted `ignored`.
+
+**The noise band comes from the data.** Each evaluation fits a least-squares line through every 1 s reading of the interval; the band is `max(0.005, 2 x the slope's standard error)`. A box whose zones jitter (Thor: about +-0.1 C/s over 20 s) gets a wide band and stops flapping between tighten and release; a quiet box gets a narrow one. Measured live 2026-10-24 on Thor and Orin with a fixed 0.005 band: the loop alternated tighten/release every interval and kept cutting an idle test slice after its burner stopped; both are fixed by these rules.
+
+| Situation | What the loop does |
+|---|---|
+| Engaged (level >= `engage`), `rate - target` above the noise band, and the unit uses >= 0.5 CPU | **Tighten.** The cut in CPUs is `error / gain` once a gain is learned, else the cold-start step `max(1, 25% of use)`. The cut is clamped to 1 CPU minimum and 50% of measured use maximum. The new cap is `max(min_cpus, use - cut)`, never above the current cap. It is based on measured use, because a cap far above what the unit uses does nothing. |
+| Engaged, the unit uses < 0.5 CPU (it is not the heat source), or it uses under half its cap while the rate is inside the band (the cap is not binding) | **Release** one step (paced as below); an uncapped idle unit is never cut. |
+| Engaged, `rate - target` below minus the noise band, and the level is exactly `engage` | **Release** one step: `+max(1, 10% of host CPUs)`, at most once per `2 x interval_s`. |
+| Engaged, otherwise | **Hold** (inside the noise band, at `min_cpus`, or above the engage level while cooling). |
+| Not engaged (level below `engage`) | **Release** one step per `2 x interval_s`. Once the cap would reach the host CPU count it is removed, which restores the unit's own quota through the normal restore path. |
+| Sensor lost (no readable zone; the level is then `hot`) | Engaged: tighten by the cold-start step, because a learned gain cannot be applied to an unknown error. Not engaged: hold, so the loop never releases while blind. Nothing is learned. |
+| Use not measured yet (the first evaluation, or an unreadable cgroup) | Hold. |
+
+**The long window.** A slow, sustained rise can stay inside every interval's band: on the Orin,
+2026-10-24, 61.2 -> 63.2 C over 6 min (about 0.005 C/s) against 20 s bands of 0.009-0.018 C/s, so the loop
+never acted. The loop therefore keeps the readings of the last 4 intervals (same source; cleared on a
+source switch, on a sensor loss, and after every tighten or release, because the readings before a change
+describe another cap). When the interval's error is inside its band and at least two intervals are kept,
+it fits the slope over all of them. Its standard error is far smaller (it falls with the window's length
+to the power 1.5), and the long band is `max(0.005, 2 x that standard error)`. Beyond it the loop
+tightens (same sizing rules as above) or, cooling at exactly the engage level, releases, and the reason
+names the long window (`long trend +0.0060 C/s over 79 s, noise band 0.0050`). Learning samples still use
+the per-interval rates only. Noise without a trend is caught by neither window.
+
+**Learning.** Each tighten records `(time, use, rate)`. The next evaluation compares: when use fell by
+at least 0.5 CPU and the rate fell, the sample is `(rate_before - rate_now) / (use_before - use_now)` in
+C/s per CPU. Otherwise the sample is counted in `ignored`. The gain is an EWMA (alpha 0.3) of the samples,
+clamped to [0.0001, 0.5] C/s per CPU. A sample is taken only when the rate fell by more than 2 x the combined standard error of the two trends (before and after the cut); smaller changes are noise and are counted `ignored`. Each tighten yields one sample at most. **In dry-run nothing is
+learned**: the change is not made, so there is no response to measure, and the would-be decision is only
+logged.
+
+**Persistence.** The learned model per unit, per platform name, is kept in `<data_dir>/adaptive.json`:
+`{"version": 1, "platforms": {"spark": {"app.slice": {"gain": 0.004, "samples": 5, "ignored": 1,
+"updated": 1761300000.0}}}}`. `updated` is epoch seconds. The file is written atomically (temporary file,
+fsync, rename) after each accepted sample and read on start. An unreadable or corrupt file is logged
+(`adaptive: <path> is unreadable (...): starting fresh`) and replaced by the next save. A config reload
+keeps each loop's current cap and model. Switching a unit back to `levels` drops its loop, but its saved
+model stays in the file.
+
+**Measuring use.** `systemctl --user show -p ControlGroup -- <unit>` gives the unit's cgroup path (cached).
+The daemon reads `usage_usec` from `/sys/fs/cgroup<path>/cpu.stat`. Use in CPUs is the change in
+`usage_usec` divided by the change in wall-clock microseconds. When the file is gone the path is looked
+up once more, because the unit may have restarted. A counter that went backwards gives no reading and
+starts a new baseline. A unit whose cgroup cannot be resolved or read (no `ControlGroup`, or no readable
+`cpu.stat`) is not looked up again for 30 s, so a broken unit does not spawn `systemctl` every tick.
+Levels-mode units are measured too, at most every 5 s, for the state document's `use_cpus`.
+
+**Log lines** (each also goes into the records):
+
+```text
+adaptive app.slice: tighten 16 -> 12 cpus (use 16, rate +0.050 C/s, target +0.000 C/s, cold start: 25% of use)
+adaptive app.slice: tighten 12.3 -> 6.15 cpus (use 12.3, rate +0.030 C/s, target +0.000 C/s, gain 0.0040 C/s/cpu from 5 samples)
+adaptive app.slice: tighten 12 -> 9 cpus (use 12, sensor lost: cold-start step)
+adaptive app.slice: tighten 12 -> 9 cpus (use 12, long trend +0.0060 C/s over 79 s, noise band 0.0050, cold start: 25% of use)
+adaptive app.slice: learned gain 0.0125 C/s/cpu from 1 samples (rate fell 0.050 C/s for 4 cpus)
+adaptive app.slice: sample ignored: use fell 0.2 cpus, rate fell +0.020 C/s (needs >= 0.5 cpus and a falling rate; 1 ignored)
+adaptive app.slice: release 9 -> 11 cpus (rate -0.020 C/s, target +0.000 C/s, cooling faster than needed)
+adaptive app.slice: release 12 -> 14 cpus (level cool, below engage warm)
+adaptive app.slice: release 18 -> none (level cool, below engage warm: unit's own quota restored)
+adaptive app.slice: dry-run would tighten 16 -> 12 cpus (use 16, ...; not learning in dry-run)
+```
+
+The `cap unit ...` / `restore unit ...` lines of the actuator follow, as in levels mode.
+
+## Behaviour
+
+Both modes hand their cap to the same actuator, so every rule below applies to both.
+
+| Rule | How |
+|---|---|
+| Ledger first | Before the first change the unit's current quota is read fresh (`systemctl --user show -p CPUQuotaPerSecUSec`) and written to the ledger (`unit_quota`: microseconds per second, `null` = no quota). |
+| Runtime only | Every change is `systemctl --user set-property --runtime -- <unit> CPUQuota=<N>%`. A reboot drops it: a cap cannot outlive the machine's uptime. |
+| Restore | On exit, on removal from the config, and by the next start's ledger recovery after a crash: `CPUQuota=<original>%`, or `CPUQuota=` (no quota). A ledger entry means a real change was made, so it is restored for real whenever the daemon applies, even if the unit is now `dry_run`. A failed restore stays in the ledger for the next try. |
+| Orphans | A unit that no longer exists at restore or recovery time keeps its original in the ledger's `unit_orphans` (persisted), because the governor's `--runtime` drop-in under `/run` can apply again when the unit loads. When the unit is seen again (loaded), that original is restored first and the orphan entry dropped, so the next cap never records the governor's own cap as the original. Recovery at start restores any orphan whose unit is loaded. |
+| Dry run | Without `--apply` (or with `dry_run = true`) it reads the unit and logs `dry-run would cap unit ...`; when that would-be cap is lifted it logs `dry-run would restore unit <name> CPUQuota=<original>` (the original read fresh). The state's `cpus` shows the would-be cap. It changes nothing and writes no ledger entry. |
+| Missing unit | A unit that is not found or is inactive is logged once, shown `missing: true` in the state, skipped, and looked for again every 30 s. |
+| systemctl errors | Any other failure (no user bus, controller not delegated) is logged once per distinct message and tried again every 30 s, not every tick. |
+| State | `units` in the state document: `name`, `mode`, `dry_run`, `cpus`, `use_cpus`, `missing`, and for adaptive units `gain` and `samples` ([state.md](state.md)). |
+
+The daemon itself is a user service and on the Spark runs in `app.slice`, so a cap on `app.slice`
+bounds it too; it logs a note when that is so. It needs little CPU, but under heavy contention its
+share inside the slice follows `CPUWeight` (the default 100 is shared equally with every busy sibling
+scope).
+
+## Status
+
+Implemented and unit-tested with a fake `systemctl` and a temporary cgroup tree (no test sets a property
+on a real unit or reads a real cgroup). The bands are declared, not measured: whether 8 / 4 / 2 CPUs keep
+the Spark under its reset temperature during a heavy interactive load has not been run. Adaptive mode has
+not run on a real box either: its constants (deadband 0.005 C/s, 25% cold-start step, 50% largest cut,
+10% release step, EWMA alpha 0.3, gain clamp, a 4-interval long window) are design values, not tuned.
+The long window is unit-tested on synthetic readings only; it has not been run against the Orin creep it
+was designed from. Nor is it measured whether
+the board's rate responds to a unit's CPU within one `interval_s`, which the learning rule assumes.

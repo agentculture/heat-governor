@@ -16,6 +16,7 @@ time, and returns a :class:`Decision`:
 * ``duty`` -- the fraction of each duty period a *batch* container is paused,
   from the profile's curve on the effective temperature. It rises at once and
   falls at most ``duty_decay_per_s`` per second, so it does not flap.
+* user units (``[[units]]``) are capped by level with :func:`unit_cpus`.
 * ``cpus`` -- the CPU cap from the bands; a drop is immediate, a rise moves one
   band per ``ramp_s`` (the gradual warm-up the operator asked for: 4 -> 8 -> 12,
   never 4 -> 12 in one step).
@@ -96,6 +97,20 @@ def _threshold(level: str, profile: Profile) -> float:
 
 def band_cpus(temp: float, profile: Profile) -> int | None:
     return _band(temp, profile.cpu_bands)
+
+
+def unit_cpus(level: str, bands) -> float | None:
+    """The CPU cap for a user unit at ``level``. ``bands`` are ``(level, cpus)``
+    pairs for any of warm / hot / critical; the cap is the band of the highest
+    listed level at or below ``level`` (only ``hot`` listed: warm uncapped, hot
+    and critical at the hot band). ``cool`` never caps. The level already carries
+    the hysteresis and dwell, so a unit's cap falls back one level at a time."""
+    have = dict(bands)
+    cap: float | None = None
+    for lv in LEVELS[1 : LEVELS.index(level) + 1]:
+        if lv in have:
+            cap = have[lv]
+    return cap
 
 
 def _trend(rate: float) -> str:

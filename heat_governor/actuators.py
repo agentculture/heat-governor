@@ -10,7 +10,10 @@ Rules every actuator here keeps:
 * **Crash safety.** Every pause and every first CPU change is written to a
   ledger file *before* it is made. A restarted governor calls :meth:`Ledger.recover`
   and undoes exactly what the ledger says it did: unpause its own pauses,
-  restore the original ``NanoCpus``.
+  restore the original ``NanoCpus`` (and user-unit quotas, :mod:`heat_governor.units`).
+* **The original is read fresh.** The limit recorded as a container's original
+  comes from a ``docker inspect`` made right before the first cap, never from the
+  discovery snapshot, which can still show a cap this process just removed.
 * **Dry run** (``apply=False``) logs what it would do and changes nothing.
 """
 
@@ -43,14 +46,23 @@ def restore_value(nano: int) -> int:
     return nano if nano > 0 else (os.cpu_count() or 1) * 1_000_000_000
 
 
+def _quotas(raw) -> dict[str, int | None]:
+    return {k: None if v is None else int(v) for k, v in (raw or {}).items()}
+
+
 class Ledger:
-    """``{"paused": [ids], "nano_cpus": {id: original}}``, written atomically."""
+    """``{"paused": [ids], "nano_cpus": {id: original}, "gpu_locked": bool,
+    "unit_quota": {unit: original usec per s, or null for none},
+    "unit_orphans": {unit: original}}`` (originals of units that vanished before
+    they could be restored), written atomically."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self.paused: set[str] = set()
         self.nano_cpus: dict[str, int] = {}
         self.gpu_locked = False
+        self.unit_quota: dict[str, int | None] = {}
+        self.unit_orphans: dict[str, int | None] = {}
         self._lock = threading.Lock()
         self._load()
 
@@ -62,6 +74,8 @@ class Ledger:
         self.paused = set(data.get("paused", []))
         self.nano_cpus = {k: int(v) for k, v in (data.get("nano_cpus") or {}).items()}
         self.gpu_locked = bool(data.get("gpu_locked", False))
+        self.unit_quota = _quotas(data.get("unit_quota"))
+        self.unit_orphans = _quotas(data.get("unit_orphans"))
 
     def save(self) -> None:
         with self._lock:
@@ -73,6 +87,8 @@ class Ledger:
                         "paused": sorted(self.paused),
                         "nano_cpus": self.nano_cpus,
                         "gpu_locked": self.gpu_locked,
+                        "unit_quota": self.unit_quota,
+                        "unit_orphans": self.unit_orphans,
                     }
                 )
             )
@@ -80,18 +96,49 @@ class Ledger:
                 os.fsync(fh.fileno())
             os.replace(tmp, self.path)
 
-    def recover(self, docker: DockerLike | None, log: Log, *, gpu=None) -> None:
-        """Undo what a previous (crashed) run left behind -- only its own actions."""
+    def recover(
+        self,
+        docker: DockerLike | None,
+        log: Log,
+        *,
+        gpu=None,
+        units=None,
+        gpu_operator_mhz: int | None = None,
+    ) -> dict[str, tuple[int, int]]:
+        """Undo what a previous (crashed) run left behind -- only its own actions.
+        A GPU ceiling it left is reset, unless an operator ceiling is set: then
+        that is restored instead (the operator's ceiling is law, never reset).
+        ``units`` is a :class:`heat_governor.units.SystemctlLike`. Returns, per
+        container restored, ``(NanoCpus written, the original it stands for)``
+        to seed :attr:`CpuCapper.restored` (an original of 0 is written as every
+        host CPU, which the next cap must not record as the original)."""
+        restored: dict[str, tuple[int, int]] = {}
         if self.gpu_locked and gpu is not None:
-            ok, out = gpu.reset()
-            log(f"recover: gpu ceiling {'removed' if ok else 'reset FAILED: ' + out}")
-            self.gpu_locked = not ok
+            self._recover_gpu(gpu, log, gpu_operator_mhz)
         if docker is not None:
             # drop an entry only once its action is undone (or the container is gone):
             # a failed restore keeps the original limit on record for the next try
             self._recover_paused(docker, log)
-            self._recover_caps(docker, log)
+            restored = self._recover_caps(docker, log)
+        if units is not None and (self.unit_quota or self.unit_orphans):
+            from heat_governor.units import recover_units
+
+            recover_units(self, units, log)
         self.save()
+        return restored
+
+    def _recover_gpu(self, gpu, log: Log, operator_mhz: int | None) -> None:
+        if operator_mhz is None:
+            ok, out = gpu.reset()
+            log(f"recover: gpu ceiling {'removed' if ok else 'reset FAILED: ' + out}")
+            self.gpu_locked = not ok
+            return
+        ok, out = gpu.lock(operator_mhz)
+        log(
+            f"recover: gpu ceiling restored to the operator's {operator_mhz} MHz"
+            if ok
+            else f"recover: gpu lock {operator_mhz} FAILED: {out}"
+        )
 
     def _recover_paused(self, docker: DockerLike, log: Log) -> None:
         for cid in sorted(self.paused):
@@ -105,16 +152,19 @@ class Ledger:
                     self.paused.discard(cid)
                 log(f"recover: {cid[:12]}: {exc}")
 
-    def _recover_caps(self, docker: DockerLike, log: Log) -> None:
+    def _recover_caps(self, docker: DockerLike, log: Log) -> dict[str, tuple[int, int]]:
+        restored: dict[str, tuple[int, int]] = {}
         for cid, nano in sorted(self.nano_cpus.items()):
             try:
                 docker.set_nano_cpus(cid, restore_value(nano))
                 log(f"recover: restored {cid[:12]} NanoCpus={nano}")
+                restored[cid] = (restore_value(nano), nano)
                 del self.nano_cpus[cid]
             except DockerError as exc:
                 if "404" in str(exc):
                     del self.nano_cpus[cid]
                 log(f"recover: {cid[:12]}: {exc} (kept on record)")
+        return restored
 
 
 class CpuCapper:
@@ -125,6 +175,12 @@ class CpuCapper:
         self.apply = apply
         self.current: dict[str, int | None] = {}
         self.set_at: dict[str, float] = {}
+        # cid -> (NanoCpus our last restore wrote, the original it stands for); lets
+        # an original of 0 (no limit) survive a restore -> cap cycle as 0
+        self.restored: dict[str, tuple[int, int]] = {}
+        # cid -> the container's own NanoCpus, tighter than the band: never raised
+        self.own_holds: dict[str, int] = {}
+        self._would: dict[str, int] = {}  # cid -> the band last logged as held
 
     def set(self, c: Container, cpus: int | None, *, observed_at: float | None = None) -> None:
         """``cpus=None`` restores the container's own limit. ``observed_at`` is
@@ -135,6 +191,7 @@ class CpuCapper:
             return
         if cpus is None and c.id not in self.ledger.nano_cpus:
             self.current[c.id] = None
+            self._release_hold(c.id)
             return
         prefix = "" if self.apply else "dry-run would "
         if cpus is None:
@@ -146,6 +203,8 @@ class CpuCapper:
 
     def _reassert(self, c: Container, cpus: int | None, observed_at: float | None) -> None:
         """Someone else changed the limit while we hold a cap: put ours back."""
+        if c.id in self.own_holds:
+            return  # its own, tighter limit is in force: nothing of ours to re-assert
         fresh = observed_at is not None and observed_at > self.set_at.get(c.id, float("inf"))
         if cpus is not None and self.apply and fresh and c.nano_cpus != int(cpus * 1e9):
             self.set_at[c.id] = time.time()
@@ -155,17 +214,65 @@ class CpuCapper:
     def _restore(self, c: Container, prefix: str) -> None:
         nano = self.ledger.nano_cpus[c.id]
         if self.apply:
-            self.docker.set_nano_cpus(c.id, restore_value(nano))
-            self.ledger.nano_cpus.pop(c.id, None)
-            self.ledger.save()
+            self._write_back(c.id, nano)
         shown = "unlimited" if nano == 0 else f"{nano / 1e9:g}"
         self.log(f"{prefix}restore {c.name} cpus={shown}")
 
+    def _write_back(self, cid: str, nano: int) -> None:
+        """Restore ``nano`` (the ledger's original) and drop the ledger entry."""
+        self.docker.set_nano_cpus(cid, restore_value(nano))
+        self.restored[cid] = (restore_value(nano), nano)
+        self.ledger.nano_cpus.pop(cid, None)
+        self.ledger.save()
+
+    def original(self, cid: str) -> int:
+        """The container's own limit, read fresh from docker right now.
+
+        Never the discovery snapshot: that is up to ``discover_every_s`` old and,
+        right after a restore, still shows our previous CAP (2026-10-23 on the
+        Spark: a stale 12 became the "original" and every later restore wrote 12
+        back). A value equal to what our own last restore wrote stands for the
+        original that restore wrote back (so 0, "no limit", survives as 0).
+        Raises :class:`DockerError` when the limit cannot be read: no cap then."""
+        fresh = self.docker.inspect(cid).nano_cpus
+        wrote = self.restored.get(cid)
+        if wrote is not None and fresh == wrote[0]:
+            return wrote[1]
+        return fresh
+
+    def _own_limit(self, c: Container) -> int:
+        """The container's own NanoCpus: the ledger's original while we hold a cap,
+        else a fresh read (dry-run: the discovery snapshot, nothing of ours on it)."""
+        if c.id in self.ledger.nano_cpus:
+            return self.ledger.nano_cpus[c.id]
+        return self.original(c.id) if self.apply else c.nano_cpus
+
+    def _release_hold(self, cid: str) -> None:
+        self.own_holds.pop(cid, None)
+        self._would.pop(cid, None)
+
+    def _hold_own(self, c: Container, cpus: int, own: int, prefix: str) -> None:
+        """The band is above the container's own limit: keep (or put back) its own,
+        and log the would-be raise once per change of the band."""
+        if c.id in self.ledger.nano_cpus:
+            if self.apply:
+                self._write_back(c.id, own)
+            self.log(f"{prefix}restore {c.name} cpus={own / 1e9:g}")
+        self.own_holds[c.id] = own
+        if self._would.get(c.id) != cpus:
+            self._would[c.id] = cpus
+            self.log(f"would raise {c.name} to {cpus} cpus -- its own limit {own / 1e9:g} holds")
+
     def _cap(self, c: Container, cpus: int, prefix: str) -> None:
+        own = self._own_limit(c)
+        if 0 < own < int(cpus * 1e9):
+            self._hold_own(c, cpus, own, prefix)
+            return
+        self._release_hold(c.id)
         if self.apply:
             if c.id not in self.ledger.nano_cpus:
-                self.ledger.nano_cpus[c.id] = c.nano_cpus
-                self.ledger.save()
+                self.ledger.nano_cpus[c.id] = own
+                self.ledger.save()  # record BEFORE acting
             self.docker.set_nano_cpus(c.id, int(cpus * 1e9))
         self.log(f"{prefix}cap {c.name} cpus={cpus}")
 
@@ -176,8 +283,7 @@ class CpuCapper:
                 if c is not None:
                     self.set(c, None)
                 elif self.apply:
-                    self.docker.set_nano_cpus(cid, restore_value(self.ledger.nano_cpus.pop(cid)))
-                    self.ledger.save()
+                    self._write_back(cid, self.ledger.nano_cpus[cid])
             except DockerError as exc:
                 self.log(f"exit: restore {cid[:12]} failed: {exc}")
 

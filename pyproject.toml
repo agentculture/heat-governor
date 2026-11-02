@@ -1,6 +1,6 @@
 [project]
 name = "heat-governor"
-version = "0.12.0"
+version = "0.13.0"
 description = "Keeps machines running heavy AI work without thermal resets: senses thermal zones, signals admission, duty-cycles and CPU-caps opted-in containers, and records each run."
 readme = "README.md"
 license = "Apache-2.0"

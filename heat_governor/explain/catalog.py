@@ -166,6 +166,13 @@ with `--listen`); record the tick; and with `--apply`:
   (`heat-governor.cpu-cap=true`, or `--serving NAME --serving-cpu-cap`).
   Drops are immediate; rises move one band per ramp interval.
 
+- with `[[units]]` in the config, set a CPUQuota on those systemd user
+  units (e.g. `app.slice`) by level (`systemctl --user set-property
+  --runtime`; a reboot drops it). Off unless a unit is listed. With
+  `mode = "adaptive"` a feedback loop sizes the cap instead: it measures
+  how the temperature rate responds to the CPU it takes away, learns that
+  per unit (kept in `<data_dir>/adaptive.json`) and releases as it cools.
+
 Serving containers are never paused. Only pauses this daemon made are ever
 undone; a restart releases what its ledger recorded. On exit it unpauses its
 own pauses and restores every CPU limit it changed.
@@ -248,8 +255,12 @@ Sections: `platform`, `[profile]` (warm_c, hot_c, crit_c, hysteresis_c,
 dwell_s, lookahead_s, rate_window_s, duty_curve, duty_period_s,
 duty_decay_per_s, cpu_bands, ramp_s, gpu_clock_bands, concurrency, zones,
 gpu), `[daemon]` (apply, poll_s, listen, state, data_dir, use_labels,
-discover_every_s, record, fsync, reload, gpu_clock) and `[[containers]]`
-(name, role = batch|serving, cpu_cap).
+discover_every_s, record, fsync, reload, gpu_clock, gpu_ceiling_mhz), `[[containers]]`
+(name, role = batch|serving, cpu_cap) and `[[units]]` (name of a systemd
+user unit, plus optional warm / hot / critical CPU counts; without them the
+platform default: spark 8 / 4 / 2, declared, unmeasured; or `mode =
+"adaptive"` with min_cpus, engage, interval_s, target_rate_c_min). Units are
+off unless listed; contract: `docs/contracts/user-units.md`.
 """
 
 _GPU_CLOCK = """\
@@ -261,7 +272,24 @@ and `status`; a sudoers rule allows exactly that helper without a password.
 The daemon lowers the ceiling per `gpu_clock_bands` when `daemon.gpu_clock =
 true` (or `run --gpu-clock`): drops at once, rises one band per `ramp_s`.
 Every lock is written to the ledger first and removed on exit, on the next
-start, and when gpu_clock is turned off.
+start, and when gpu_clock is turned off -- unless an operator ceiling is set.
+
+The operator's ceiling is law. Declare it with `[daemon] gpu_ceiling_mhz`
+(live-reloaded) or `gpu-clock hold <MHz>` (persisted in
+`<data_dir>/operator.json`, picked up by a running daemon within ~2 s); the
+lower of the two wins. The daemon writes `min(operator ceiling, band)`: it
+may go below for heat, never above, applies it even with gpu_clock off, and
+restores it (never resets) on exit, on turning gpu_clock off and in crash
+recovery. A band it may not write is logged once per change, e.g.
+`gpu: would raise the ceiling to none (policy: level cool) -- operator
+ceiling 2200 MHz holds`, and published (`gpu_held_by_operator`).
+
+On a Jetson the helper's `status` reads back devfreq `max_freq`, so a hand
+lock below the daemon's own ceiling is seen and treated as the operator's
+(source `observed`) until `gpu-clock release`. On the DGX Spark (GB10)
+`nvidia-smi` exposes no lock: a raw `nvidia-smi -lgc` or helper `lock` is
+invisible there and must be declared to be law. Contract:
+`docs/contracts/gpu-clock.md`.
 
 DGX Spark: `nvidia-smi -lgc 0,<MHz>` / `-rgc`. Jetson: the GPU devfreq
 nodes' `max_freq`, snapped to `available_frequencies`.
@@ -270,6 +298,8 @@ nodes' `max_freq`, snapped to `available_frequencies`.
     heat-governor gpu-clock helper          # the script and how to install it
     heat-governor gpu-clock lock 2200       # dry run; --apply to lock
     heat-governor gpu-clock reset --apply
+    heat-governor gpu-clock hold 1100       # the operator's ceiling: law
+    heat-governor gpu-clock release         # give it (or an observed one) back
 
 The bands are declared, not measured: what a lower ceiling does to the board
 temperature on each platform is still to be measured.
@@ -321,4 +351,6 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("gpu-clock", "helper"): _GPU_CLOCK,
     ("gpu-clock", "lock"): _GPU_CLOCK,
     ("gpu-clock", "reset"): _GPU_CLOCK,
+    ("gpu-clock", "hold"): _GPU_CLOCK,
+    ("gpu-clock", "release"): _GPU_CLOCK,
 }
