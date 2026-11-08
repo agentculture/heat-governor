@@ -30,6 +30,7 @@ declared from their trip points, unmeasured), and a generic fallback.
 - `heat-governor unit` -- a systemd user unit to install it.
 - `heat-governor config ...` -- the file a running daemon re-reads.
 - `heat-governor gpu-clock ...` -- the GPU clock ceiling (root helper).
+- `heat-governor mcp` -- a read-only MCP server over stdio (fleet and sense tools).
 - `heat-governor mesh ...` -- the fleet view (`overview`, `status`, `serve`).
 
 ## Agent verbs
@@ -154,6 +155,27 @@ Machines come from `fleet.toml` beside `config.toml` (format:
     heat-governor mesh serve --listen 127.0.0.1:9480
 """
 
+
+_MCP = """\
+# heat-governor mcp
+
+A read-only MCP (Model Context Protocol) server over stdio: newline-delimited
+JSON-RPC 2.0 on stdin/stdout, so an agent can query the fleet. Stdout carries
+only protocol frames; diagnostics go to stderr; EOF on stdin exits 0.
+`--json` is accepted but has no effect on the protocol.
+
+Tools (none can pause, cap, apply or edit anything):
+
+- `mesh_status {fleet?, url?}` -- what `mesh status --json` returns.
+- `machine_state {name, fleet?, url?}` -- one machine's full snapshot entry.
+- `sense {}` -- this machine's own sensor reading (`sense --json`).
+
+The fleet tools ask a running `mesh serve` first and fall back to a direct
+read, exactly like `mesh status`. A tool failure is a result with
+`isError: true`, not a JSON-RPC error.
+
+    heat-governor mcp [--json]
+"""
 
 _SENSE = """\
 # heat-governor sense
@@ -373,6 +395,7 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("mesh", "overview"): _MESH,
     ("mesh", "status"): _MESH,
     ("mesh", "serve"): _MESH,
+    ("mcp",): _MCP,
     ("sense",): _SENSE,
     ("capabilities",): _CAPABILITIES,
     ("run",): _RUN,
