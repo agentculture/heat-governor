@@ -6,7 +6,8 @@ Public API (both transports share it):
   ``GET /state`` over ssh. ``fetch() -> dict`` returns the parsed document or raises
   :class:`Unreachable` (timeout, ssh failure, empty or non-JSON output) with a reason.
   ``close()`` tears the persistent connection down; idempotent; also a context manager.
-* ``LocalTransport(*, timeout_s, port=9476)`` -- same interface for the daemon on this machine.
+* ``LocalTransport(*, timeout_s, port=9476)`` -- same interface for the daemon on this machine,
+  read over ``http://127.0.0.1:<port>/state`` (see the class for why not the state file).
 
 The ssh command is always an argv list (never a shell). The host is re-validated with
 :func:`heat_governor.fleet.validate_host`, passed after ``--``, and the remote command is a fixed
@@ -33,6 +34,7 @@ from heat_governor.fleet import validate_host
 from heat_governor.state import default_data_dir
 
 STATE_PORT = 9476
+MAX_DOC_BYTES = 1 << 20  # a state document is a few KiB; refuse anything absurd (as pair.py)
 GRACE_S = 0.5
 PERSIST_S = 60
 ALIVE_S = 5
@@ -164,7 +166,16 @@ class SshTransport:
 
 
 class LocalTransport:
-    """Read the daemon on this machine over 127.0.0.1."""
+    """Read the daemon on this machine over ``http://127.0.0.1:<port>/state``.
+
+    Why HTTP and not the state file (``state.default_state_path``): the file path is per
+    user (``$XDG_RUNTIME_DIR``), so a reader running as another user or service would look
+    in the wrong place; the loopback endpoint is the same one :class:`SshTransport` curls
+    on every remote box, so the fleet has one convention (the daemon runs with
+    ``--listen 127.0.0.1:9476``) and the local box reads exactly the document its remote
+    peers would. A daemon started without ``--listen`` shows as unreachable with the
+    reason, rather than silently read from a stale file.
+    """
 
     def __init__(self, *, timeout_s: float, port: int = STATE_PORT) -> None:
         self.timeout_s = float(timeout_s)
@@ -174,9 +185,12 @@ class LocalTransport:
         url = f"http://127.0.0.1:{self.port}/state"  # NOSONAR python:S5332 -- loopback
         try:
             with urllib.request.urlopen(url, timeout=self.timeout_s) as resp:  # nosec B310
-                return parse_state(resp.read())
+                raw = resp.read(MAX_DOC_BYTES + 1)
         except (OSError, ValueError) as exc:
             raise Unreachable(f"local daemon unreachable: {exc}") from exc
+        if len(raw) > MAX_DOC_BYTES:
+            raise Unreachable("state document too large")
+        return parse_state(raw)
 
     def close(self) -> None:
         return None
