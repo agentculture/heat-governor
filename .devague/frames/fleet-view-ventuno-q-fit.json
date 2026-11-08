@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-08T18:26:10Z",
-  "updated": "2026-11-08T22:29:30Z",
+  "updated": "2026-11-08T22:47:17Z",
   "claims": [
     {
       "id": "c1",
@@ -949,6 +949,28 @@
       "skipped_check": "unit tests for LocalTransport",
       "refs": [
         "plan t6"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l5",
+      "code": "grader-unverified",
+      "what": "t10 (mesh CLI) did not get a clean red run of its tests before implementing (first run failed at import; a stashed re-run was not clean)",
+      "skipped_check": "run the new CLI tests red before implementing",
+      "refs": [
+        "plan t10"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l6",
+      "code": "grader-unverified",
+      "what": "main agent merged t10 even though its own mutation check showed the CLI's admit-null rule was untested (mutant survived); caught minutes later and fixed with a test (42daf1f)",
+      "skipped_check": "block the merge when a mutation check survives",
+      "refs": [
+        "plan t10"
       ],
       "origin": "llm",
       "status": "proposed"
