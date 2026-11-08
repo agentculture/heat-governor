@@ -1,0 +1,649 @@
+{
+  "slug": "fleet-view-ventuno-q-fit",
+  "title": "fleet view + VENTUNO Q fit",
+  "frame_slug": "fleet-view-ventuno-q-fit",
+  "schema_version": 5,
+  "status": "exported",
+  "created": "2026-11-08T21:28:47Z",
+  "updated": "2026-11-08T21:34:12Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "heat-governor runs natively on the VENTUNO Q, governs all five mesh boxes (cultureos, spark, spark2, thor, orin), and one React dashboard plus an MCP server and CLI on cultureos show every box live",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "all five machines (cultureos, spark, spark2, thor, orin) appear in heat-governor mesh status --json and on the mesh serve page, each with a fresh reading or an explicit stale, unreachable or not-supported state",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "platforms.detect() recognises the VENTUNO Q from proc/device-tree/compatible (arduino,monza / qcom,qcs8300) and resolves a built-in 'ventunoq' profile; today detect() reads only device-tree/model ('Qualcomm Technologies, Inc. Monaco Monza addons', platforms.py:158-181) so this box falls to 'generic'",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "detect() returns 'ventunoq' for a tmp_path tree whose proc/device-tree/compatible contains arduino,monza, and the existing Spark, Thor and Orin fixtures still resolve unchanged",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "a built-in 'ventunoq' profile watches cpu-*, cpuss-*, gpuss-*, nsp-* (NPU) and ddrss-* zones only, with declared (unmeasured) limits derived from the live passive trips (CPU 126 C, GPU/NPU 115 C); today generic watches all 48 zones, picks pmm8650au_1_sdram as hottest and sets warm/hot/crit 102/106/110 from the PMIC 125 C critical trip, so it would essentially never act",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "the ventunoq profile's crit limit sits below the 115 \u00b0C GPU/NPU passive trip, and its provenance text says the limits are declared from trip points, not measured",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "sense reads the Adreno GPU via devfreq 3d00000.gpu (steps 479/599/780/877 MHz, no 'load' file) and board power from hwmon ina232 power1_input (12.96 W idle); capabilities stops calling the emc2305 fan 'firmware/nvfancontrol owned' (sense.py:470) because here it is kernel cooling_device7 (emc2305_fan, state 5/10)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "on cultureos, sense --json reports the GPU clock from devfreq 3d00000.gpu and board power in watts from ina232, and capabilities no longer calls the emc2305 fan firmware-owned",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c5",
+      "kind": "boundary",
+      "text": "heat-governor does not drive the GPU clock on the VENTUNO Q in this work: gpuclock gains an explicit unsupported-platform guard, because the shell helper's is_jetson() (gpuclock.py:109) would fall through to nvidia-smi -lgc, which does not exist here",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "heat-governor gpu-clock lock on a ventunoq box exits 1 with an unsupported-platform error and never invokes the root helper",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "tests fake a VENTUNO Q tree: tests/fakes.py make_sys gains compatible=, devfreq and ina232 hwmon support plus a VENTUNOQ_ZONES fixture, under tmp_path, never the real /sys",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "no test reads the real /sys: every VENTUNO Q test builds its tree under tmp_path through tests/fakes.py",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "heat-governor is installed on cultureos (uv tool + user unit + config like the other four) so the VENTUNO Q is the fifth governed, observable box, running in dry-run (apply = false) until the declared VENTUNO Q limits are checked under load; today 'which heat-governor' is empty and the unit does not exist",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "on cultureos, systemctl --user is-active heat-governor prints active, and heat-governor state reports applying false",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "a fleet reader on cultureos polls all five boxes server-side: the four remote daemons through a persistent SSH connection per box (`ssh <box> curl 127.0.0.1:9476/state`, no change on any box) and cultureos locally; it tracks per-box ok/stale/unreachable on the reader's own clock, reusing pair.PeerLink's staleness logic, keeps a rolling buffer of the polled documents for trends, and never uses client.read's admit-on-unknown default",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "stopping one remote daemon makes the reader mark that box stale and then unreachable within its stale window, without blocking the other boxes; no remote config file or listen address changes",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c9",
+      "kind": "boundary",
+      "text": "the fleet view is read-only and outside every daemon's control path: state schema 1 is unchanged (no renamed/removed fields, top-level level/admit/concurrency_factor/cpus keep their meaning, pair shown separately) and a dead box never delays any daemon tick",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "the state schema stays 1 with only optional fields added, and a daemon's tick interval is unchanged while the fleet reader is down or slow",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "the dashboard is served same-origin by heat-governor on cultureos (page + aggregated JSON from one process), so no daemon needs CORS headers; StateServer sends only Content-Type/Content-Length (state.py:72-77)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "the dashboard page fetches only relative URLs from mesh serve, and no daemon's state server gains CORS headers",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "the dashboard is one prebuilt static HTML file shipped as package data (hatch ships non-py files under heat_governor/), with React 18.3.1, htm 3.1.1 and Lato vendored alongside it so it renders offline and no node build step, built to the locked design in docs/design/fleet-dashboard.html with the Polar night theme only (cream light, slate dark)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "the built wheel contains the dashboard HTML, mesh serve serves it from package data, and pyproject.toml still declares dependencies = []",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c13",
+      "kind": "requirement",
+      "text": "a 'mesh' noun (overview, status [--json], serve) and a top-level 'mcp' verb are added through register(sub) in _build_parser with parser_class=type(p), ENTRIES in explain/catalog.py, the learn _TEXT/_as_json_payload lists and overview _VERBS, so teken cli doctor --strict and test_every_catalog_path_resolves stay green",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "uv run teken cli doctor . --strict passes and test_every_catalog_path_resolves covers mesh overview, mesh status, mesh serve and mcp",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "'heat-governor mcp' speaks MCP over stdio with read-only tools (mesh status, one box's state, sense) and owns stdout for JSON-RPC framing: all logging goes to stderr via emit_diagnostic; it still accepts --json and 'mcp --help' returns",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "an MCP client that adds 'heat-governor mcp' lists only read-only tools, a mesh status tool call returns all five machines, and stdout carries nothing but JSON-RPC frames",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c16",
+      "kind": "boundary",
+      "text": "remote hostnames (spark/spark2/thor/orin and their tailnet names) live in a fleet host list, not hardcoded in package code, and no committed JSON carries a non-localhost url/host key",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "python3 scripts/scan-secrets.py passes and no file under heat_governor/ contains the names spark, spark2, thor or orin as hostnames",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c19",
+      "kind": "audience",
+      "text": "the operator who runs the five-box mesh from cultureos, plus the agents and tools on cultureos that read fleet thermal state through the CLI or MCP (Claude Code sessions, lobes, sparkrun)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h15",
+      "kind": "honesty",
+      "text": "the CLI, MCP and page outputs are all usable without SSH access to the remote boxes, so an agent on cultureos needs no per-box credentials",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c20",
+      "kind": "before_state",
+      "text": "today cultureos (VENTUNO Q) runs no governor and would fall to the generic profile (102/106/110 \u00b0C over all 48 zones, hottest zone a memory PMIC); the four mesh daemons answer only on their own 127.0.0.1:9476, so checking the fleet means ssh-ing into each box",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h16",
+      "kind": "honesty",
+      "text": "the before state matches the 2026-11-08 survey: sense --json on cultureos reported platform generic with limits 102/106/110, and curl from cultureos to each box's :9476 failed",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c21",
+      "kind": "after_state",
+      "text": "from cultureos, one command (heat-governor mesh status), one MCP server (heat-governor mcp) and one web page (heat-governor mesh serve, which is the fleet reader the other two query) show every machine's live temperature, level, admission and trends, and the VENTUNO Q is detected and watched with its own profile in dry-run",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h17",
+      "kind": "honesty",
+      "text": "each of the three surfaces (mesh status, mcp, mesh serve) reads the same fleet reader, so they never disagree about a machine's level",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c22",
+      "kind": "why_it_matters",
+      "text": "the Sparks reach thermal resets under heavy AI work (spark read critical at 89.1 \u00b0C during this scope survey); seeing every box at once, with the hot ones first, is how the operator keeps that work running without resets",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h18",
+      "kind": "honesty",
+      "text": "the dashboard sorts hottest first by default and the heat aura marks warm, hot and critical boxes without opening any panel",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c23",
+      "kind": "success_signal",
+      "text": "on cultureos, heat-governor mesh status --json reports 5 of 5 machines with readings no older than 10 s, and the mesh serve page renders all 5 in under 2 s",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h19",
+      "kind": "honesty",
+      "text": "the 10 s freshness bound holds with the SSH transport at the reader's poll interval for all four remote boxes at once",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c24",
+      "kind": "success_signal",
+      "text": "on cultureos, heat-governor sense --json reports platform ventunoq and watches 5 zone families (cpu, cpuss, gpuss, nsp, ddrss) instead of all 48 zones",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h20",
+      "kind": "honesty",
+      "text": "the zone families come from the ventunoq profile, not from a hardcoded list in sense.py",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "the fleet reader validates every host in the fleet list as a plain hostname or IP (no leading '-', no spaces or shell metacharacters), passes '--' before the host and runs a fixed remote command, so a host entry can never become an ssh option such as -oProxyCommand",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h21",
+      "kind": "honesty",
+      "text": "a fleet entry '-oProxyCommand=touch /tmp/x' is rejected at config load with exit 1 and ssh is never spawned for it",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c26",
+      "kind": "requirement",
+      "text": "the reader manages its own persistent SSH connections (ControlMaster/ControlPersist with a ControlPath under its state dir), with BatchMode=yes, ConnectTimeout, ServerAliveInterval and a per-poll timeout, independent of the operator's ~/.ssh/config; today ~/.ssh/config sets only IdentityFile and a fresh poll measured 0.55 s",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h22",
+      "kind": "honesty",
+      "text": "with ControlMaster up, a spark poll completes in well under the measured 0.55 s fresh-handshake time, and a box that stops answering is marked unreachable after the per-poll timeout rather than hanging the reader",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "the reader's history buffer stores compact samples (time, hottest temperature, GPU temperature, level, admit factor) bounded to 24 h per box, not raw /state documents; probe: /state is 2-3 KB, so raw docs at a 2 s poll would be about 130 MB per box per day",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h24",
+      "kind": "honesty",
+      "text": "with 19 machines polled for 24 h the reader's resident memory stays under 100 MB",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "mesh status, the MCP tools and the page report the reader's own health (when each box was last polled, reader uptime, transport errors) separately from each box's thermal state, so a dead reader never looks like five stale boxes",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h25",
+      "kind": "honesty",
+      "text": "stopping the reader's ssh for every box shows a reader or transport error, not five independent 'stale' machines",
+      "deferred": false,
+      "deferred_reason": ""
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "VENTUNO Q fake sysfs fixture in tests/fakes.py",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/fakes.py make_sys accepts compatible=, devfreq= and ina232= and writes proc/device-tree/compatible (NUL-separated), class/devfreq/3d00000.gpu/{cur_freq,max_freq,available_frequencies} and an hwmon named ina232 with power1_input, all under the given tmp_path root",
+        "a VENTUNOQ_ZONES constant mirrors the 2026-11-08 trips (cpu-* passive 126/130/135, gpuss-*/nsp-* 115/130/135, ddrss 130/135, pmm86*-therm passive 105 critical 125)",
+        "existing SPARK_ZONES/THOR_ZONES/ORIN_ZONES callers are unchanged and the full suite still passes"
+      ],
+      "deps": [],
+      "covers": [
+        "c6",
+        "h6"
+      ],
+      "instruction": "Extend make_sys with keyword-only arguments; default None keeps today's behaviour. Copy trip values from docs/specs/2026-11-08-fleet-view-ventuno-q-fit.md scope entry s2. No test may touch the real /sys."
+    },
+    {
+      "id": "t2",
+      "summary": "detect() reads device-tree compatible and resolves a built-in ventunoq profile",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "detect() returns 'ventunoq' for a tree whose compatible holds the exact token arduino,monza or qcom,qcs8300, and still returns thor/orin for the real Thor (nvidia,p4071-0000+p3834-0008 nvidia,tegra264) and Orin (nvidia,p3737-0000+p3701-0005 nvidia,tegra234) strings and spark when nvidia-smi reports GB10",
+        "the ventunoq profile watches only cpu, cpuss, gpuss, nsp and ddrss zone families, its crit limit is below 115 C, and its provenance says declared from trip points, not measured",
+        "an arduino,imola (UNO Q) tree resolves to generic"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c2",
+        "h2",
+        "c3",
+        "h3",
+        "c24",
+        "h20"
+      ],
+      "instruction": "Read proc/device-tree/compatible after model, split on NUL, match exact tokens; check it before the nvidia-smi probe. Add VENTUNOQ to BUILTIN and update the module docstring and resolve() error text. Tests go in tests/test_platform_ventunoq.py."
+    },
+    {
+      "id": "t3",
+      "summary": "sense reads the Adreno GPU via devfreq and board power via ina232; fix fan ownership text",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "on a VENTUNO Q fake tree sense --json reports the GPU clock in MHz from class/devfreq/3d00000.gpu and board power in watts from ina232 power1_input",
+        "capabilities() reports the emc2305 fan as kernel-owned (a thermal cooling device), not 'firmware/nvfancontrol owned', when the fan is a cooling device",
+        "Spark, Thor and Orin sense output is byte-identical to before for their fixtures"
+      ],
+      "deps": [
+        "t1",
+        "t2"
+      ],
+      "covers": [
+        "c4",
+        "h4"
+      ],
+      "instruction": "Add a gpu mode for the profile (e.g. 'devfreq') and accept it in config.py's profile.gpu validator. Read power only when an hwmon named ina232 exists. Tests in tests/test_sense_ventunoq.py."
+    },
+    {
+      "id": "t4",
+      "summary": "gpu-clock refuses unsupported platforms before touching the root helper",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "heat-governor gpu-clock lock and unlock on a ventunoq profile exit 1 with an unsupported-platform error and a hint, and the helper subprocess is never spawned (asserted with a fake runner)",
+        "Spark, Thor and Orin gpu-clock behaviour is unchanged"
+      ],
+      "deps": [
+        "t2"
+      ],
+      "covers": [
+        "c5",
+        "h5"
+      ],
+      "instruction": "Gate on the resolved profile name or profile.gpu before probe(); keep the error in the CliError format. Tests in tests/test_gpuclock_platform.py."
+    },
+    {
+      "id": "t5",
+      "summary": "fleet.toml loader with strict host validation",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "a fleet.toml under the config dir lists machines (name, host, transport ssh or local) and loads into frozen dataclasses with strict unknown-key errors",
+        "a host entry such as '-oProxyCommand=touch /tmp/x', one with spaces or shell metacharacters, or an empty host fails load with exit 1 and a hint",
+        "no file under heat_governor/ contains spark, spark2, thor or orin as a hostname, and scripts/scan-secrets.py passes"
+      ],
+      "deps": [],
+      "covers": [
+        "c16",
+        "h14",
+        "c25",
+        "h21"
+      ],
+      "instruction": "New module heat_governor/fleet.py, stdlib tomllib. Do not touch config.py's TOP_KEYS (decision c34). Ship a commented example in the docs, not a committed JSON. Tests in tests/test_fleet_config.py."
+    },
+    {
+      "id": "t6",
+      "summary": "SSH transport with reader-managed persistent connections",
+      "origin": "llm",
+      "status": "proposed",
+      "acceptance_criteria": [
+        "the transport runs ssh with BatchMode=yes, ConnectTimeout, ServerAliveInterval, ControlMaster=auto, ControlPersist and a ControlPath under the reader's state dir, then '--', the validated host and the fixed remote command `curl -s -m <timeout> 127.0.0.1:9476/state`",
+        "a host that hangs is reported unreachable after the per-poll timeout and never blocks the caller beyond it (tested with a fake ssh script on PATH)",
+        "closing the transport tears down its control sockets"
+      ],
+      "deps": [
+        "t5"
+      ],
+      "covers": [
+        "c26",
+        "h22"
+      ],
+      "instruction": "subprocess.run with an argv list, never shell=True; annotate the bandit/Sonar exceptions the way pair.py does. Backtick-free: no user text reaches the remote command. Tests in tests/test_transport.py with a fake ssh executable in tmp_path."
+    },
+    {
+      "id": "t7",
+      "summary": "fleet reader: concurrent polling, staleness, compact 24 h history, reader health",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "one polling thread per machine; a stopped or hanging box is marked stale then unreachable on the reader's own clock without delaying the others, and admit is never reported for an unreachable box",
+        "history keeps compact samples (time, hottest temp, GPU temp, level, admit factor) bounded to 24 h per box; a simulated week of polling for 19 machines stays under 100 MB",
+        "the snapshot carries reader health (per-box last poll time, last transport error, reader uptime) separately from thermal state",
+        "the reader imports nothing from daemon.py and never writes to any remote box"
+      ],
+      "deps": [
+        "t5",
+        "t6"
+      ],
+      "covers": [
+        "c8",
+        "h8",
+        "c9",
+        "h9",
+        "c28",
+        "h24",
+        "c29",
+        "h25"
+      ],
+      "instruction": "Reuse pair.PeerLink's staleness approach (reader clock, MAX_PEER_STALE_S cap) rather than client.read. Local machine uses the state file or 127.0.0.1. Tests in tests/test_fleet_reader.py with fake transports."
+    },
+    {
+      "id": "t8",
+      "summary": "mesh serve HTTP server: same-origin page, JSON API, 127.0.0.1 by default",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "GET / serves the dashboard from package data; GET /api/fleet and GET /api/history?machine=&range= serve JSON from the reader; everything else 404",
+        "it binds 127.0.0.1 by default and only an explicit --listen changes it (decision c32); no daemon state server gains CORS headers",
+        "the page and API share one origin; tests fetch them with urllib against an ephemeral port"
+      ],
+      "deps": [
+        "t7"
+      ],
+      "covers": [
+        "c10",
+        "h10"
+      ],
+      "instruction": "Stdlib ThreadingHTTPServer as in state.py. Serve files via importlib.resources from heat_governor/web/. Tests in tests/test_mesh_server.py."
+    },
+    {
+      "id": "t9",
+      "summary": "dashboard page built to the locked design, Polar night only, vendored assets",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "heat_governor/web/index.html reproduces docs/design/fleet-dashboard.html's Machines view with Polar night only (no theme picker) and reads /api/fleet and /api/history instead of embedded data",
+        "React 18.3.1, htm 3.1.1 and Lato are vendored under heat_governor/web/vendor/ with their licence files, the page makes no request to any other host, and the built wheel contains them",
+        "obligations o1-o6, o8 and o9 hold: fleet map on top, filters, single band label, aura only on critical moving, trend panel with compare, not-supported and unreachable states",
+        "pyproject.toml still declares dependencies = []"
+      ],
+      "deps": [
+        "t8"
+      ],
+      "covers": [
+        "c11",
+        "h11",
+        "c22",
+        "h18"
+      ],
+      "instruction": "Start from docs/design/fleet-dashboard.html; delete the other skins, the Survey/Decisions tabs, the example fleets and the generated history; keep the 'Example history' label until real history backs the chart (o6). Re-run the dataviz validator for the two Polar night modes."
+    },
+    {
+      "id": "t10",
+      "summary": "mesh noun: overview, status, serve; status queries mesh serve and falls back to a direct read",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "heat-governor mesh overview|status|serve exist, each takes --json, results on stdout and errors on stderr with exit codes 0/1/2",
+        "mesh status reads the running mesh serve's /api/fleet and, when it is not running, does a one-shot direct read through the same reader code; both paths report each machine's age in seconds",
+        "explain catalog entries, learn text and overview verbs list the new paths; test_every_catalog_path_resolves and uv run teken cli doctor . --strict pass"
+      ],
+      "deps": [
+        "t7",
+        "t8"
+      ],
+      "covers": [
+        "c13",
+        "h12",
+        "c19",
+        "h15",
+        "c21",
+        "h17",
+        "c23",
+        "h19"
+      ],
+      "instruction": "Follow _commands/cli.py's noun pattern with parser_class=type(p). Tests in tests/test_cli_mesh.py."
+    },
+    {
+      "id": "t11",
+      "summary": "heat-governor mcp: read-only MCP server over stdio",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "initialize, tools/list and tools/call work over newline-delimited JSON-RPC on stdio; tools are mesh_status, machine_state and sense, all read-only",
+        "stdout carries only JSON-RPC frames (asserted by feeding a scripted session); diagnostics go to stderr; mcp --help returns and mcp accepts --json",
+        "tools query mesh serve when it runs and fall back to a direct read otherwise"
+      ],
+      "deps": [
+        "t10"
+      ],
+      "covers": [
+        "c14",
+        "h13"
+      ],
+      "instruction": "Hand-roll JSON-RPC 2.0 with stdlib json; keep the loop thin around a testable dispatch function so coverage holds. Register the verb and its catalog entry after t10's changes. Tests in tests/test_mcp.py."
+    },
+    {
+      "id": "t12",
+      "summary": "docs, harness mirrors and version bump",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "README CLI table, docs/integration.md, CLAUDE.md current-state table, AGENTS.override.md, AGENTS.colleague.md and QWEN.md describe the ventunoq profile, mesh status/serve, mcp and fleet.toml; nothing ahead of the code is described without (planned)",
+        "pyproject.toml version and CHANGELOG.md bumped; markdownlint and scripts/harness-smoke.py --stage config pass"
+      ],
+      "deps": [
+        "t3",
+        "t4",
+        "t9",
+        "t11"
+      ],
+      "covers": [],
+      "instruction": "Use the version-bump skill. Keep the lobes-cli attribution only in .pi/SYSTEM.md."
+    },
+    {
+      "id": "t13",
+      "summary": "install on cultureos in dry-run, run mesh serve, verify all five machines",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "docs/evidence/2026-11-08-ventunoq-baseline.md records the before state (generic profile 102/106/110, 48 zones, curl to each box's :9476 failing from cultureos)",
+        "on cultureos systemctl --user is-active heat-governor prints active and heat-governor state reports applying false",
+        "mesh serve runs as a user unit on 127.0.0.1, and heat-governor mesh status --json lists 5 of 5 machines with readings no older than 10 s"
+      ],
+      "deps": [
+        "t2",
+        "t3",
+        "t10",
+        "t11"
+      ],
+      "covers": [
+        "c1",
+        "h1",
+        "c7",
+        "h7",
+        "c20",
+        "h16"
+      ],
+      "instruction": "LIVE MACHINE CHANGE: get the user's explicit go-ahead before installing anything. Write the baseline evidence first, then install with uv tool and a user unit like the other four boxes (apply = false). No change on spark, spark2, thor or orin."
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "teken cli doctor --strict may invoke verbs beyond --help; a long-running stdio verb (mcp) could hang the rubric \u2014 unverified in the scope survey (s13)",
+      "kind": "unknown_nonblocking",
+      "task_id": "t11",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r2",
+      "text": "VENTUNO Q limits are declared, not measured; dry-run on cultureos stays until a CPU+GPU+NPU load run tunes them (frame park v1)",
+      "kind": "follow_up",
+      "task_id": "t13",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r3",
+      "text": "the upgrade release (token listener + /history route, frame park v4) and the buffer persistence question (v5) are out of this plan",
+      "kind": "out_of_scope",
+      "task_id": null,
+      "resolved": false,
+      "resolution": ""
+    }
+  ],
+  "obligations": []
+}
