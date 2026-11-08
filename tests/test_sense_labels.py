@@ -89,3 +89,7 @@ def test_cmd_sense_text_mode(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert "fans: acpi_fan 3412 RPM" in out
     assert "gpu: temp 71 C," in out and "headroom 22 C to the 93 C limit" in out
+
+
+def test_unqualified_fan_key_still_gets_a_name() -> None:
+    assert fan_text("fan1_input", 3412.0) == "fan 3412 RPM"

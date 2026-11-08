@@ -87,6 +87,7 @@ def _profile_dict(prof: platforms.Profile) -> dict[str, object]:
 def fan_text(key: str, value: float) -> str:
     """One fan reading with its unit: tach input in RPM, PWM duty as n/255 and percent."""
     name, _, field = key.rpartition(".")
+    name = name or "fan"  # an unqualified key such as fan1_input has no device prefix
     if field.startswith("fan") and field.endswith("_input"):
         return f"{name} {value:g} RPM"
     if field.startswith("pwm"):
