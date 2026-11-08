@@ -9,7 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- CI fails while SonarCloud has unaccepted findings: `scripts/sonar-gate.py` runs after the SonarCloud scan and fails the job on any unresolved issue or unreviewed (TO_REVIEW) security hotspot. On a PR it checks that PR's findings; on main, the new-code period. Fix the finding or accept it on SonarCloud (Accepted and False Positive do not count). The quality gate alone let code smells through while the rating held.
+- CI fails while SonarCloud has unaccepted findings: `scripts/sonar-gate.py` runs after the SonarCloud scan and fails the job on any unresolved issue or unreviewed (TO_REVIEW) security hotspot. On a PR it checks that PR's findings; on main, every unresolved finding (main is cleared here). Fix the finding or accept it on SonarCloud (Accepted and False Positive do not count). The quality gate alone let code smells through while the rating held.
 
 ### Fixed
 

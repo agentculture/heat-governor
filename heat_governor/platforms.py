@@ -222,7 +222,8 @@ def _concurrency_override(p: Profile, conc: dict) -> Profile:
     levels = ("cool", "warm", "hot", "critical")
     cur = dict(zip(levels, p.concurrency))
     cur.update({k: float(v) for k, v in conc.items()})
-    return cast(Profile, replace(p, concurrency=tuple(cur[k] for k in levels)))
+    conc4 = (cur["cool"], cur["warm"], cur["hot"], cur["critical"])
+    return cast(Profile, replace(p, concurrency=conc4))
 
 
 def apply_overrides(profile: Profile, cfg: dict) -> Profile:

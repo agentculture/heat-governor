@@ -10,14 +10,15 @@ step runs after the scan and asks SonarCloud directly:
   SonarCloud does not count;
 * security hotspots still ``TO_REVIEW``.
 
-Scope:
+Scope (exactly one):
     --pull-request N   the findings SonarCloud reports on that PR (its new code);
-    --branch NAME      the findings in the branch's new-code period, so the
-                       backlog that predates this gate does not turn main red.
+    --branch NAME      every unresolved finding on the branch. Main was cleared
+                       when this gate landed, so any finding there is new.
 
 Sends ``SONAR_TOKEN`` as a Bearer token when set (anonymous works for a public
 project) and reads the project key from
-``sonar-project.properties``. Stdlib only. Exit 0 clean, 1 findings, 2 error.
+``sonar-project.properties``. Stdlib only.
+Exit 0 clean, 1 findings, 2 error (config, or SonarCloud unreachable or unreadable).
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from pathlib import Path
 
 HOST = "https://sonarcloud.io"
 PAGE = 100
+MAX_RESULTS = 10_000  # issues/search refuses p * ps beyond this (HTTP 400)
 
 
 def project_key(props: Path) -> str:
@@ -39,7 +41,7 @@ def project_key(props: Path) -> str:
         key, sep, value = line.partition("=")
         if sep and key.strip() == "sonar.projectKey":
             return value.strip()
-    raise SystemExit(f"sonar-gate: no sonar.projectKey in {props}")
+    raise GateError(f"no sonar.projectKey in {props}")
 
 
 def _get(path: str, params: dict[str, str], token: str) -> dict:
@@ -58,34 +60,35 @@ def _paged(path: str, params: dict[str, str], token: str, items: str) -> list[di
         batch = doc.get(items, [])
         out.extend(batch)
         total = doc.get("total", doc.get("paging", {}).get("total", len(out)))
-        if not batch or len(out) >= total:
+        if not batch or len(out) >= total or page * PAGE >= MAX_RESULTS:
             return out
         page += 1
 
 
-def scope_params(pull_request: str | None, branch: str | None) -> tuple[dict, dict]:
-    """Query parameters for issues and hotspots in the requested scope."""
+class GateError(Exception):
+    """A configuration problem: exit 2, never reported as findings."""
+
+
+def scope_params(pull_request: str | None, branch: str | None) -> dict[str, str]:
+    """Query parameters for the requested scope (the same for issues and hotspots)."""
     if pull_request:
-        return {"pullRequest": pull_request}, {"pullRequest": pull_request}
+        return {"pullRequest": pull_request}
     if branch:
-        return (
-            {"branch": branch, "inNewCodePeriod": "true"},
-            {"branch": branch, "inNewCodePeriod": "true"},
-        )
-    raise SystemExit("sonar-gate: give --pull-request or --branch")
+        return {"branch": branch}
+    raise GateError("give --pull-request or --branch")
 
 
 def findings(key: str, pull_request: str | None, branch: str | None, token: str) -> list[str]:
-    iscope, hscope = scope_params(pull_request, branch)
+    scope = scope_params(pull_request, branch)
     issues = _paged(
         "/api/issues/search",
-        {"componentKeys": key, "resolved": "false", **iscope},
+        {"componentKeys": key, "resolved": "false", **scope},
         token,
         "issues",
     )
     hotspots = _paged(
         "/api/hotspots/search",
-        {"projectKey": key, "status": "TO_REVIEW", **hscope},
+        {"projectKey": key, "status": "TO_REVIEW", **scope},
         token,
         "hotspots",
     )
@@ -103,18 +106,22 @@ def describe(item: dict, kind: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--pull-request")
-    ap.add_argument("--branch")
+    which = ap.add_mutually_exclusive_group(required=True)
+    which.add_argument("--pull-request")
+    which.add_argument("--branch")
     ap.add_argument("--properties", default="sonar-project.properties")
     args = ap.parse_args(argv)
     token = os.environ.get("SONAR_TOKEN", "")  # empty: anonymous, public projects only
-    key = project_key(Path(args.properties))
     try:
+        key = project_key(Path(args.properties))
         found = findings(key, args.pull_request, args.branch, token)
-    except OSError as exc:  # URLError and HTTPError are OSErrors
+    except GateError as exc:
+        print(f"sonar-gate: {exc}", file=sys.stderr)
+        return 2
+    except (OSError, ValueError) as exc:  # URLError/HTTPError/missing file; bad JSON
         print(f"sonar-gate: SonarCloud query failed: {exc}", file=sys.stderr)
         return 2
-    scope = f"PR #{args.pull_request}" if args.pull_request else f"{args.branch} (new code)"
+    scope = f"PR #{args.pull_request}" if args.pull_request else args.branch
     if not found:
         print(f"sonar-gate: {scope}: no unaccepted issues, no hotspots to review")
         return 0

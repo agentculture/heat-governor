@@ -27,15 +27,43 @@ def test_project_key_read_from_properties(tmp_path: Path) -> None:
 
 
 def test_scope_pull_request_and_branch() -> None:
-    assert gate.scope_params("9", None) == ({"pullRequest": "9"}, {"pullRequest": "9"})
-    issues, hotspots = gate.scope_params(None, "main")
-    assert issues == {"branch": "main", "inNewCodePeriod": "true"}
-    assert hotspots == issues
+    assert gate.scope_params("9", None) == {"pullRequest": "9"}
+    assert gate.scope_params(None, "main") == {"branch": "main"}  # every unresolved finding
 
 
 def test_scope_needs_one() -> None:
-    with pytest.raises(SystemExit):
+    with pytest.raises(gate.GateError):
         gate.scope_params(None, None)
+
+
+def test_pull_request_and_branch_are_exclusive() -> None:
+    with pytest.raises(SystemExit) as exc:
+        gate.main(["--pull-request", "9", "--branch", "main"])
+    assert exc.value.code == 2  # argparse usage error
+
+
+def test_config_and_decode_errors_exit_2(monkeypatch, tmp_path: Path) -> None:
+    missing = str(tmp_path / "none.properties")
+    assert gate.main(["--branch", "main", "--properties", missing]) == 2
+    nokey = tmp_path / "nokey.properties"
+    nokey.write_text("sonar.organization=o\n")
+    assert gate.main(["--branch", "main", "--properties", str(nokey)]) == 2
+    props = tmp_path / "s.properties"
+    props.write_text("sonar.projectKey=k\n")
+
+    def html_page(*a):
+        raise ValueError("Expecting value")  # json.load on an HTML error page
+
+    monkeypatch.setattr(gate, "findings", html_page)
+    assert gate.main(["--branch", "main", "--properties", str(props)]) == 2
+
+
+def test_paging_stops_at_the_api_result_cap(monkeypatch) -> None:
+    def fake_get(path, params, token):
+        return {"total": 50_000, "issues": list(range(100))}
+
+    monkeypatch.setattr(gate, "_get", fake_get)
+    assert len(gate._paged("/api/issues/search", {}, "", "issues")) == 10_000
 
 
 def test_queries_ask_for_unresolved_issues_and_unreviewed_hotspots(monkeypatch) -> None:

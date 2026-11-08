@@ -131,9 +131,9 @@ class Daemon:
         )
         self.server = StateServer(*opts.listen) if (opts.listen and opts.listeners) else None
         # -- the tensor-parallel pair ([pair]); None without one
-        self.pair_link: PeerLink | None = peer_link or (
-            PeerLink(opts.pair) if opts.pair is not None else None
-        )
+        self.pair_link: PeerLink | None = peer_link
+        if self.pair_link is None and opts.pair is not None:
+            self.pair_link = PeerLink(opts.pair)
         self.pair_server = self._pair_server(opts.pair) if opts.listeners else None
         self.pair_ids: set[str] = set()  # ids of this box's rank containers
         self._pair_forced: set[str] = set()  # pair containers found as batch, logged once
@@ -150,7 +150,7 @@ class Daemon:
         self.host = socket.gethostname()
         self.operator = OperatorCeiling(hold_path(data) if data else None, opts.gpu_ceiling_mhz)
         self.gpu = GpuGovernor(
-            gpuclock or self._default_gpuclock(opts),
+            gpuclock if gpuclock is not None else self._default_gpuclock(opts),
             self.ledger,
             self.operator,
             self._log,
@@ -179,7 +179,7 @@ class Daemon:
         self, docker: Docker | None, profile: Profile, opts: Options
     ) -> tuple[CpuCapper | None, DutyCycler | None]:
         """The container CPU capper and duty cycler; neither without a docker client."""
-        if docker is None:
+        if not docker:
             return None, None
         capper = CpuCapper(docker, self.ledger, self._log, apply=opts.apply)
         cycler = DutyCycler(
