@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-11-08
+
+### Added
+
+- VENTUNO Q (Qualcomm QCS8300) support: detection from the device tree (arduino,monza / qcom,qcs8300), built-in `ventunoq` profile (30 zones, warm 94 / hot 98 / critical 102 C, declared from trip points, unmeasured). UNO Q falls back to generic.
+- `sense`: `devfreq` GPU mode (Adreno clock in MHz), board power from an ina232 hwmon (`board_power_w`); `capabilities` reports a fan driven by a kernel cooling device as kernel-owned.
+- Fleet view: `fleet.toml` (strictly validated, beside `config.toml`), SSH/local transport with ControlMaster and bounded timeouts, and a concurrent fleet reader (ok/stale/unreachable on the reader clock, admit null unless ok, 24 h history).
+- `heat-governor mesh overview|status|serve`: `serve` runs the reader, the dashboard and a JSON API on 127.0.0.1:9480; `status` asks it and falls back to a direct read.
+- Dashboard with vendored React 18.3.1, htm 3.1.1 and Lato: fleet map, filters, trends, compare, Polar night light/dark, works offline.
+- `heat-governor mcp`: read-only MCP server over stdio (tools `mesh_status`, `machine_state`, `sense`).
+
+### Changed
+
+- `gpu-clock` refuses ventunoq/devfreq profiles (exit 1 with a hint) in the CLI and the daemon; `lock` and `reset` gained `--platform`.
+- Docs and harness prompt files describe the fleet view. Planned, not built: a bearer-token tailnet listener and daemon `GET /history` route; persisted reader history; measured VENTUNO Q limits.
+
 ## [0.15.0] - 2026-11-08
 
 ### Changed

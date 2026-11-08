@@ -10,7 +10,7 @@ of project guidance for a Qwen Code session.
 
 `heat-governor` is an AgentCulture mesh agent that **keeps machines running heavy AI work without thermal resets: it senses the thermal zones, signals clients when to hold new work, duty-cycles and CPU-caps the containers that opt in, and records each run so the next one is tuned better.**
 
-It was scaffolded from `culture-agent-template`. The governing core has landed: `sense`, `capabilities`, `run` (the daemon), `state`, `wait`, `report`, `replay` and `unit`, with built-in profiles for the DGX Spark (measured), Jetson AGX Thor and Orin (declared, unmeasured). Live validation of `run --apply` on a real batch window is **(planned)**. The agent verbs (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) remain.
+It was scaffolded from `culture-agent-template`. The governing core has landed: `sense`, `capabilities`, `run` (the daemon), `state`, `wait`, `report`, `replay` and `unit`, with built-in profiles for the DGX Spark (measured), Jetson AGX Thor, Jetson AGX Orin and VENTUNO Q (`ventunoq`; declared, unmeasured). The fleet view has landed too: `mesh overview|status|serve` (reader plus dashboard and JSON API on `127.0.0.1:9480`, machines listed in `fleet.toml`) and `mcp` (read-only MCP server over stdio). A token-protected tailnet listener and a daemon `GET /history` route are **(planned)**. Live validation of `run --apply` on a real batch window is **(planned)**. The agent verbs (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) remain.
 
 Actuating hardware (cpufreq, fan or CPU-hotplug controls) changes the live
 machine, not the repo. Don't run it without the operator's go-ahead, and keep
@@ -75,6 +75,10 @@ verbs also needs an `overview` verb.
 heat_governor/            agent-first CLI (cited from teken's python-cli reference)
   cli/                    parser, error/output contract, _commands/ (verbs)
   explain/                markdown catalog for `explain`
+  fleet.py, transport.py  fleet.toml loader; local/SSH transport
+  fleet_reader.py         concurrent poll, ok/stale/unreachable, history
+  mesh_server.py, web/    dashboard + JSON API (vendored assets)
+  mcp_server.py           read-only MCP server over stdio
 tests/                    pytest: CLI, doctor, harness registries, smoke, secret scan
 scripts/                  harness-smoke.py, scan-secrets.py
 .claude/skills/           vendored guildmaster skill kit (cite-don't-import)
