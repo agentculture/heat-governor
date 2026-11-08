@@ -29,25 +29,27 @@ ORIN_ZONES = [
     ("soc2-thermal", 54812, [("passive", 99000), ("critical", 104500)]),
     ("tj-thermal", 60000, [("active", 75000), ("critical", 104500)]),
 ]
-# Arduino VENTUNO Q (arduino,monza), live trips 2026-11-08: a representative subset of its 48
-# zones. cpu-* passive/hot/critical 126/130/135, gpuss-*/nsp-* 115/130/135, ddrss 130/135, PMIC
-# pmm86*-therm passive 105 critical 125. aoss/pcie are families the profile excludes; their trips
-# here are placeholders. The PMIC sdram zone is the hottest at idle, as on the real box.
-_CPU = [("passive", 126000), ("hot", 130000), ("critical", 135000)]
-_ACC = [("passive", 115000), ("hot", 130000), ("critical", 135000)]
-_DDR = [("hot", 130000), ("critical", 135000)]
+# Arduino VENTUNO Q (arduino,monza): a representative subset of its 48 zones. Trip types and
+# values read from the live VENTUNO Q sysfs, 2026-11-08. Only the two PMIC zones carry a critical
+# trip (125 C); cpuss-0-0 also has an active 38 C trip. Idle temps are typical; the PMIC sdram
+# zone is the hottest, as on the real box.
+_CPU = [("passive", 135000), ("passive", 126000), ("passive", 130000)]
+_ACC = [("passive", 135000), ("passive", 115000), ("passive", 130000)]
+_TWO = [("passive", 135000), ("passive", 130000)]
+_CPUSS = [("passive", 135000), ("passive", 130000), ("active", 38000)]
 _PMIC = [("passive", 105000), ("critical", 125000)]
 VENTUNOQ_ZONES = [
-    ("aoss-0-thermal", 43000, _CPU),
+    ("aoss-0-thermal", 43000, _TWO),
     ("cpu-0-0-0-thermal", 44100, _CPU),
     ("cpu-1-0-0-thermal", 43800, _CPU),
-    ("cpuss-0-0-thermal", 43500, _CPU),
-    ("ddrss-0-thermal", 45000, _DDR),
+    ("cpuss-0-0-thermal", 43500, _CPUSS),
+    ("cpuss-1-0-thermal", 43400, _TWO),
+    ("ddrss-0-thermal", 45000, _TWO),
     ("gpuss-0-thermal", 44200, _ACC),
     ("gpuss-1-thermal", 44600, _ACC),
     ("nsp-0-0-0-thermal", 43200, _ACC),
     ("nsp-1-0-0-thermal", 43900, _ACC),
-    ("pcie-0-thermal", 42000, _CPU),
+    ("pcie-0-thermal", 42000, _TWO),
     ("pmm8620au-0-therm", 46000, _PMIC),
     ("pmm8650au-1-therm", 48000, _PMIC),
 ]

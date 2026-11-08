@@ -51,14 +51,28 @@ def test_ina232_coexists_with_fan(tmp_path):
 
 
 def test_ventunoq_trips():
-    by = {z[0]: z for z in VENTUNOQ_ZONES}
-    trips = lambda name: [t for _, t in by[name][2]]  # noqa: E731
-    assert trips("cpu-0-0-0-thermal") == [126000, 130000, 135000]
-    assert trips("gpuss-0-thermal") == [115000, 130000, 135000]
-    assert trips("nsp-0-0-0-thermal") == [115000, 130000, 135000]
-    assert trips("ddrss-0-thermal") == [130000, 135000]
-    for pm in ("pmm8620au-0-therm", "pmm8650au-1-therm"):
-        assert by[pm][2] == [("passive", 105000), ("critical", 125000)]
+    by = {z[0]: [(k, t // 1000) for k, t in z[2]] for z in VENTUNOQ_ZONES}
+    cpu = [("passive", 135), ("passive", 126), ("passive", 130)]
+    acc = [("passive", 135), ("passive", 115), ("passive", 130)]
+    two = [("passive", 135), ("passive", 130)]
+    pmic = [("passive", 105), ("critical", 125)]
+    assert by["cpu-0-0-0-thermal"] == cpu
+    assert by["gpuss-0-thermal"] == acc
+    assert by["nsp-0-0-0-thermal"] == acc
+    assert by["cpuss-0-0-thermal"] == [("passive", 135), ("passive", 130), ("active", 38)]
+    for name in ("cpuss-1-0-thermal", "ddrss-0-thermal", "aoss-0-thermal", "pcie-0-thermal"):
+        assert by[name] == two
+    assert by["pmm8620au-0-therm"] == pmic
+    assert by["pmm8650au-1-therm"] == pmic
+
+
+def test_ventunoq_only_pmic_zones_are_critical():
+    crit = {z[0]: t for z in VENTUNOQ_ZONES for k, t in z[2] if k == "critical"}
+    assert crit == {"pmm8620au-0-therm": 125000, "pmm8650au-1-therm": 125000}
+    assert all(k in ("passive", "critical", "active") for z in VENTUNOQ_ZONES for k, _ in z[2])
+
+
+def test_ventunoq_idle_temps():
     temps = {z[0]: z[1] for z in VENTUNOQ_ZONES}
     assert max(temps, key=temps.get).startswith("pmm86")
-    assert {"aoss-0-thermal", "pcie-0-thermal"} <= set(temps)
+    assert all(42000 <= t <= 48000 for t in temps.values())
