@@ -97,6 +97,12 @@ def utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _decision_fields(dec: PairDecision | None) -> dict:
+    """The pair's shared decision, or all None before the first one."""
+    keys = ("level", "admit", "concurrency_factor", "cpus", "basis")
+    return {k: getattr(dec, k) if dec else None for k in keys}
+
+
 class Daemon:
     def __init__(
         self,
@@ -119,28 +125,15 @@ class Daemon:
         self.ctrl = Controller(profile)
         data = opts.data_dir
         self.ledger = Ledger((data or Path(".")) / "ledger.json")
-        self.capper = (
-            CpuCapper(self.docker, self.ledger, self._log, apply=opts.apply) if docker else None
-        )
-        self.cycler = (
-            DutyCycler(
-                self.docker,
-                self.ledger,
-                self._log,
-                apply=opts.apply,
-                period_s=profile.duty_period_s,
-            )
-            if docker
-            else None
-        )
+        self.capper, self.cycler = self._actuators(docker, profile, opts)
         self.recorder = (
             Recorder(data / "records", fsync=opts.fsync) if (data and opts.record) else None
         )
         self.server = StateServer(*opts.listen) if (opts.listen and opts.listeners) else None
         # -- the tensor-parallel pair ([pair]); None without one
-        self.pair_link: PeerLink | None = peer_link
-        if self.pair_link is None and opts.pair is not None:
-            self.pair_link = PeerLink(opts.pair)
+        self.pair_link: PeerLink | None = peer_link or (
+            PeerLink(opts.pair) if opts.pair is not None else None
+        )
         self.pair_server = self._pair_server(opts.pair) if opts.listeners else None
         self.pair_ids: set[str] = set()  # ids of this box's rank containers
         self._pair_forced: set[str] = set()  # pair containers found as batch, logged once
@@ -156,10 +149,8 @@ class Daemon:
         self.last: Decision | None = None
         self.host = socket.gethostname()
         self.operator = OperatorCeiling(hold_path(data) if data else None, opts.gpu_ceiling_mhz)
-        if gpuclock is None and (opts.gpu_clock or self.operator.mhz is not None):
-            gpuclock = GpuClock()
         self.gpu = GpuGovernor(
-            gpuclock,
+            gpuclock or self._default_gpuclock(opts),
             self.ledger,
             self.operator,
             self._log,
@@ -183,6 +174,24 @@ class Daemon:
         if opts.units:
             self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
             self._sync_adaptive(opts.units)
+
+    def _actuators(
+        self, docker: Docker | None, profile: Profile, opts: Options
+    ) -> tuple[CpuCapper | None, DutyCycler | None]:
+        """The container CPU capper and duty cycler; neither without a docker client."""
+        if docker is None:
+            return None, None
+        capper = CpuCapper(docker, self.ledger, self._log, apply=opts.apply)
+        cycler = DutyCycler(
+            docker, self.ledger, self._log, apply=opts.apply, period_s=profile.duty_period_s
+        )
+        return capper, cycler
+
+    def _default_gpuclock(self, opts: Options) -> GpuClock | None:
+        """A GPU clock driver when clock control or an operator ceiling needs one."""
+        if opts.gpu_clock or self.operator.mhz is not None:
+            return GpuClock()
+        return None
 
     # -- logging: to the log sink and into the record
     def _log(self, msg: str) -> None:
@@ -603,33 +612,32 @@ class Daemon:
         rule = self.opts.pair
         if rule is None:
             return None
-        peer, dec = self._peer, self._pair
-        r = peer.reading if peer else None
         return {
             "peer": rule.peer,
-            "peer_status": peer.status if peer else "unreachable",
-            "peer_error": peer.error if peer and not peer.ok else None,
-            "peer_age_s": peer.age_s if peer else None,
-            "stale_after_s": self.pair_link.stale_after(r) if self.pair_link else None,
-            "peer_host": r.host if r else None,
-            "peer_level": r.level if r else None,
-            "peer_cpus": r.cpus if r else None,
-            "peer_effective_c": r.effective_c if r else None,
-            "peer_gpu_operator_mhz": r.gpu_operator_mhz if r else None,
-            "gpu_operator_match": (
-                self.operator.mhz == r.gpu_operator_mhz
-                if (r and r.has_gpu_operator and peer.ok)
-                else None
-            ),
-            "level": dec.level if dec else None,
-            "admit": dec.admit if dec else None,
-            "concurrency_factor": dec.concurrency_factor if dec else None,
-            "cpus": dec.cpus if dec else None,
-            "basis": dec.basis if dec else None,
+            **self._peer_fields(),
+            **_decision_fields(self._pair),
             "containers": sorted(
                 c.name for cid, c in self.containers.items() if cid in self.pair_ids
             ),
         }
+
+    def _peer_fields(self) -> dict:
+        """What the pair document says about the peer (all None when it is unreachable)."""
+        peer = self._peer
+        r = peer.reading if peer else None
+        doc: dict = {
+            "peer_status": peer.status if peer else "unreachable",
+            "peer_error": peer.error if peer and not peer.ok else None,
+            "peer_age_s": peer.age_s if peer else None,
+            "stale_after_s": self.pair_link.stale_after(r) if self.pair_link else None,
+        }
+        keys = ("host", "level", "cpus", "effective_c", "gpu_operator_mhz")
+        doc.update({f"peer_{k}": getattr(r, k) if r else None for k in keys})
+        match = None
+        if r and r.has_gpu_operator and peer and peer.ok:
+            match = self.operator.mhz == r.gpu_operator_mhz
+        doc["gpu_operator_match"] = match
+        return doc
 
     def cpus_for(self, c: Container, d: Decision) -> int | None:
         """A pair container follows the pair's band; everything else, this box's."""

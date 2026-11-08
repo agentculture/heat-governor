@@ -40,7 +40,8 @@ def test_pair_config_valid_and_parsed() -> None:
     assert validate(data) == []
     rule = Config(data=data).pair
     assert rule == PairRule("10.77.77.2:9476", ("sparkrun_*",), "10.77.77.1:9476", 8.0, 0.5)
-    assert rule.matches("sparkrun_qwen_rank0") and not rule.matches("model-gear-vllm-primary")
+    assert rule.matches("sparkrun_qwen_rank0")
+    assert not rule.matches("model-gear-vllm-primary")
     assert Config().pair is None
 
 
@@ -149,12 +150,15 @@ def test_lost_peer_is_one_band_hotter_than_local(status: str) -> None:
 
 
 def test_band_helpers() -> None:
-    assert tighter(None, 8) == 8 and tighter(8, None) == 8 and tighter(4, 8) == 4
+    assert tighter(None, 8) == 8
+    assert tighter(8, None) == 8
+    assert tighter(4, 8) == 4
     assert tighter(None, None) is None
     assert one_band_hotter(12, BANDS) == 8
     assert one_band_hotter(10, BANDS) == 8  # between bands: the next one down
     assert one_band_hotter(2, BANDS) == 2  # tighter than every band: stays
-    assert one_band_hotter(None, []) is None and one_band_hotter(6, []) == 6
+    assert one_band_hotter(None, []) is None
+    assert one_band_hotter(6, []) == 6
     assert one_level_hotter("critical") == "critical"
 
 
@@ -216,7 +220,9 @@ def test_peer_link_ok_stale_unreachable_and_recovered() -> None:
     peer.error, peer.doc = None, peer_doc("warm", 8, at=2.0)
     link.poll_once()
     st = link.status(clk())
-    assert st.ok and st.reading.level == "warm" and st.age_s == 0.0
+    assert st.ok
+    assert st.reading.level == "warm"
+    assert st.age_s == 0.0
 
 
 def test_peer_link_short_failure_inside_the_window_is_still_ok() -> None:
@@ -259,7 +265,8 @@ def test_fetch_state_from_a_real_state_server_on_localhost() -> None:
         link.start()  # idempotent
         assert link.running
         link.stop()
-        assert not link.running and link.status(link.clock()).ok
+        assert not link.running
+        assert link.status(link.clock()).ok
     finally:
         srv.stop()
     with pytest.raises(OSError):
@@ -314,7 +321,8 @@ def test_pair_container_capped_by_the_hotter_peer_and_never_paused(tmp_path: Pat
     assert dk.c["s1"].nano_cpus == 0  # non-pair serving: local band (no cap when cool)
     assert dk.c["b1"].nano_cpus == 0
     st = read_state(tmp_path / "state.json")
-    assert st["level"] == "cool" and st["admit"] is True  # the host signal stays local
+    assert st["level"] == "cool"
+    assert st["admit"] is True  # the host signal stays local
     pair = st["pair"]
     assert (pair["level"], pair["admit"], pair["cpus"], pair["basis"]) == ("hot", False, 4, "peer")
     assert (pair["peer_status"], pair["peer_host"], pair["gpu_operator_match"]) == (
@@ -371,7 +379,8 @@ def test_stale_peer_one_band_hotter_logged_once_then_recovered(tmp_path: Path) -
         clk.t += 1
         d.tick()
     lost = [m for m in logs if "held one band hotter" in m]
-    assert len(lost) == 1 and "unreachable (timed out)" in lost[0]
+    assert len(lost) == 1
+    assert "unreachable (timed out)" in lost[0]
     assert dk.c["r0"].nano_cpus == 12_000_000_000  # one band hotter than local (none)
     assert dk.c["s1"].nano_cpus == 0  # non-pair containers: untouched
     st = read_state(tmp_path / "state.json")
@@ -400,7 +409,8 @@ def test_gpu_ceiling_mismatch_warned_once_per_change(tmp_path: Path) -> None:
         peer.doc = {**peer.doc, "at": clk.t}
         d.tick()
     warn = [m for m in logs if "operator GPU ceiling differs" in m]
-    assert len(warn) == 1 and "here 2200 MHz, peer spark2 1800 MHz" in warn[0]
+    assert len(warn) == 1
+    assert "here 2200 MHz, peer spark2 1800 MHz" in warn[0]
     peer.doc = {**peer.doc, "gpu_operator_mhz": 2200}
     clk.t += 1
     d.tick()
@@ -429,7 +439,8 @@ def test_no_pair_leaves_everything_local(tmp_path: Path) -> None:
     d.discover()
     d.tick()
     st = read_state(tmp_path / "s.json")
-    assert st["pair"] is None and d.pair_link is None
+    assert st["pair"] is None
+    assert d.pair_link is None
     assert d.containers["r0"].role == "batch"  # no pair: its label rules
 
 
@@ -439,14 +450,16 @@ def test_reload_adds_changes_and_drops_the_pair(tmp_path: Path) -> None:
     d.set_pair(PairRule(PAIR["peer"], ("sparkrun_*",), stale_after_s=20.0))
     assert d.pair_link.rule.stale_after_s == 20.0
     d.set_pair(None)
-    assert d.pair_link is None and d.opts.pair is None
+    assert d.pair_link is None
+    assert d.opts.pair is None
     d.discover()
     d.tick()
     assert read_state(tmp_path / "state.json")["pair"] is None
     assert d.containers["r0"].role == "batch"
     assert any("pair: off" in m for m in logs)
     d.set_pair(PairRule(PAIR["peer"], ("sparkrun_*",)))
-    assert d.pair_link is not None and not d.pair_link.running
+    assert d.pair_link is not None
+    assert not d.pair_link.running
 
 
 def test_reload_flags_pair_listen_as_restart_only(tmp_path: Path) -> None:
@@ -549,13 +562,15 @@ def test_cli_state_pair(tmp_path: Path, capsys) -> None:
     base = {"at": time.time(), "level": "cool", "admit": True, "concurrency_factor": 1.0}
     write_state(p, {**base, "pair": pair})
     rc, out, _ = _cli(capsys, "state", "--source", str(p), "--pair", "--json")
-    assert rc == 0 and json.loads(out)["level"] == "warm"
+    assert rc == 0
+    assert json.loads(out)["level"] == "warm"
     rc, out, _ = _cli(capsys, "state", "--source", str(p))
     assert rc == 0
     assert "pair: level=warm admit=True cpus=12 basis=peer_lost" in out
     assert "unreachable (timed out)" in out
     rc, out, _ = _cli(capsys, "wait", "--source", str(p), "--pair", "--timeout", "0", "--json")
-    assert rc == 0 and json.loads(out)["level"] == "warm"
+    assert rc == 0
+    assert json.loads(out)["level"] == "warm"
 
 
 def _pair_config(tmp_path: Path, peer: str) -> Path:
@@ -600,7 +615,8 @@ def test_cli_pair_without_docker_is_env_error(tmp_path: Path, capsys) -> None:
     rc, _, err = _cli(
         capsys, "run", "--once", "--no-docker", "--config", str(cfg), "--data-dir", str(tmp_path)
     )
-    assert rc == 2 and "hint:" in err
+    assert rc == 2
+    assert "hint:" in err
 
 
 def test_cli_config_show_and_overview_carry_pair(tmp_path: Path, capsys) -> None:
@@ -608,9 +624,11 @@ def test_cli_config_show_and_overview_carry_pair(tmp_path: Path, capsys) -> None
 
     cfg = _pair_config(tmp_path, "10.77.77.2:9476")
     rc, out, _ = _cli(capsys, "config", "show", "--config", str(cfg), "--json")
-    assert rc == 0 and json.loads(out)["pair"]["peer"] == "10.77.77.2:9476"
+    assert rc == 0
+    assert json.loads(out)["pair"]["peer"] == "10.77.77.2:9476"
     rc, out, _ = _cli(capsys, "config", "overview", "--config", str(cfg))
-    assert rc == 0 and "pair peer 10.77.77.2:9476" in out
+    assert rc == 0
+    assert "pair peer 10.77.77.2:9476" in out
 
 
 # -- review fixes (PR #6) -----------------------------------------------------------
@@ -675,7 +693,8 @@ def test_1_poller_thread_survives_any_error() -> None:
         deadline = time.time() + 5
         while time.time() < deadline and not link.status(time.time()).ok:
             time.sleep(0.05)
-        assert link.running and link.status(time.time()).ok
+        assert link.running
+        assert link.status(time.time()).ok
     finally:
         link.stop()
 
@@ -732,7 +751,8 @@ def test_1_dead_poller_is_restarted_not_polled_in_the_tick(tmp_path: Path) -> No
     restarted = []
     d.pair_link.start = lambda: restarted.append(True)
     d.tick()
-    assert restarted == [True] and peer.calls == []
+    assert restarted == [True]
+    assert peer.calls == []
 
 
 def test_2_labelled_batch_rank_never_reaches_the_cycler_when_inspect_fails(
@@ -745,7 +765,8 @@ def test_2_labelled_batch_rank_never_reaches_the_cycler_when_inspect_fails(
     )
     d, sysr, _, _ = _pair_daemon(tmp_path, dk, FakePeer())
     d.discover()
-    assert "r0" in d.pair_ids and d.containers["r0"].role == "serving"
+    assert "r0" in d.pair_ids
+    assert d.containers["r0"].role == "serving"
     assert set(d.batch()) == {"b1"}
     set_temp(sysr, 0, 99000)
     d.tick()
@@ -794,7 +815,8 @@ def test_3_rule_cpu_cap_off_on_reload_restores_a_serving_container(tmp_path: Pat
     assert dk.c["s1"].nano_cpus == 4_000_000_000
     d.opts.containers = (ContainerRule("lane", "serving", False),)
     d.discover()
-    assert dk.c["s1"].nano_cpus == 7_000_000_000 and "s1" not in d.ledger.nano_cpus
+    assert dk.c["s1"].nano_cpus == 7_000_000_000
+    assert "s1" not in d.ledger.nano_cpus
 
 
 @pytest.mark.parametrize(
@@ -889,7 +911,8 @@ def test_7_peer_published_stale_window_is_honoured() -> None:
     link.poll_once()
     clk.t += 10
     st = link.status(clk())
-    assert st.ok and link.stale_after(st.reading) == 30.0  # its cadence, not ours
+    assert st.ok
+    assert link.stale_after(st.reading) == 30.0  # its cadence, not ours
     clk.t += 21
     assert link.status(clk()).status == "stale"
     capped = PeerLink(
@@ -923,7 +946,8 @@ def test_8_result_for_a_replaced_peer_is_discarded() -> None:
     link = PeerLink(PairRule("a:1", ("x",)), fetch=fetch, clock=clk)
     link.poll_once()
     st = link.status(clk())
-    assert st.status == "unreachable" and st.reading is None  # A's doc is not B's
+    assert st.status == "unreachable"
+    assert st.reading is None  # A's doc is not B's
 
 
 def test_8_failure_for_a_replaced_peer_is_not_recorded() -> None:

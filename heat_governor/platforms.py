@@ -26,7 +26,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, cast
 
 # Breakpoints of a piecewise-linear curve: (temperature C, value).
 Curve = tuple[tuple[float, float], ...]
@@ -212,16 +212,17 @@ def _int_bands(value: Iterable[Sequence[float]]) -> tuple[tuple[float, int], ...
 
 def _gpu_temp_override(p: Profile, g: dict | bool) -> Profile:
     if g is False:
-        return replace(p, gpu_temp_limits=None)
+        return cast(Profile, replace(p, gpu_temp_limits=None))
     base = p.gpu_temp_limits or Limits(warm_c=82.0, hot_c=87.0, crit_c=91.0)
-    return replace(p, gpu_temp_limits=replace(base, **{k: float(v) for k, v in g.items()}))
+    limits = replace(base, **{k: float(v) for k, v in g.items()})
+    return cast(Profile, replace(p, gpu_temp_limits=limits))
 
 
 def _concurrency_override(p: Profile, conc: dict) -> Profile:
     levels = ("cool", "warm", "hot", "critical")
     cur = dict(zip(levels, p.concurrency))
     cur.update({k: float(v) for k, v in conc.items()})
-    return replace(p, concurrency=tuple(cur[k] for k in levels))  # type: ignore[arg-type]
+    return cast(Profile, replace(p, concurrency=tuple(cur[k] for k in levels)))
 
 
 def apply_overrides(profile: Profile, cfg: dict) -> Profile:

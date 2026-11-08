@@ -37,6 +37,21 @@ jobs:
         env:
           SONAR_HOST_URL: https://sonarcloud.io
 
+      # The quality gate passes code smells while the rating holds; this fails the
+      # job on ANY unaccepted issue or unreviewed hotspot (accept it on SonarCloud,
+      # or fix it). Runs after the scan, which waits for the analysis to finish.
+      - name: SonarCloud findings gate
+        if: env.SONAR_TOKEN != ''
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -n "$PR_NUMBER" ]; then
+            python3 scripts/sonar-gate.py --pull-request "$PR_NUMBER"
+          else
+            python3 scripts/sonar-gate.py --branch "$BRANCH"
+          fi
+
   lint:
     runs-on: ubuntu-latest
     permissions:

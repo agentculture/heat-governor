@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.2] - 2026-11-08
+
+### Added
+
+- CI fails while SonarCloud has unaccepted findings: `scripts/sonar-gate.py` runs after the SonarCloud scan and fails the job on any unresolved issue or unreviewed (TO_REVIEW) security hotspot. On a PR it checks that PR's findings; on main, the new-code period. Fix the finding or accept it on SonarCloud (Accepted and False Positive do not count). The quality gate alone let code smells through while the rating held.
+
+### Fixed
+
+- The 31 SonarCloud findings open on main, so the new gate starts green: composite test assertions split one per assert (S9073), three functions brought under the cognitive-complexity limit (S3776: `Daemon.__init__`, `Daemon.pair_doc`, `_validate_pair_keys`), `Trend.WINDOWS` renamed `MAX_WINDOWS` so it no longer clashes with the `windows` field (S1845), and `dataclasses.replace` results cast to `Profile` (S5886). The pair peer's plain-HTTP URL (S5332) is marked NOSONAR with the reason: it is the other box on the private cluster link, which serves no TLS by design.
+
 ## [0.14.1] - 2026-11-02
 
 ### Fixed
