@@ -256,3 +256,30 @@ def test_catalog_learn_overview_list_mesh(capsys):
     assert "mesh" in ov
     rc, out, _ = run(capsys, "explain", "mesh", "status")
     assert rc == 0 and "mesh status" in out
+
+
+def test_status_never_reports_admit_for_a_box_that_is_not_ok():
+    """Defence in depth: even if a snapshot (e.g. from a misbehaving server) carries
+    admit=True for a stale or unreachable box, mesh status must report admit as null."""
+    from heat_governor.cli._commands.mesh import build_status
+
+    thermal = {"admit": True, "concurrency_factor": 1.0, "temp_c": 80.0, "level": "cool"}
+    snap = {
+        "schema": 1,
+        "reader": {},
+        "machines": [
+            {"name": "a", "state": "stale", "age_s": 40.0, "thermal": dict(thermal), "health": {}},
+            {
+                "name": "b",
+                "state": "unreachable",
+                "age_s": 90.0,
+                "thermal": dict(thermal),
+                "health": {},
+            },
+            {"name": "c", "state": "ok", "age_s": 1.0, "thermal": dict(thermal), "health": {}},
+        ],
+    }
+    rows = {r["name"]: r for r in build_status(snap, "mesh serve", None)["machines"]}
+    assert rows["a"]["admit"] is None
+    assert rows["b"]["admit"] is None
+    assert rows["c"]["admit"] is True
