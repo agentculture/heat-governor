@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-11-08
+
+### Changed
+
+- `heat-governor sense` (text mode) labels every fan and GPU value with a plain name and unit: a fan tach reads `acpi_fan 3412 RPM`, a PWM fan `pwmfan duty 85/255 (33%)`, and the GPU line reads `temp 71 C, power 33.19 W, SM clock 2184 MHz, util 95%, ...`. `tlimit_c`, which is headroom rather than a temperature, now prints as `headroom 22 C to the 93 C limit`. The `--json` document is unchanged.
+
 ## [0.14.2] - 2026-11-08
 
 ### Added

@@ -84,6 +84,61 @@ def _profile_dict(prof: platforms.Profile) -> dict[str, object]:
 # -- sense / capabilities ---------------------------------------------------
 
 
+_GPU_LABELS = {
+    # key: (label, unit); a value of None prints "n/a"
+    "temp_c": ("temp", " C"),
+    "power_w": ("power", " W"),
+    "sm_mhz": ("SM clock", " MHz"),
+    "gr_mhz": ("graphics clock", " MHz"),
+    "mem_mhz": ("memory clock", " MHz"),
+    "util_pct": ("util", "%"),
+    "mem_util_pct": ("memory util", "%"),
+    "events": ("throttle reasons", ""),
+}
+
+
+def fan_text(key: str, value: float) -> str:
+    """One fan reading with its unit: tach input in RPM, PWM duty as n/255 and percent."""
+    name, _, field = key.rpartition(".")
+    if field.startswith("fan") and field.endswith("_input"):
+        return f"{name} {value:g} RPM"
+    if field.startswith("pwm"):
+        return f"{name} duty {value:g}/255 ({value / 255 * 100:.0f}%)"
+    return f"{key}={value:g}"
+
+
+def _num(value: object, unit: str) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, float):
+        return f"{value:g}{unit}"
+    return f"{value}{unit}"
+
+
+def gpu_text(gpu: dict) -> str:
+    """The GPU readings with plain labels and units; the JSON keys stay as they are.
+
+    ``tlimit_c`` is headroom -- degrees left before the GPU's own thermal limit --
+    so it prints next to that limit (``limit_c``) rather than as a temperature.
+    """
+    parts: list[str] = []
+    for key, value in gpu.items():
+        if key in ("tlimit_c", "limit_c"):
+            continue
+        if key in _GPU_LABELS:
+            label, unit = _GPU_LABELS[key]
+            parts.append(f"{label} {_num(value, unit)}")
+        elif key.endswith(".mhz"):  # Jetson devfreq clock, e.g. 17000000.gpu.mhz
+            parts.append(f"{key[: -len('.mhz')]} clock {_num(value, ' MHz')}")
+        else:
+            parts.append(f"{key}={value}")
+    head, limit = gpu.get("tlimit_c"), gpu.get("limit_c")
+    if head is not None:
+        tail = f" to the {_num(limit, ' C')} limit" if limit is not None else " to its limit"
+        parts.append(f"headroom {_num(head, ' C')}{tail}")
+    return ", ".join(parts)
+
+
 def cmd_sense(args: argparse.Namespace) -> None:
     from heat_governor.sense import Sensor
 
@@ -100,9 +155,9 @@ def cmd_sense(args: argparse.Namespace) -> None:
             f" {mark} {z.key:<22} {'unreadable' if z.temp_c is None else f'{z.temp_c:.1f} C'}"
         )
     if r.fans:
-        lines.append("fans: " + ", ".join(f"{k}={v:g}" for k, v in r.fans.items()))
+        lines.append("fans: " + ", ".join(fan_text(k, v) for k, v in r.fans.items()))
     if r.gpu:
-        lines.append("gpu: " + ", ".join(f"{k}={v}" for k, v in r.gpu.items()))
+        lines.append("gpu: " + gpu_text(r.gpu))
     lines.append("(* = watched)")
     emit_result("\n".join(lines), json_mode=False)
 
