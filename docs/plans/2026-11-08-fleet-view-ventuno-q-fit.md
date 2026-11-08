@@ -59,7 +59,7 @@ slug: `fleet-view-ventuno-q-fit` · status: `exported` · from frame: `fleet-vie
 - depends on: t5
 - covers: c26, h22
 - acceptance:
-  - the transport runs ssh with BatchMode=yes, ConnectTimeout, ServerAliveInterval, ControlMaster=auto, ControlPersist and a ControlPath under the reader's state dir, then '--', the validated host and the fixed remote command curl -s -m <timeout> 127.0.0.1:9476/state
+  - the transport runs ssh with BatchMode=yes, ConnectTimeout, ServerAliveInterval, ControlMaster=auto, ControlPersist and a ControlPath under the reader's state dir, then '--', the validated host and the fixed remote command `curl -s -m <timeout> 127.0.0.1:9476/state`
   - a host that hangs is reported unreachable after the per-poll timeout and never blocks the caller beyond it (tested with a fake ssh script on PATH)
   - closing the transport tears down its control sockets
 

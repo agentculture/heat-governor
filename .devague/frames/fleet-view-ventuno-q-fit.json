@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-08T18:26:10Z",
-  "updated": "2026-11-08T21:28:40Z",
+  "updated": "2026-11-08T22:29:30Z",
   "claims": [
     {
       "id": "c1",
@@ -907,7 +907,53 @@
       "seeds": []
     }
   ],
-  "lapses": [],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "assumption-for-measurement",
+      "what": "t1 (VENTUNOQ_ZONES fixture) labelled the middle and top cpu/gpuss/nsp trips 'hot'/'critical' without reading the live trip types; live sysfs shows all SoC trips passive, critical only on pmm86*-therm at 125 C, plus an active 38 C trip on cpuss-0-0",
+      "skipped_check": "cat trip_point_*_type on the live board",
+      "refs": [
+        "plan t1",
+        "scope s2"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l2",
+      "code": "grader-unverified",
+      "what": "t5 (fleet.toml loader) wrote its 49 tests and the implementation together and never saw the tests fail first, so the tests were not shown to detect a broken validator",
+      "skipped_check": "run the new tests red before implementing (TDD)",
+      "refs": [
+        "plan t5"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l3",
+      "code": "assumption-for-measurement",
+      "what": "t3 (sense) classified fan ownership with a heuristic (any cooling device containing the hwmon name or 'fan') without checking real boxes; live probe showed it would mislabel thor and orin (nvfancontrol active) and spark (ACPI 'Fan')",
+      "skipped_check": "read cooling_device types and fan daemons on the mesh boxes",
+      "refs": [
+        "plan t3"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l4",
+      "code": "control-absent",
+      "what": "t6 shipped LocalTransport with no tests (only lint and suite pass); assigned to t7 as its first real user",
+      "skipped_check": "unit tests for LocalTransport",
+      "refs": [
+        "plan t6"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    }
+  ],
   "obligations": [
     {
       "id": "o1",

@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-11-08T21:28:47Z",
-  "updated": "2026-11-08T21:34:12Z",
+  "updated": "2026-11-08T22:26:28Z",
   "targets": [
     {
       "id": "c1",
@@ -446,7 +446,7 @@
       "id": "t6",
       "summary": "SSH transport with reader-managed persistent connections",
       "origin": "llm",
-      "status": "proposed",
+      "status": "confirmed",
       "acceptance_criteria": [
         "the transport runs ssh with BatchMode=yes, ConnectTimeout, ServerAliveInterval, ControlMaster=auto, ControlPersist and a ControlPath under the reader's state dir, then '--', the validated host and the fixed remote command `curl -s -m <timeout> 127.0.0.1:9476/state`",
         "a host that hangs is reported unreachable after the per-poll timeout and never blocks the caller beyond it (tested with a fake ssh script on PATH)",
