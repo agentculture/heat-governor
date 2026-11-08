@@ -331,8 +331,8 @@ def _validate_profile(prof: dict, problems: list[str]) -> None:
         _validate_gpu_clock_bands(prof["gpu_clock_bands"], problems)
     if "gpu_temp" in prof:
         _validate_gpu_temp(prof["gpu_temp"], problems)
-    if "gpu" in prof and prof["gpu"] not in ("nvidia-smi", "jetson", "none"):
-        problems.append("profile.gpu must be nvidia-smi, jetson or none")
+    if "gpu" in prof and prof["gpu"] not in ("nvidia-smi", "jetson", "devfreq", "none"):
+        problems.append("profile.gpu must be nvidia-smi, jetson, devfreq or none")
     if "concurrency" in prof:
         _validate_concurrency(prof["concurrency"], problems)
 

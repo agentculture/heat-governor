@@ -166,7 +166,7 @@ VENTUNOQ = Profile(
     limits=Limits(warm_c=94.0, hot_c=98.0, crit_c=102.0),
     duty_curve=((94.0, 0.0), (97.0, 0.2), (100.0, 0.5), (102.0, 1.0)),
     cpu_bands=((94.0, 6), (98.0, 3)),  # of 8 cores
-    gpu="none",  # GPU is a devfreq node, not nvidia-smi; sensed separately
+    gpu="devfreq",  # Adreno GPU is a devfreq node (clock only) plus the ina232 board-power hwmon
     provenance=(
         "declared from trip points (GPU/NPU passive 115 C, CPU passive 126 C) minus margin; "
         "not measured"
