@@ -326,6 +326,19 @@ _GPU_KEYS = (
     "tlimit_c",
 )
 
+# Plain label and unit for each GPU key, for human-readable output. Keep in step with
+# _GPU_KEYS; a key missing here still prints, as raw key=value.
+GPU_LABELS = {
+    "temp_c": ("temp", " C"),
+    "power_w": ("power", " W"),
+    "sm_mhz": ("SM clock", " MHz"),
+    "util_pct": ("util", "%"),
+    "events": ("clock event reasons", ""),  # clocks_event_reasons.active; includes idle
+    "gr_mhz": ("graphics clock", " MHz"),
+    "mem_mhz": ("memory clock", " MHz"),
+    "mem_util_pct": ("memory bandwidth busy", "%"),  # utilization.memory, not occupancy
+}
+
 
 def _smi(fields: tuple[str, ...], timeout: float) -> str:
     try:

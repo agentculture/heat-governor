@@ -84,19 +84,6 @@ def _profile_dict(prof: platforms.Profile) -> dict[str, object]:
 # -- sense / capabilities ---------------------------------------------------
 
 
-_GPU_LABELS = {
-    # key: (label, unit); a value of None prints "n/a"
-    "temp_c": ("temp", " C"),
-    "power_w": ("power", " W"),
-    "sm_mhz": ("SM clock", " MHz"),
-    "gr_mhz": ("graphics clock", " MHz"),
-    "mem_mhz": ("memory clock", " MHz"),
-    "util_pct": ("util", "%"),
-    "mem_util_pct": ("memory util", "%"),
-    "events": ("throttle reasons", ""),
-}
-
-
 def fan_text(key: str, value: float) -> str:
     """One fan reading with its unit: tach input in RPM, PWM duty as n/255 and percent."""
     name, _, field = key.rpartition(".")
@@ -115,27 +102,41 @@ def _num(value: object, unit: str) -> str:
     return f"{value}{unit}"
 
 
-def gpu_text(gpu: dict) -> str:
-    """The GPU readings with plain labels and units; the JSON keys stay as they are.
+def _limit_text(head: object, limit: object) -> str | None:
+    """``tlimit_c`` is headroom (degrees left before the GPU's own limit), not a temperature."""
+    lim = f"the {_num(limit, ' C')} limit" if limit is not None else "its limit"
+    if head is None:
+        return f"limit {_num(limit, ' C')}" if limit is not None else None
+    if not isinstance(head, (int, float)):
+        return f"headroom {head} to {lim}"
+    if head > 0:
+        return f"headroom {_num(head, ' C')} to {lim}"
+    if head == 0:
+        return f"at {lim}"
+    return f"{_num(-head, ' C')} over {lim}"
 
-    ``tlimit_c`` is headroom -- degrees left before the GPU's own thermal limit --
-    so it prints next to that limit (``limit_c``) rather than as a temperature.
-    """
+
+def gpu_text(gpu: dict) -> str:
+    """The GPU readings with plain labels and units; the JSON keys stay as they are."""
+    from heat_governor.sense import GPU_LABELS
+
     parts: list[str] = []
     for key, value in gpu.items():
         if key in ("tlimit_c", "limit_c"):
             continue
-        if key in _GPU_LABELS:
-            label, unit = _GPU_LABELS[key]
+        if key in GPU_LABELS:
+            label, unit = GPU_LABELS[key]
             parts.append(f"{label} {_num(value, unit)}")
         elif key.endswith(".mhz"):  # Jetson devfreq clock, e.g. 17000000.gpu.mhz
             parts.append(f"{key[: -len('.mhz')]} clock {_num(value, ' MHz')}")
         else:
             parts.append(f"{key}={value}")
     head, limit = gpu.get("tlimit_c"), gpu.get("limit_c")
-    if head is not None:
-        tail = f" to the {_num(limit, ' C')} limit" if limit is not None else " to its limit"
-        parts.append(f"headroom {_num(head, ' C')}{tail}")
+    tail = _limit_text(head, limit)
+    if tail is None and "tlimit_c" in gpu:
+        tail = "headroom n/a"  # the driver knows the field but reported N/A
+    if tail is not None:
+        parts.append(tail)
     return ", ".join(parts)
 
 
