@@ -659,6 +659,7 @@ def template(profile: Profile) -> str:
         f"gpu_clock_bands = {_toml_value([list(b) for b in profile.gpu_clock_bands])}",
         "# allowed in-flight work for clients = base x factor (hot/critical 0 = hold):",
         f"concurrency = {_toml_value(conc)}",
+        '# how the GPU is read: "nvidia-smi" | "jetson" | "devfreq" | "none"',
         f'gpu = "{profile.gpu}"',
         "# the GPU's own temperature as a second input (false = off); whichever input is",
         "# closer to its own limit governs:",

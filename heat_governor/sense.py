@@ -422,7 +422,8 @@ def read_gpu_devfreq(sys_root: Path = Path("/sys")) -> dict[str, object]:
 
 def _fan_kernel_owned(sys_root: Path) -> bool:
     """True when a thermal cooling device is the fan: its type contains the fan hwmon's driver
-    name (``emc2305`` -> ``emc2305_fan``), ignoring punctuation, or says ``fan``."""
+    name (``emc2305`` -> ``emc2305_fan``), ignoring punctuation. A bare "fan" type is not enough:
+    Spark's ACPI ``Fan`` devices are not the sensed fan."""
 
     def norm(text: str) -> str:
         return "".join(c for c in text.lower() if c.isalnum())
@@ -433,7 +434,7 @@ def _fan_kernel_owned(sys_root: Path) -> bool:
             names.append(norm(_read(hw / "name") or ""))
     for cd in sorted((sys_root / "class" / "thermal").glob("cooling_device*")):
         ctype = norm(_read(cd / "type") or "")
-        if ctype and (any(n and n in ctype for n in names) or "fan" in ctype):
+        if ctype and any(n and n in ctype for n in names):
             return True
     return False
 
@@ -481,10 +482,10 @@ class Sensor:
         )
 
 
-def _fan_ownership(sys_root: Path, fans: dict[str, float]) -> str:
+def _fan_ownership(sys_root: Path, fans: dict[str, float], jetson: bool) -> str:
     if not fans:
         return "absent"
-    if _fan_kernel_owned(sys_root):
+    if not jetson and _fan_kernel_owned(sys_root):  # Jetson: nvfancontrol drives the fan
         return "present, kernel-owned (thermal cooling device)"
     return "present, firmware/nvfancontrol owned"
 
@@ -514,7 +515,7 @@ def capabilities(sys_root: Path = Path("/sys"), root: Path = Path("/")) -> dict[
             "admission_signal": True,
             # Present but NOT driven by heat-governor (root-only or parked):
             "nvpmodel": "present, not driven" if shutil.which("nvpmodel") else "absent",
-            "fan_pwm": _fan_ownership(sys_root, fans),
+            "fan_pwm": _fan_ownership(sys_root, fans, jetson),
             "gpu_clock_lock": "not driven (parked by operator)",
         },
         "jetson": jetson,

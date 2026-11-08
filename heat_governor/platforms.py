@@ -84,7 +84,7 @@ class Profile:
     duty_decay_per_s: float = 0.1  # how fast the duty may fall (rises are immediate)
     # client concurrency factor per level: cool, warm, hot, critical (0 = hold new work)
     concurrency: tuple[float, float, float, float] = (1.0, 0.5, 0.0, 0.0)
-    gpu: str = "none"  # "nvidia-smi" | "jetson" | "none"
+    gpu: str = "none"  # "nvidia-smi" | "jetson" | "devfreq" | "none"
     provenance: str = "declared"
     notes: str = ""
     extra: dict = field(default_factory=dict, compare=False)

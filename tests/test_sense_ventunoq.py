@@ -91,3 +91,21 @@ def test_legacy_platforms_output_is_unchanged(tmp_path, monkeypatch, name, zones
         "caps": capabilities(sysr, tmp_path),
     }
     assert json.loads(json.dumps(got, default=str)) == GOLDEN[name]
+
+
+def test_jetson_with_pwm_fan_cooling_device_stays_firmware_owned(tmp_path):
+    sysr = make_sys(tmp_path, THOR_ZONES, fan=(100,))  # hwmon "pwmfan"
+    _cooling(sysr, 0, "pwm-fan")
+    (tmp_path / "etc").mkdir()
+    (tmp_path / "etc" / "nv_tegra_release").write_text("# R38\n")
+    ctl = capabilities(sysr, tmp_path)["control"]
+    assert ctl["fan_pwm"] == "present, firmware/nvfancontrol owned"
+
+
+def test_spark_acpi_fan_cooling_devices_do_not_claim_ownership(tmp_path):
+    sysr = make_sys(tmp_path, SPARK_ZONES)
+    _emc2305_fan(sysr)  # a fan hwmon whose name matches no cooling device
+    _cooling(sysr, 0, "Fan")
+    _cooling(sysr, 1, "Fan")
+    ctl = capabilities(sysr, tmp_path)["control"]
+    assert ctl["fan_pwm"] == "present, firmware/nvfancontrol owned"
