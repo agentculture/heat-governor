@@ -39,6 +39,10 @@ Commands
   heat-governor gpu-clock <verb>   overview | status | helper | lock MHZ | reset |
                                    hold MHZ | release: the GPU clock ceiling (root
                                    helper); hold = the operator's ceiling, law.
+  heat-governor mesh <verb>        overview | status | serve: the fleet view. status asks a
+                                   running mesh serve, else reads every machine once
+                                   (exit 2 if none answered); serve = page + JSON API on
+                                   127.0.0.1:9480 (read-only).
   heat-governor whoami | learn | explain <path> | overview | doctor | cli overview
 
 Containers opt in by label: heat-governor.role=batch (duty-cycled, CPU-capped)
@@ -89,6 +93,10 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["unit"], "summary": "Print a systemd user unit."},
             {"path": ["config"], "summary": "The config file a running daemon re-reads."},
             {"path": ["gpu-clock"], "summary": "The GPU clock ceiling (root helper)."},
+            {"path": ["mesh"], "summary": "The fleet view."},
+            {"path": ["mesh", "overview"], "summary": "Describe the mesh noun."},
+            {"path": ["mesh", "status"], "summary": "Every machine's state, age, temp, level."},
+            {"path": ["mesh", "serve"], "summary": "Serve the fleet page and JSON API."},
         ],
         "exit_codes": {
             "0": "success",

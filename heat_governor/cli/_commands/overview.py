@@ -30,6 +30,7 @@ _VERBS = [
     "explain <path> — markdown docs for a topic",
     "overview — this descriptive snapshot",
     "doctor — check the agent-identity invariants",
+    "mesh overview | status | serve — the fleet view (see 'heat-governor mesh overview')",
 ]
 
 
