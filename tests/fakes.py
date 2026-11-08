@@ -48,7 +48,7 @@ VENTUNOQ_ZONES = [
     ("gpuss-0-thermal", 44200, _ACC),
     ("gpuss-1-thermal", 44600, _ACC),
     ("nsp-0-0-0-thermal", 43200, _ACC),
-    ("nsp-1-0-0-thermal", 43900, _ACC),
+    ("nsp-0-1-0-thermal", 43900, _ACC),
     ("pcie-0-thermal", 42000, _TWO),
     ("pmm8620au-0-therm", 46000, _PMIC),
     ("pmm8650au-1-therm", 48000, _PMIC),
