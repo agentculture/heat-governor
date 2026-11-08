@@ -88,7 +88,8 @@ def test_cmd_sense_text_mode(monkeypatch, capsys) -> None:
     governing.cmd_sense(argparse.Namespace(platform="spark", config=None, json=False))
     out = capsys.readouterr().out
     assert "fans: acpi_fan 3412 RPM" in out
-    assert "gpu: temp 71 C," in out and "headroom 22 C to the 93 C limit" in out
+    assert "gpu: temp 71 C," in out
+    assert "headroom 22 C to the 93 C limit" in out
 
 
 def test_unqualified_fan_key_still_gets_a_name() -> None:
