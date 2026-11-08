@@ -16,6 +16,12 @@ Provenance of the numbers (keep this honest when you change them):
   from each board's own passive trip point (Thor 109 C, Orin 99 C) minus a
   margin. No reset has been observed on either board, so treat them as a
   conservative starting point to tune from recorded runs.
+* **Arduino VENTUNO Q (Qualcomm QCS8300)** -- DECLARED from the board's own trip points
+  (read 2026-11-08), not measured. Only two PMIC zones carry a critical trip (125 C); the
+  CPU, GPU and NPU zones are passive-only (CPU 126 C, GPU/NPU 115 C). The profile watches the
+  cpu/cpuss/gpuss/nsp/ddrss zone families and puts critical below the 115 C GPU/NPU trip.
+  No reset or throttle run has been recorded; tune from recorded runs.
+* **Arduino UNO Q (``arduino,imola``)** -- no data; falls back to generic.
 * **generic** -- derived at runtime from the lowest critical trip point.
 """
 
@@ -145,7 +151,33 @@ ORIN = Profile(
     notes="cv0-2 zones return ENODATA (no DLA load); skipped.",
 )
 
-BUILTIN = {p.name: p for p in (SPARK, THOR, ORIN)}
+# Zone TYPES are matched exactly by the sensor, so every family member is listed.
+_VENTUNOQ_ZONES = (
+    tuple(f"cpu-{a}-{b}-{c}-thermal" for a in (0, 1) for b in range(4) for c in (0, 1))
+    + tuple(f"cpuss-{a}-{b}-thermal" for a in (0, 1) for b in (0, 1))
+    + ("gpuss-0-thermal", "gpuss-1-thermal")
+    + tuple(f"nsp-0-{b}-{c}-thermal" for b in range(3) for c in (0, 1))
+    + ("ddrss-0-thermal", "ddrss-1-thermal")
+)
+
+VENTUNOQ = Profile(
+    name="ventunoq",
+    zones=_VENTUNOQ_ZONES,
+    limits=Limits(warm_c=94.0, hot_c=98.0, crit_c=102.0),
+    duty_curve=((94.0, 0.0), (97.0, 0.2), (100.0, 0.5), (102.0, 1.0)),
+    cpu_bands=((94.0, 6), (98.0, 3)),  # of 8 cores
+    gpu="none",  # GPU is a devfreq node, not nvidia-smi; sensed separately
+    provenance=(
+        "declared from trip points (GPU/NPU passive 115 C, CPU passive 126 C) minus margin; "
+        "not measured"
+    ),
+    notes=(
+        "Watches cpu/cpuss/gpuss/nsp/ddrss only: PMIC zones (critical 125 C) are excluded and "
+        "never govern. Declared, unmeasured; no thermal reset has been observed."
+    ),
+)
+
+BUILTIN = {p.name: p for p in (SPARK, THOR, ORIN, VENTUNOQ)}
 
 
 def _read(path: Path) -> str:
@@ -156,15 +188,20 @@ def _read(path: Path) -> str:
 
 
 def detect(root: Path = Path("/"), *, nvidia_smi: bool = True) -> str:
-    """Return ``spark`` / ``thor`` / ``orin`` / ``generic``.
+    """Return ``spark`` / ``thor`` / ``orin`` / ``ventunoq`` / ``generic``.
 
-    Jetsons name themselves in the device tree. The Spark has no device-tree
-    model, so it is recognised by its GPU name (``NVIDIA GB10``)."""
+    Jetsons name themselves in the device-tree model. The VENTUNO Q is recognised by an
+    exact token of the device-tree ``compatible`` list (``arduino,monza`` / ``qcom,qcs8300``);
+    the UNO Q (``arduino,imola``) matches nothing and stays generic. The Spark has no
+    device tree, so it is recognised by its GPU name (``NVIDIA GB10``)."""
     model = _read(root / "proc/device-tree/model").lower()
     if "jetson agx thor" in model:
         return "thor"
     if "jetson agx orin" in model:
         return "orin"
+    compatible = _read(root / "proc/device-tree/compatible").split("\x00")
+    if {"arduino,monza", "qcom,qcs8300"} & {c.strip() for c in compatible}:
+        return "ventunoq"
     if nvidia_smi and shutil.which("nvidia-smi"):
         try:
             out = subprocess.run(
