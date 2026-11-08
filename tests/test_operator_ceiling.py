@@ -552,7 +552,7 @@ def test_cli_lock_dry_run_records_nothing(tmp_path: Path, capsys, monkeypatch) -
     from heat_governor.cli._commands import tuning
 
     monkeypatch.setattr(tuning, "_clock", lambda: FakeGpuClock(visible=False))
-    rc, out = _cli(capsys, GC, LOCK, "2200", "--platform", "spark", DATA, str(tmp_path))
+    rc, out, _ = _cli(capsys, GC, LOCK, "2200", "--platform", "spark", DATA, str(tmp_path))
     assert rc == 0
     assert "dry run" in out
     assert not _hold_file(tmp_path).exists()
