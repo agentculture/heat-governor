@@ -360,13 +360,13 @@ class Trend:
     mapped scale differ (on the Spark often by ~8 C), so a switch starts a new
     window and :attr:`switched` says the window just taken began at one.
 
-    :meth:`long` fits the last :attr:`WINDOWS` interval windows together (same
+    :meth:`long` fits the last :attr:`MAX_WINDOWS` interval windows together (same
     source, no sensor loss): a slow creep that stays inside each interval's
     noise band stands out there, because the slope's standard error falls with
     the window's length to the power 1.5."""
 
     MIN_POINTS = 3
-    WINDOWS = 4
+    MAX_WINDOWS = 4
 
     def __init__(self) -> None:
         self.points: list[tuple[float, float]] = []
@@ -375,7 +375,7 @@ class Trend:
         self.source: str | None = None
         self.switched = False  # the window just taken started at a source switch
         self._switch = False
-        self.windows: deque[list[tuple[float, float]]] = deque(maxlen=self.WINDOWS)
+        self.windows: deque[list[tuple[float, float]]] = deque(maxlen=self.MAX_WINDOWS)
 
     def add(self, now: float, temp: float | None, source: str | None = None) -> None:
         if source is not None and source != self.source:

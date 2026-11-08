@@ -58,7 +58,9 @@ Fetch = Callable[[str, float], dict]
 
 def fetch_state(peer: str, timeout: float) -> dict:
     """``GET http://<peer>/state``; raises ``OSError``/``ValueError`` on failure."""
-    url = f"http://{peer}/state"  # the scheme is fixed: never file:// or a custom one
+    # The peer is the other box's state server on the private cluster link; it serves
+    # plain HTTP by design (no TLS on that LAN). The scheme is fixed: never file://.
+    url = f"http://{peer}/state"  # NOSONAR python:S5332 -- LAN peer, plain HTTP by design
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
         raw = resp.read(MAX_DOC_BYTES + 1)
     if len(raw) > MAX_DOC_BYTES:

@@ -64,6 +64,7 @@ uv run bandit -c pyproject.toml -r heat_governor
 markdownlint-cli2 "**/*.md" "#node_modules" "#.local" "#.claude/skills" "#.teken"
 uv run teken cli doctor . --strict         # agent-first rubric gate
 python3 scripts/scan-secrets.py            # committed-secret / non-localhost-endpoint scan
+python3 scripts/sonar-gate.py --pull-request N   # CI: fail on unaccepted SonarCloud issues / unreviewed hotspots
 uv run python scripts/harness-smoke.py --stage config   # all four harness configs
 ```
 

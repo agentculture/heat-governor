@@ -9,6 +9,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # One scan-then-gate at a time per PR / branch: the gate reads SonarCloud's latest
+    # analysis for that scope, so an overlapping run must not replace it in between.
+    # Never cancel: a cancelled run could stop between its scan and its gate.
+    concurrency:
+      group: sonar-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
     # Promote SONAR_TOKEN to job env so the SonarCloud step can gate on
@@ -36,6 +42,21 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6
         env:
           SONAR_HOST_URL: https://sonarcloud.io
+
+      # The quality gate passes code smells while the rating holds; this fails the
+      # job on ANY unaccepted issue or unreviewed hotspot (accept it on SonarCloud,
+      # or fix it). Runs after the scan, which waits for the analysis to finish.
+      - name: SonarCloud findings gate
+        if: env.SONAR_TOKEN != ''
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -n "$PR_NUMBER" ]; then
+            python3 scripts/sonar-gate.py --pull-request "$PR_NUMBER"
+          else
+            python3 scripts/sonar-gate.py --branch "$BRANCH"
+          fi
 
   lint:
     runs-on: ubuntu-latest

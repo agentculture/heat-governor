@@ -490,6 +490,11 @@ def listen_conflict(a: tuple[str, int], b: tuple[str, int]) -> str | None:
 
 
 def _validate_pair_keys(pair: dict, problems: list[str]) -> None:
+    _validate_pair_types(pair, problems)
+    _validate_pair_required(pair, problems)
+
+
+def _validate_pair_types(pair: dict, problems: list[str]) -> None:
     for k, v in pair.items():
         want = PAIR_KEYS.get(k)
         if want is None:
@@ -499,6 +504,9 @@ def _validate_pair_keys(pair: dict, problems: list[str]) -> None:
     for k in ("peer", "listen"):
         if isinstance(pair.get(k), str) and host_port(pair[k]) is None:
             problems.append(f"pair.{k} must be HOST:PORT (no scheme or path, e.g. 10.0.0.2:9476)")
+
+
+def _validate_pair_required(pair: dict, problems: list[str]) -> None:
     if "peer" not in pair:
         problems.append("pair.peer is required (HOST:PORT of the peer daemon's state server)")
     conts = pair.get("containers")
