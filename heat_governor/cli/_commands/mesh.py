@@ -238,15 +238,25 @@ def render_status(st: dict) -> str:
     return "\n".join(lines)
 
 
-def cmd_status(args: argparse.Namespace) -> int:
+def read_snapshot(args: argparse.Namespace) -> tuple[dict, str, str | None]:
+    """Fleet snapshot from a running ``mesh serve`` (``args.url``), else a direct read.
+
+    Returns ``(snapshot, source, url)``; ``source`` is "mesh serve" or "direct". Shared by
+    ``mesh status`` and the MCP tools so they never disagree. Raises ``CliError`` when
+    there is neither a server nor a usable fleet file.
+    """
     url = (getattr(args, "url", None) or DEFAULT_URL).rstrip("/")
-    nothing = False
     try:
-        status = build_status(_fetch_server(url), "mesh serve", url)
+        return _fetch_server(url), "mesh serve", url
     except Exception:  # noqa: BLE001 - any failure means: read directly
-        status = build_status(_direct_snapshot(_load_for_status(args)), "direct", None)
-        # reads were attempted but not one box ever answered: output is still data, exit 2
-        nothing = all(r["age_s"] is None for r in status["machines"])
+        return _direct_snapshot(_load_for_status(args)), "direct", None
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    snapshot, source, url = read_snapshot(args)
+    status = build_status(snapshot, source, url)
+    # reads were attempted but not one box ever answered: output is still data, exit 2
+    nothing = source == "direct" and all(r["age_s"] is None for r in status["machines"])
     emit_result(status if _json(args) else render_status(status), json_mode=_json(args))
     return EXIT_ENV_ERROR if nothing else 0
 

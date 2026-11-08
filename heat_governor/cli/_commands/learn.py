@@ -43,6 +43,8 @@ Commands
                                    running mesh serve, else reads every machine once
                                    (exit 2 if none answered); serve = page + JSON API on
                                    127.0.0.1:9480 (read-only).
+  heat-governor mcp [--json]       read-only MCP server over stdio (JSON-RPC lines; tools
+                                   mesh_status, machine_state, sense); --json has no effect.
   heat-governor whoami | learn | explain <path> | overview | doctor | cli overview
 
 Containers opt in by label: heat-governor.role=batch (duty-cycled, CPU-capped)
@@ -93,6 +95,7 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["unit"], "summary": "Print a systemd user unit."},
             {"path": ["config"], "summary": "The config file a running daemon re-reads."},
             {"path": ["gpu-clock"], "summary": "The GPU clock ceiling (root helper)."},
+            {"path": ["mcp"], "summary": "Read-only MCP server over stdio."},
             {"path": ["mesh"], "summary": "The fleet view."},
             {"path": ["mesh", "overview"], "summary": "Describe the mesh noun."},
             {"path": ["mesh", "status"], "summary": "Every machine's state, age, temp, level."},
