@@ -9,6 +9,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # One scan-then-gate at a time per PR / branch: the gate reads SonarCloud's latest
+    # analysis for that scope, so an overlapping run must not replace it in between.
+    # Never cancel: a cancelled run could stop between its scan and its gate.
+    concurrency:
+      group: sonar-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
     # Promote SONAR_TOKEN to job env so the SonarCloud step can gate on
