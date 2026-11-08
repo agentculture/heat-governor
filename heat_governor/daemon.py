@@ -52,6 +52,7 @@ from heat_governor.config import (
 from heat_governor.config import load as load_config
 from heat_governor.docker import Container, Docker, DockerError
 from heat_governor.gpuclock import GpuClock
+from heat_governor.gpuclock import unsupported_reason as gpuclock_unsupported
 from heat_governor.gpulaw import GpuGovernor, Plan
 from heat_governor.operator_ceiling import OperatorCeiling, hold_path
 from heat_governor.pair import PairDecision, PeerLink, PeerStatus
@@ -190,7 +191,8 @@ class Daemon:
     def _default_gpuclock(self, opts: Options) -> GpuClock | None:
         """A GPU clock driver when clock control or an operator ceiling needs one."""
         if opts.gpu_clock or self.operator.mhz is not None:
-            return GpuClock()
+            # VENTUNO Q / devfreq boards: never probe or spawn the root helper (spec c5)
+            return GpuClock(unsupported=gpuclock_unsupported(self.profile))
         return None
 
     # -- logging: to the log sink and into the record
@@ -888,7 +890,7 @@ class Daemon:
         restored = self.ledger.recover(
             self.docker,
             self._log,
-            gpu=self.gpuclock or GpuClock(),
+            gpu=self.gpuclock or GpuClock(unsupported=gpuclock_unsupported(self.profile)),
             units=units,
             gpu_operator_mhz=self.operator.mhz,
         )

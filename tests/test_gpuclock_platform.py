@@ -111,3 +111,28 @@ def test_gpuclock_probe_short_circuits(spawned) -> None:
     assert g.probe() is False
     assert g.reason == "no GPU clock control"
     assert spawned == []
+
+
+def test_daemon_gpu_clock_never_probes_helper_on_ventunoq(tmp_path, monkeypatch):
+    """[daemon] gpu_clock = true on a VENTUNO Q must not probe or spawn the root helper."""
+    from heat_governor import gpuclock as gc
+    from heat_governor.daemon import Daemon, Options
+    from heat_governor.platforms import VENTUNOQ
+    from heat_governor.sense import Sensor
+    from tests.fakes import VENTUNOQ_ZONES, make_sys
+
+    spawned: list = []
+    monkeypatch.setattr(gc.subprocess, "run", lambda *a, **k: spawned.append(a) or None)
+    sysr = make_sys(tmp_path, VENTUNOQ_ZONES)
+    opts = Options(
+        apply=False,
+        gpu_clock=True,
+        state_path=tmp_path / "state.json",
+        data_dir=tmp_path / "data",
+        log=[].append,
+    )
+    d = Daemon(VENTUNOQ, opts, sensor=Sensor(VENTUNOQ.zones, sys_root=sysr), docker=None)
+    clock = d._default_gpuclock(opts)
+    assert clock is not None and clock.unsupported
+    assert clock.probe() is False
+    assert spawned == []
