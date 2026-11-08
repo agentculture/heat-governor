@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heat Governor</title>
+</head>
+<body>
+<h1>Heat Governor</h1>
+<p>Placeholder page; the real dashboard replaces it.</p>
+<ul id="machines"></ul>
+<script>
+fetch("/api/fleet").then(function (r) { return r.json(); }).then(function (d) {
+  var ul = document.getElementById("machines");
+  (d.machines || []).forEach(function (m) {
+    var li = document.createElement("li");
+    li.textContent = m.name;
+    ul.appendChild(li);
+  });
+});
+</script>
+</body>
+</html>
