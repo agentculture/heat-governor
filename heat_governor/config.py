@@ -331,8 +331,8 @@ def _validate_profile(prof: dict, problems: list[str]) -> None:
         _validate_gpu_clock_bands(prof["gpu_clock_bands"], problems)
     if "gpu_temp" in prof:
         _validate_gpu_temp(prof["gpu_temp"], problems)
-    if "gpu" in prof and prof["gpu"] not in ("nvidia-smi", "jetson", "none"):
-        problems.append("profile.gpu must be nvidia-smi, jetson or none")
+    if "gpu" in prof and prof["gpu"] not in ("nvidia-smi", "jetson", "devfreq", "none"):
+        problems.append("profile.gpu must be nvidia-smi, jetson, devfreq or none")
     if "concurrency" in prof:
         _validate_concurrency(prof["concurrency"], problems)
 
@@ -659,6 +659,7 @@ def template(profile: Profile) -> str:
         f"gpu_clock_bands = {_toml_value([list(b) for b in profile.gpu_clock_bands])}",
         "# allowed in-flight work for clients = base x factor (hot/critical 0 = hold):",
         f"concurrency = {_toml_value(conc)}",
+        '# how the GPU is read: "nvidia-smi" | "jetson" | "devfreq" | "none"',
         f'gpu = "{profile.gpu}"',
         "# the GPU's own temperature as a second input (false = off); whichever input is",
         "# closer to its own limit governs:",
