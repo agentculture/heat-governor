@@ -19,6 +19,7 @@ from pathlib import Path
 from heat_governor import config as cfgmod
 from heat_governor import gpuclock
 from heat_governor import operator_ceiling as opc
+from heat_governor import platforms
 from heat_governor.cli._commands.governing import (
     _JSON_HELP,
     _add_profile_args,
@@ -155,6 +156,17 @@ def _clock() -> gpuclock.GpuClock:
     return g
 
 
+def _clock_for(prof) -> gpuclock.GpuClock:
+    """``_clock()``, except on a platform with no GPU clock control, where the root
+    helper is never probed or spawned."""
+    reason = gpuclock.unsupported_reason(prof)
+    if reason:
+        g = gpuclock.GpuClock(unsupported=reason)
+        g.probe()
+        return g
+    return _clock()
+
+
 _CEILING_KEY = "gpu_ceiling_mhz"
 _INVISIBLE = (
     "a raw `nvidia-smi -lgc` or `sudo heat-governor-gpuclock lock` is invisible here "
@@ -192,7 +204,7 @@ def _operator_doc(args: argparse.Namespace, cfg, prof) -> dict:
 def cmd_gpu_status(args: argparse.Namespace) -> None:
     cfg = _config(args)
     prof = _profile(args, cfg)
-    g = _clock()
+    g = _clock_for(prof)
     doc = {
         "helper": g.helper,
         "available": g.available,
@@ -286,6 +298,14 @@ def cmd_gpu_helper(args: argparse.Namespace) -> None:
 
 
 def _manual(args: argparse.Namespace, action: str) -> None:
+    reason = gpuclock.unsupported_reason(_profile(args, _config(args)))
+    if reason:  # before the helper is probed or spawned
+        raise CliError(
+            EXIT_USER_ERROR,
+            reason,
+            "this board has no supported GPU clock control; heat-governor does not drive "
+            "the GPU clock on the VENTUNO Q",
+        )
     g = _clock()
     if not g.available:
         raise CliError(EXIT_ENV_ERROR, g.reason, "install it: heat-governor gpu-clock helper")
@@ -369,10 +389,12 @@ def register(sub: argparse._SubParsersAction) -> None:
     q.add_argument("mhz", type=int, help="Ceiling in MHz.")
     q.add_argument("--apply", action="store_true", help="Actually lock it (and hold it: law).")
     _hold_args(q)
+    _platform_arg(q)
     q.set_defaults(func=cmd_gpu_lock)
     q = gsub.add_parser("reset", help="Remove the GPU clock ceiling (dry-run unless --apply).")
     q.add_argument("--apply", action="store_true", help="Actually reset it (and release a hold).")
     _hold_args(q)
+    _platform_arg(q)
     q.set_defaults(func=cmd_gpu_reset)
     q = gsub.add_parser(
         "hold", help="Declare the operator's GPU ceiling (law: the daemon never goes above it)."
@@ -383,6 +405,12 @@ def register(sub: argparse._SubParsersAction) -> None:
     q = gsub.add_parser("release", help="Give back a held (or observed) operator GPU ceiling.")
     _hold_args(q)
     q.set_defaults(func=cmd_gpu_release)
+
+
+def _platform_arg(q: argparse.ArgumentParser) -> None:
+    q.add_argument(
+        "--platform", choices=[*platforms.BUILTIN, "generic"], help="Override detection."
+    )
 
 
 def _hold_args(q: argparse.ArgumentParser) -> None:
