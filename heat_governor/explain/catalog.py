@@ -30,6 +30,7 @@ declared from their trip points, unmeasured), and a generic fallback.
 - `heat-governor unit` -- a systemd user unit to install it.
 - `heat-governor config ...` -- the file a running daemon re-reads.
 - `heat-governor gpu-clock ...` -- the GPU clock ceiling (root helper).
+- `heat-governor mesh ...` -- the fleet view (`overview`, `status`, `serve`).
 
 ## Agent verbs
 
@@ -125,6 +126,32 @@ itself (distinct from the global `overview`, which describes the agent).
 
     heat-governor cli overview
     heat-governor cli overview --json
+"""
+
+_MESH = """\
+# heat-governor mesh
+
+The fleet view: every machine's thermal state in one place. Read-only toward
+the machines (each is read through its own `state` over ssh or locally).
+Machines come from `fleet.toml` beside `config.toml` (format:
+`docs/fleet.example.toml`).
+
+- `mesh overview` -- describe this noun.
+- `mesh status [--fleet PATH] [--url URL]` -- name, state (ok / stale /
+  unreachable), age in seconds, temperature, level, admit, version and last
+  error per machine, hottest first. It asks a running `mesh serve`
+  (`/api/fleet`, 2 s) and otherwise reads every machine once, concurrently
+  (about timeout_s + 1 s at most). `source` says which. Exit 0 when the read
+  worked (an unreachable box is data); 2 when nothing could be read; 1 for a
+  bad or missing fleet file.
+- `mesh serve [--fleet PATH] [--listen HOST:PORT]` -- the page and JSON API
+  on 127.0.0.1:9480; only an explicit `--listen` changes the address.
+
+## Usage
+
+    heat-governor mesh status
+    heat-governor mesh status --json
+    heat-governor mesh serve --listen 127.0.0.1:9480
 """
 
 
@@ -342,6 +369,10 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("doctor",): _DOCTOR,
     ("cli",): _CLI,
     ("cli", "overview"): _CLI,
+    ("mesh",): _MESH,
+    ("mesh", "overview"): _MESH,
+    ("mesh", "status"): _MESH,
+    ("mesh", "serve"): _MESH,
     ("sense",): _SENSE,
     ("capabilities",): _CAPABILITIES,
     ("run",): _RUN,
