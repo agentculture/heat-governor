@@ -33,6 +33,14 @@ elif mode == "empty":
     sys.exit(0)
 elif mode == "junk":
     print("not json")
+elif mode == "flood":
+    # a broken or hostile remote: stream output until killed
+    chunk = b"x" * 65536
+    with open(os.environ["FAKE_SSH_PIDFILE"], "w") as f:
+        f.write(str(os.getpid()))
+    while True:
+        sys.stdout.buffer.write(chunk)
+        sys.stdout.buffer.flush()
 else:
     print(json.dumps({doc}))
 """
@@ -200,3 +208,62 @@ def test_history_hang_is_bounded(fake, tmp_path, monkeypatch):
         transport_.history(1.0, 100.0, 10)
     assert time.monotonic() - start < 3.0
     assert "timed out" in str(exc.value)
+
+
+# -- output caps (qodo #4) --------------------------------------------------------
+
+
+def _assert_killed(pidfile: Path) -> None:
+    import os
+
+    pid = int(pidfile.read_text())
+    end = time.monotonic() + 2.0
+    while time.monotonic() < end:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"flooding child {pid} still alive")
+
+
+def test_fetch_output_is_capped_and_the_child_killed(fake, tmp_path, monkeypatch):
+    pidfile = tmp_path / "flood.pid"
+    monkeypatch.setenv("FAKE_SSH_MODE", "flood")
+    monkeypatch.setenv("FAKE_SSH_PIDFILE", str(pidfile))
+    t = make(fake, tmp_path, timeout_s=8.0)
+    start = time.monotonic()
+    with pytest.raises(Unreachable) as exc:
+        t.fetch()
+    assert time.monotonic() - start < 4.0  # stopped at the cap, not at the 8 s deadline
+    assert "too large" in str(exc.value)
+    _assert_killed(pidfile)
+
+
+def test_history_output_is_capped_and_the_child_killed(fake, tmp_path, monkeypatch):
+    import heat_governor.transport as transport
+
+    pidfile = tmp_path / "flood.pid"
+    monkeypatch.setenv("FAKE_SSH_MODE", "flood")
+    monkeypatch.setenv("FAKE_SSH_PIDFILE", str(pidfile))
+    monkeypatch.setattr(transport, "timeout_for", lambda span: 8.0)
+    t = make(fake, tmp_path)
+    start = time.monotonic()
+    with pytest.raises(Unreachable) as exc:
+        t.history(1.0, 100.0, 10)
+    assert time.monotonic() - start < 4.0
+    assert "too large" in str(exc.value)
+    _assert_killed(pidfile)
+
+
+def test_output_at_the_cap_is_accepted(exec_fake, tmp_path, monkeypatch):
+    import heat_governor.transport as transport
+
+    body = json.dumps({"level": "cool", "pad": "y" * 5000})
+    monkeypatch.setattr(transport, "MAX_DOC_BYTES", len(body) + 1)  # + print's newline
+    t = make(exec_fake, tmp_path)
+    monkeypatch.setattr(t, "argv", lambda: [t.ssh, "--", t.host, f"echo '{body}'"])
+    assert t.fetch()["pad"] == "y" * 5000
+    monkeypatch.setattr(transport, "MAX_DOC_BYTES", len(body))
+    with pytest.raises(Unreachable, match="too large"):
+        t.fetch()
