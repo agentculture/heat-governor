@@ -886,13 +886,12 @@ function Detail({ items, slots, fleet, nowS, keptS, onClose, onAdd, onRemove }) 
   const one = items.length === 1, b = items[0];
   const raw = one ? histOf(b.name) : null;
   const h = one ? toHist(raw, rk, nowS) : null;
-  const kept = keptS ? (keptS >= 3600 ? Math.round(keptS / 3600) + " h" : Math.round(keptS / 60) + " min") : "";
   return html`<${React.Fragment}>
     <div class="scrim"></div>
     <aside class=${"drawer " + (one ? b.state : "")} role="dialog" aria-label=${one ? b.name + " trends" : "Comparing " + items.length + " machines"}>
       <div class="dh">
         <div style=${{ minWidth: 0 }}>
-          <span class="eyebrow">Trends · read by the fleet reader${kept ? " · last " + kept + " kept" : ""}</span>
+          <span class="eyebrow">Trends · from each machine's own records</span>
           ${one ? html`<h2><${Mark} b=${b} />${b.name}${b.hub && html`<span class="tag">reader</span>`}</h2>
             <div class="sub">${subLine(b)} · ${viaLine(b)}</div>`
           : html`<h2>Comparing ${items.length} machines</h2>
