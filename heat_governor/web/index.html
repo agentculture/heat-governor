@@ -424,17 +424,17 @@ function Gpus({ b }) {
 
 // small (i) hint: hover or focus shows a plain-language explanation; never opens the machine
 const HINT = {
-  admit: "Whether clients may start new work here. ×1.00 is full speed, ×0.50 means run half as many jobs, holding means start nothing new until it cools.",
-  containers: "Docker containers this governor watches. Applying means it really pauses or CPU-caps them when hot; dry-run means it only logs what it would do.",
-  gpu: "GPU temperature, then the GPU clock ceiling when the daemon reports one.",
-  pair: "The other half of a tensor-parallel pair. Both boxes cap the pair's containers by whichever box is hotter. ok means the partner's state is fresh.",
-  memory: "Memory in use and free on this machine, from its daemon. DDR temperature appears only where the board exposes a memory thermal zone (the VENTUNO Q does; Jetson and DGX Spark boards do not).",
-  gpus: "One cell per GPU, coloured against this machine's limits. The hottest GPU drives the machine's level.",
-  fan: "Fan speed read from the board's fan controller. The kernel drives it, not the governor.",
-  power: "Board power from the board's power monitor.",
-  zones: "Thermal zones being watched. The hottest one drives the machine's level.",
-  sensors: "heat-governor reads Linux /sys thermal zones, so it can't see this machine's sensors.",
-  band: "The shaded range runs from warm, where the governor starts slowing new work, to critical, where it stops admitting work and pauses batch jobs.",
+  admit: "New work allowed? ×1.00 full, ×0.50 half, holding: start nothing new.",
+  containers: "Watched containers. Applying: paused or capped when hot. Dry-run: logged only.",
+  gpu: "GPU temperature, and the clock ceiling if one is set.",
+  pair: "Tensor-parallel partner; both cap by the hotter box. ok: partner is fresh.",
+  memory: "In use and free. DDR temperature shows only where the board exposes it.",
+  gpus: "One cell per GPU; the hottest sets the level.",
+  fan: "Fan speed. The kernel drives it, not the governor.",
+  power: "Board power draw.",
+  zones: "Thermal zones watched; the hottest sets the level.",
+  sensors: "No readable Linux thermal sensors on this machine.",
+  band: "Warm: new work slows. Critical: admission stops and batch jobs pause.",
 };
 function Info({ k }) {
   return html`<span class="info" tabIndex="0" aria-label=${HINT[k]} onClick=${e => e.stopPropagation()} onKeyDown=${e => e.stopPropagation()}>

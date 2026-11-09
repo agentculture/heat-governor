@@ -135,8 +135,21 @@ def test_fact_hints_present():
 
 
 def test_memory_fact_hint_and_trend_columns():
-    assert re.search(r"\bmemory:\s*\"Memory in use and free on this machine", PAGE)
-    assert "DDR temperature appears only where the board exposes a memory thermal zone" in PAGE
+    assert re.search(r"\bmemory:\s*\"In use and free", PAGE)
+    assert "DDR temperature shows only where the board exposes it" in PAGE
+
+
+def test_hints_are_short_and_name_no_board():
+    """Hover hints stay one short sentence and never name a specific board."""
+    import re
+
+    block = PAGE[PAGE.index("HINT = {") : PAGE.index("};", PAGE.index("HINT = {"))]
+    texts = re.findall(r':\s*"([^"]*)"', block)
+    assert len(texts) >= 10
+    for t in texts:
+        assert len(t) <= 90, t
+        for board in ("VENTUNO", "Jetson", "DGX", "Spark", "Thor", "Orin"):
+            assert board not in t, t
     assert '<dt>Memory<${Info} k="memory" />' in PAGE
     assert "t.memory" in PAGE and "m.temp_c" in PAGE  # DDR shown only when temp_c is present
     assert "s.mem_used_pct" in PAGE  # samples feed the trend
