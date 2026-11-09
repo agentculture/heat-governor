@@ -7,7 +7,8 @@ re-reads, so the governor can be tuned as we learn without a restart.
 GPU clock ceiling, the one control that needs the root helper. ``lock`` and
 ``reset`` are dry-run unless ``--apply``. ``hold`` / ``release`` declare the
 operator's own ceiling (law for the daemon) in ``<data_dir>/operator.json``;
-they write that file only, and the running daemon applies it.
+they write that file only, and the running daemon applies it. ``lock``, ``reset``
+and ``hold`` refuse (exit 1) on a board with no supported GPU clock control.
 """
 
 from __future__ import annotations
@@ -238,7 +239,9 @@ def cmd_gpu_hold(args: argparse.Namespace) -> None:
             f"refusing {mhz} MHz (allowed {gpuclock.MIN_MHZ}-{gpuclock.MAX_MHZ})",
             "pick a ceiling the root helper accepts",
         )
-    path = opc.hold_path(_data_dir(args, _config(args)))
+    cfg = _config(args)
+    _refuse_unsupported(args, cfg)  # a hold the daemon can never apply is not law
+    path = opc.hold_path(_data_dir(args, cfg))
     opc.write_hold(path, mhz, opc.HOLD)
     doc = {_CEILING_KEY: mhz, "source": opc.HOLD, "path": str(path)}
     emit_result(
@@ -254,6 +257,8 @@ def cmd_gpu_hold(args: argparse.Namespace) -> None:
 
 
 def cmd_gpu_release(args: argparse.Namespace) -> None:
+    # not refused on an unsupported board: it only removes a hold file and promises no
+    # ceiling, so clearing a stale hold (e.g. a copied data dir) is harmless anywhere
     cfg = _config(args)
     path = opc.hold_path(_data_dir(args, cfg))
     old = opc.clear_hold(path)
@@ -297,15 +302,22 @@ def cmd_gpu_helper(args: argparse.Namespace) -> None:
     )
 
 
-def _manual(args: argparse.Namespace, action: str) -> None:
-    reason = gpuclock.unsupported_reason(_profile(args, _config(args)))
-    if reason:  # before the helper is probed or spawned
+def _refuse_unsupported(args: argparse.Namespace, cfg=None) -> None:
+    """Exit 1 on a board with no supported GPU clock control, before the helper is
+    probed or spawned and before anything is written: every verb that promises an
+    enforceable GPU ceiling (lock, reset, hold) refuses alike."""
+    reason = gpuclock.unsupported_reason(_profile(args, cfg if cfg is not None else _config(args)))
+    if reason:
         raise CliError(
             EXIT_USER_ERROR,
             reason,
             "this board has no supported GPU clock control; heat-governor does not drive "
             "the GPU clock on the VENTUNO Q",
         )
+
+
+def _manual(args: argparse.Namespace, action: str) -> None:
+    _refuse_unsupported(args)
     g = _clock()
     if not g.available:
         raise CliError(EXIT_ENV_ERROR, g.reason, "install it: heat-governor gpu-clock helper")
@@ -401,9 +413,11 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     q.add_argument("mhz", type=int, help="Ceiling in MHz (100-5000).")
     _hold_args(q)
+    _platform_arg(q)
     q.set_defaults(func=cmd_gpu_hold)
     q = gsub.add_parser("release", help="Give back a held (or observed) operator GPU ceiling.")
     _hold_args(q)
+    _platform_arg(q)
     q.set_defaults(func=cmd_gpu_release)
 
 

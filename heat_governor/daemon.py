@@ -157,6 +157,7 @@ class Daemon:
             self._log,
             apply=opts.apply,
             enabled=opts.gpu_clock,
+            unsupported=gpuclock_unsupported(profile),
         )
         self._gpu_plan = Plan(False, None, None, False)
         self._reload_at = 0.0
@@ -472,6 +473,7 @@ class Daemon:
         self.ctrl.set_profile(profile)
         self.sensor.watched = profile.zones
         self.sensor.gpu = profile.gpu
+        self._set_gpu_unsupported(gpuclock_unsupported(profile))
         if self.cycler:
             self.cycler.period_s = profile.duty_period_s
         d = cfg.daemon
@@ -646,6 +648,14 @@ class Daemon:
         if c.id in self.pair_ids and self._pair is not None:
             return self._pair.cpus
         return d.cpus
+
+    def _set_gpu_unsupported(self, reason: str | None) -> None:
+        """A reload that resolves to a platform with no GPU clock control: the governor,
+        and any clock it already built, never touch the root helper from now on."""
+        self.gpu.unsupported = reason
+        if reason and self.gpu.clock is not None:
+            self.gpu.clock.unsupported = reason
+            self.gpu.clock.available, self.gpu.clock.reason = False, reason
 
     @property
     def gpuclock(self) -> GpuClock | None:

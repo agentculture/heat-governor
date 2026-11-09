@@ -85,6 +85,8 @@ class GpuClock:
         return True
 
     def lock(self, mhz: int) -> tuple[bool, str]:
+        if self.unsupported:  # never spawn the helper on an unsupported board
+            return False, self.unsupported
         mhz = int(mhz)
         if not MIN_MHZ <= mhz <= MAX_MHZ:
             return False, f"refusing {mhz} MHz (allowed {MIN_MHZ}-{MAX_MHZ})"
@@ -94,6 +96,8 @@ class GpuClock:
         return rc == 0, out
 
     def reset(self) -> tuple[bool, str]:
+        if self.unsupported:
+            return False, self.unsupported
         rc, out = self.run(["sudo", "-n", self.helper, "reset"])
         if rc == 0:
             self.ceiling_mhz = None
@@ -106,6 +110,8 @@ class GpuClock:
         current and maximum SM clocks (``2405, 3003``): ``nvidia-smi`` exposes no
         ``-lgc`` lock there (checked live 2026-10-24), so this is ``None`` and a
         hand ceiling is invisible -- it must be declared to be law."""
+        if self.unsupported:
+            return None
         rc, out = self.run(["sudo", "-n", self.helper, "status"])
         return parse_ceiling(out) if rc == 0 else None
 

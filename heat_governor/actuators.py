@@ -128,6 +128,16 @@ class Ledger:
         return restored
 
     def _recover_gpu(self, gpu, log: Log, operator_mhz: int | None) -> None:
+        reason = getattr(gpu, "unsupported", None)
+        if reason:
+            # A board with no supported GPU clock control (VENTUNO Q): the helper is never
+            # invoked. The root helper only drives nvidia-smi and Jetson devfreq, so no
+            # ceiling can be in force here; the entry is stale (an older release, or a
+            # ledger copied from another box). Clear it -- retaining it would only keep the
+            # governor believing it holds a ceiling it can never reset.
+            log(f"recover: stale gpu_locked ledger entry cleared without the helper ({reason})")
+            self.gpu_locked = False
+            return
         if operator_mhz is None:
             ok, out = gpu.reset()
             log(f"recover: gpu ceiling {'removed' if ok else 'reset FAILED: ' + out}")
