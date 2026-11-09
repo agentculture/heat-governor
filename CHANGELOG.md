@@ -16,6 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Dashboard with vendored React 18.3.1, htm 3.1.1 and Lato: fleet map, filters, trends, compare, Polar night light/dark, works offline.
 - `heat-governor mcp`: read-only MCP server over stdio (tools `mesh_status`, `machine_state`, `sense`).
 - Fleet view memory: each machine carries a `memory` object (used %, available, derived total, swap, pressure, DDR temperature only where a memory zone exists); history gains `mem_used_pct`; `mesh status` shows `mem 91% of 122G`; the page has a Memory fact with an (i) hint and a Memory value in the trend tooltip and table.
+- Fleet view trend history from each machine's own record files: a fixed, read-only, niced downsampling script (`heat_governor/history.py`) runs over the reader's existing ssh connection (locally for the reader's machine), cached 60 s (300 s over 26 h); `/api/history` gains a `7d` range and a `source` field (`records`, or `buffer` when the reader falls back to its in-memory history); the trend panel has a 7d pill with date labels and a one-line note when showing the buffer.
 
 ### Changed
 

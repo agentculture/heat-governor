@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import stat
 import sys
 import time
@@ -120,3 +121,79 @@ def test_close_tears_down_and_is_idempotent(fake, tmp_path):
     assert not sock.exists()
     t.close()
     assert len([a for a in calls(fake[1]) if "-O" in a]) == 1
+
+
+# -- records history (d2) ---------------------------------------------------------
+
+EXEC_FAKE = """#!{py}
+import json, os, subprocess, sys
+with open(os.environ["FAKE_SSH_LOG"], "a") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\\n")
+if "-O" in sys.argv:
+    sys.exit(0)
+# behave like sshd: the remote command string goes to a shell
+sys.exit(subprocess.call(["sh", "-c", sys.argv[-1]]))
+"""
+
+
+@pytest.fixture
+def exec_fake(tmp_path, monkeypatch):
+    path = tmp_path / "fakebin" / "ssh"
+    path.parent.mkdir()
+    path.write_text(EXEC_FAKE.format(py=sys.executable))
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    log = tmp_path / "argv.log"
+    monkeypatch.setenv("FAKE_SSH_LOG", str(log))
+    return str(path), log
+
+
+def test_history_argv_is_the_fixed_niced_command(exec_fake, tmp_path, monkeypatch):
+    from heat_governor.history import HISTORY_SCRIPT
+
+    home = tmp_path / "xdg"
+    rd = home / "heat-governor" / "records"
+    rd.mkdir(parents=True)
+    t0 = 1_794_000_000.0
+    day = time.strftime("%Y%m%d", time.gmtime(t0 + 10))
+    (rd / f"{day}.jsonl").write_text(
+        json.dumps({"t": t0 + 10, "temp_c": 61.0, "level": "warm", "gpu": {}, "system": {}}) + "\n"
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(home))
+    t = make(exec_fake, tmp_path)
+    out = t.history(t0, t0 + 100, 10)
+    assert [s["temp_c"] for s in out["samples"]] == [61.0]
+    argv = calls(exec_fake[1])[0]
+    assert f"ControlPath={t.control_path}" in argv
+    assert "BatchMode=yes" in argv
+    i = argv.index("--")
+    remote = f"nice -n 19 python3 -c {shlex.quote(HISTORY_SCRIPT)} {t0:.3f} {t0 + 100:.3f} 10"
+    assert argv[i + 1 :] == ["spark", remote]
+
+
+@pytest.mark.parametrize(
+    "args", [("1; rm -rf /", 2.0, 10), (float("nan"), 2.0, 10), (1.0, 2.0, "10 && x")]
+)
+def test_history_refuses_non_numeric_before_any_process(exec_fake, tmp_path, args):
+    t = make(exec_fake, tmp_path)
+    with pytest.raises(Unreachable):
+        t.history(*args)
+    assert not exec_fake[1].exists()
+
+
+@pytest.mark.parametrize("mode", ["fail", "junk", "empty"])
+def test_history_bad_outputs_are_unreachable(fake, tmp_path, monkeypatch, mode):
+    monkeypatch.setenv("FAKE_SSH_MODE", mode)
+    with pytest.raises(Unreachable):
+        make(fake, tmp_path).history(1.0, 100.0, 10)
+
+
+def test_history_hang_is_bounded(fake, tmp_path, monkeypatch):
+    import heat_governor.transport as transport
+
+    monkeypatch.setenv("FAKE_SSH_MODE", "hang")
+    monkeypatch.setattr(transport, "timeout_for", lambda span: 0.5)
+    start = time.monotonic()
+    with pytest.raises(Unreachable) as exc:
+        make(fake, tmp_path).history(1.0, 100.0, 10)
+    assert time.monotonic() - start < 3.0
+    assert "timed out" in str(exc.value)

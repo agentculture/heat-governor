@@ -2,13 +2,15 @@
 
 ``MeshServer(reader, host="127.0.0.1", port=9480)`` wraps a stdlib
 ``ThreadingHTTPServer`` (the same pattern as ``state.StateServer``). ``reader`` is
-any object with ``snapshot()`` and ``history(name, since_s, max_points)``
-(normally a ``FleetReader``). ``start()`` serves on a daemon thread, ``stop()``
-shuts down, ``address`` is the bound ``(host, port)``; port 0 picks an ephemeral port.
+any object with ``snapshot()`` and ``trend(name, since_s, max_points)`` returning
+``{"source", "samples"}`` (normally a ``FleetReader``). ``start()`` serves on a daemon
+thread, ``stop()`` shuts down, ``address`` is the bound ``(host, port)``; port 0 picks an
+ephemeral port.
 
 Routes (GET, and HEAD): ``/`` the page from ``heat_governor/web/index.html``;
 ``/vendor/<file>`` an allow-listed plain filename from ``web/vendor/``;
-``/api/fleet``; ``/api/history?machine=<name>&range=15m|1h|6h|24h`` (default 1h).
+``/api/fleet``; ``/api/history?machine=<name>&range=15m|1h|6h|24h|7d`` (default 1h), which
+answers ``{"machine", "range", "source": "records"|"buffer", "samples"}``.
 Everything else is 404, other methods 405. The page and API share one origin, so
 no CORS headers are sent. The default bind is loopback; only an explicit ``host``
 changes it.
@@ -25,7 +27,7 @@ from urllib.parse import parse_qs, urlsplit
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9480
-RANGES = {"15m": 900, "1h": 3600, "6h": 21600, "24h": 86400}
+RANGES = {"15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}
 MAX_POINTS = 300
 _VENDOR_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 _VENDOR_TYPES = {
@@ -111,10 +113,18 @@ class MeshServer:
                 if rng not in RANGES:
                     return self._json(400, {"error": f"range must be one of {', '.join(RANGES)}"})
                 try:
-                    samples = owner.reader.history(name, since_s=RANGES[rng], max_points=MAX_POINTS)
+                    got = owner.reader.trend(name, since_s=RANGES[rng], max_points=MAX_POINTS)
                 except KeyError:
                     return self._json(404, {"error": f"unknown machine: {name}"})
-                self._json(200, {"machine": name, "range": rng, "samples": samples})
+                self._json(
+                    200,
+                    {
+                        "machine": name,
+                        "range": rng,
+                        "source": got["source"],
+                        "samples": got["samples"],
+                    },
+                )
 
             def _guarded(self) -> None:
                 try:

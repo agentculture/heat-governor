@@ -537,3 +537,123 @@ def test_reader_does_not_import_daemon():
         [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
     )  # nosec B603
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# -- trend: records first, buffer fallback (d2) -----------------------------------
+
+
+class HistoryTransport(FakeTransport):
+    """A transport that also answers records-based history."""
+
+    def __init__(self, answer=None, delay: float = 0.0):
+        super().__init__()
+        self.answer = answer
+        self.delay = delay
+        self.history_calls: list[tuple] = []
+
+    def history(self, since: float, until: float, max_points: int) -> dict:
+        self.history_calls.append((since, until, max_points))
+        if self.delay:
+            time.sleep(self.delay)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+REC = {"t": 1.0, "temp_c": 70.0, "gpu_temp_c": None, "level": "warm"}
+REC.update({"concurrency_factor": 0.5, "mem_used_pct": 80.0})
+
+
+def make_hist(answer, delay: float = 0.0, poll_s: float = 10.0):
+    fleet = Fleet(machines=(Machine("a", "ssh", "a"),), poll_s=poll_s, timeout_s=5.0)
+    t = HistoryTransport(answer, delay)
+    clock, wall = Clock(), Clock(1_700_000_000.0)
+    reader = FleetReader(fleet, transport_factory=lambda m: t, clock=clock, wall=wall)
+    return reader, t, clock, wall
+
+
+def test_trend_prefers_records_and_passes_the_window():
+    reader, t, clock, wall = make_hist({"schema": 1, "samples": [REC]})
+    out = reader.trend("a", since_s=3600, max_points=300)
+    assert out == {"source": "records", "samples": [REC]}
+    assert t.history_calls == [(wall.t - 3600, wall.t, 300)]
+
+
+def test_trend_cache_hits_then_expires():
+    reader, t, clock, wall = make_hist({"schema": 1, "samples": [REC]})
+    reader.trend("a", since_s=3600)
+    clock.t += 59
+    reader.trend("a", since_s=3600)
+    assert len(t.history_calls) == 1
+    clock.t += 2  # past 60 s
+    reader.trend("a", since_s=3600)
+    assert len(t.history_calls) == 2
+    # a long range is cached for 300 s
+    reader.trend("a", since_s=7 * 86_400)
+    clock.t += 299
+    reader.trend("a", since_s=7 * 86_400)
+    assert len(t.history_calls) == 3
+    clock.t += 2
+    reader.trend("a", since_s=7 * 86_400)
+    assert len(t.history_calls) == 4
+
+
+def test_trend_cache_is_bounded():
+    reader, t, clock, wall = make_hist({"schema": 1, "samples": [REC]})
+    for k in range(500):
+        reader.trend("a", since_s=60 + k)
+    assert len(reader._trend_cache) <= 64
+
+
+def test_trend_falls_back_to_buffer_on_failure():
+    reader, t, clock, wall = make_hist(Unreachable("ssh exited 255"))
+    t.items = [doc(1.0, temp=55.0)]
+    reader.poll_once("a")
+    out = reader.trend("a", since_s=3600)
+    assert out["source"] == "buffer"
+    assert [s["temp_c"] for s in out["samples"]] == [55.0]
+    # the failure is remembered: no new ssh call on every page refresh
+    reader.trend("a", since_s=3600)
+    assert len(t.history_calls) == 1
+
+
+def test_trend_falls_back_when_records_are_empty_but_buffer_is_not():
+    reader, t, clock, wall = make_hist({"schema": 1, "samples": []})
+    out = reader.trend("a", since_s=3600)
+    assert out == {"source": "records", "samples": []}  # nothing anywhere: records answer
+    t.items = [doc(1.0, temp=57.0)]
+    reader.poll_once("a")
+    clock.t += 61
+    out = reader.trend("a", since_s=3600)
+    assert out["source"] == "buffer" and out["samples"][0]["temp_c"] == 57.0
+
+
+def test_trend_without_transport_history_uses_buffer():
+    reader, t, clock, wall = make()
+    t["a"].items = [doc(1.0, temp=52.0)]
+    reader.poll_once("a")
+    out = reader.trend("a")
+    assert out["source"] == "buffer"
+    assert out["samples"][0]["temp_c"] == 52.0
+
+
+def test_trend_unknown_machine():
+    reader, *_ = make()
+    with pytest.raises(KeyError):
+        reader.trend("nope")
+
+
+def test_trend_is_bounded_by_the_transport_and_does_not_hold_the_lock():
+    # the transport's own deadline bounds the call; meanwhile polling and snapshots go on
+    reader, t, clock, wall = make_hist({"schema": 1, "samples": [REC]}, delay=0.5)
+    t.items = [doc(1.0)]
+    done = threading.Event()
+    th = threading.Thread(target=lambda: (reader.trend("a"), done.set()))
+    start = time.monotonic()
+    th.start()
+    time.sleep(0.05)
+    reader.poll_once("a")  # would deadlock if trend held the reader lock
+    reader.snapshot()
+    assert time.monotonic() - start < 0.4
+    th.join(timeout=3)
+    assert done.is_set()

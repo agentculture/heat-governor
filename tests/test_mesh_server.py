@@ -26,6 +26,9 @@ class FakeReader:
             raise KeyError(name)
         return [{"t": 1, "temp": 50.0}]
 
+    def trend(self, name: str, since_s: int = 86400, max_points: int = 300) -> dict:
+        return {"source": "records", "samples": self.history(name, since_s, max_points)}
+
 
 @pytest.fixture
 def server():
@@ -75,10 +78,29 @@ def test_history(server):
     assert code == 200
     assert h["Cache-Control"] == "no-store"
     doc = json.loads(body)
-    assert doc == {"machine": "spark-a", "range": "6h", "samples": [{"t": 1, "temp": 50.0}]}
+    assert doc == {
+        "machine": "spark-a",
+        "range": "6h",
+        "source": "records",
+        "samples": [{"t": 1, "temp": 50.0}],
+    }
     assert server.reader.calls[-1] == ("spark-a", 21600, 300)
     get(server, "/api/history?machine=spark-a")
     assert server.reader.calls[-1] == ("spark-a", 3600, 300)
+
+
+def test_history_7d_range(server):
+    code, _, body = get(server, "/api/history?machine=spark-a&range=7d")
+    assert code == 200
+    assert json.loads(body)["range"] == "7d"
+    assert server.reader.calls[-1] == ("spark-a", 604800, 300)
+    assert mesh_server.RANGES["7d"] == 604800
+
+
+def test_history_source_is_passed_through(server):
+    server.reader.trend = lambda name, since_s, max_points: {"source": "buffer", "samples": []}
+    _, _, body = get(server, "/api/history?machine=spark-a&range=1h")
+    assert json.loads(body)["source"] == "buffer"
 
 
 @pytest.mark.parametrize(

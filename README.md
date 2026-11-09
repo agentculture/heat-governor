@@ -241,9 +241,16 @@ The dashboard (fleet map, filters, per-machine trends and compare, Polar night
 light and dark) is served from vendored assets and works offline. From another
 device, open it through a tunnel:
 `ssh -L 9480:127.0.0.1:9480 user@host`, then <http://127.0.0.1:9480/>.
-The reader keeps a compact 24 h history in memory (temperatures, level,
-concurrency factor and memory use %); it is lost on restart (persisting it is
-undecided).
+Trends come from each machine's own record files
+(`<data_dir>/records/YYYYMMDD.jsonl`, the ones the daemon already writes): the
+reader runs one fixed, read-only, niced downsampling script over its existing
+ssh connection (numbers are its only arguments) and reads this machine's files
+locally, caching each answer for a minute (five for ranges over 26 h). The panel
+offers 15 min to 7 days; a 7-day bucket is a sampled maximum, not an exact one,
+to keep the load on busy boxes low. When a machine's records cannot be read, the
+panel falls back to the reader's own compact 24 h in-memory history
+(temperatures, level, concurrency factor and memory use %, lost on restart) and
+says so under the chart.
 
 Each machine also carries a `memory` object taken from the daemon's published
 sensors: `used_pct`, `avail_mib`, `total_mib` (derived from the two, since the

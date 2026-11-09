@@ -8,6 +8,12 @@ Public API (both transports share it):
   ``close()`` tears the persistent connection down; idempotent; also a context manager.
 * ``LocalTransport(*, timeout_s, port=9476)`` -- same interface for the daemon on this machine,
   read over ``http://127.0.0.1:<port>/state`` (see the class for why not the state file).
+* Both also have ``history(since, until, max_points) -> dict``: trend history from the machine's
+  record files via :data:`heat_governor.history.HISTORY_SCRIPT` -- over ssh as the fixed command
+  ``nice -n 19 python3 -c <script> <since> <until> <max_points>`` (numbers validated before any
+  process starts; same options and ControlPath as ``fetch``), or run locally through this
+  python. Bounded by :func:`heat_governor.history.timeout_for` (10 s, 20 s over 26 h); raises
+  :class:`Unreachable` on any failure.
 
 The ssh command is always an argv list (never a shell). The host is re-validated with
 :func:`heat_governor.fleet.validate_host`, passed after ``--``, and the remote command is a fixed
@@ -25,12 +31,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import subprocess  # nosec B404
+import sys
 import urllib.request
 from pathlib import Path
 
 from heat_governor.cli._errors import EXIT_ENV_ERROR, CliError
 from heat_governor.fleet import validate_host
+from heat_governor.history import HISTORY_SCRIPT, build_args, parse_output, run_local, timeout_for
 from heat_governor.state import default_data_dir
 
 STATE_PORT = 9476
@@ -38,6 +47,7 @@ MAX_DOC_BYTES = 1 << 20  # a state document is a few KiB; refuse anything absurd
 GRACE_S = 0.5
 PERSIST_S = 60
 ALIVE_S = 5
+PYTHON = sys.executable  # the interpreter LocalTransport.history runs the script with
 
 
 class Unreachable(CliError):
@@ -110,7 +120,17 @@ class SshTransport:
         remote = f"curl -s -m {_num(self.timeout_s)} 127.0.0.1:{STATE_PORT}/state"
         return [*self._base_argv(), "--", self.host, remote]
 
-    def _run(self, argv: list[str], deadline: float) -> tuple[int, bytes, bytes]:
+    def history_argv(self, since: float, until: float, max_points: int) -> list[str]:
+        """The fixed records-history command: the same ssh options and ControlPath as
+        :meth:`argv`, ``--``, the validated host, then ``nice -n 19 python3 -c <script>``
+        and three numbers (``ValueError`` from :func:`build_args` for anything else)."""
+        args = build_args(since, until, max_points)
+        remote = " ".join(["nice -n 19 python3 -c", shlex.quote(HISTORY_SCRIPT), *args])
+        return [*self._base_argv(), "--", self.host, remote]
+
+    def _run(
+        self, argv: list[str], deadline: float, label: float | None = None
+    ) -> tuple[int, bytes, bytes]:
         try:
             proc = (
                 subprocess.Popen(  # nosec B603  # NOSONAR python:S4721 -- argv list, validated host
@@ -130,19 +150,45 @@ class SshTransport:
                 proc.communicate(timeout=1.0)
             except subprocess.TimeoutExpired:
                 pass  # a lingering master holding the pipes must not block the caller
-            raise Unreachable(f"timed out after {_num(self.timeout_s)}s") from exc
+            shown = self.timeout_s if label is None else label
+            raise Unreachable(f"timed out after {_num(shown)}s") from exc
         return proc.returncode, out, err
 
-    def fetch(self) -> dict:
+    def _prepare(self) -> None:
         self._dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self._dir, 0o700)
         self._used = True
         self._closed = False
-        code, out, err = self._run(self.argv(), self.timeout_s + GRACE_S)
+
+    @staticmethod
+    def _check(code: int, err: bytes) -> None:
         if code != 0:
             reason = err.decode("utf-8", "replace").strip().splitlines()
             raise Unreachable(f"ssh exited {code}: {reason[-1] if reason else 'no output'}")
+
+    def fetch(self) -> dict:
+        self._prepare()
+        code, out, err = self._run(self.argv(), self.timeout_s + GRACE_S)
+        self._check(code, err)
         return parse_state(out)
+
+    def history(self, since: float, until: float, max_points: int) -> dict:
+        """Records-based history of the remote box (see :mod:`heat_governor.history`).
+        Bounded by :func:`timeout_for` (10 s, 20 s for a window over 26 h); raises
+        :class:`Unreachable` on bad arguments (before any process starts), ssh failure,
+        timeout or bad output."""
+        try:
+            argv = self.history_argv(since, until, max_points)
+        except ValueError as exc:
+            raise Unreachable(f"refused history arguments: {exc}") from exc
+        limit = timeout_for(float(until) - float(since))
+        self._prepare()
+        code, out, err = self._run(argv, limit + GRACE_S, label=limit)
+        self._check(code, err)
+        try:
+            return parse_output(out)
+        except ValueError as exc:
+            raise Unreachable(f"bad history output: {exc}") from exc
 
     def close(self) -> None:
         if self._closed or not self._used:
@@ -191,6 +237,16 @@ class LocalTransport:
         if len(raw) > MAX_DOC_BYTES:
             raise Unreachable("state document too large")
         return parse_state(raw)
+
+    def history(self, since: float, until: float, max_points: int) -> dict:
+        """Records-based history of this machine: the same script as the remote boxes,
+        run niced through the local python (no ssh). Raises :class:`Unreachable`."""
+        try:
+            return run_local(since, until, max_points, python=PYTHON)
+        except subprocess.TimeoutExpired as exc:
+            raise Unreachable(f"local history timed out after {_num(exc.timeout)}s") from exc
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise Unreachable(f"local history failed: {exc}") from exc
 
     def close(self) -> None:
         return None
