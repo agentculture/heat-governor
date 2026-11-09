@@ -179,7 +179,13 @@ machines at once:
 - `heat-governor mesh status --json` asks a running `mesh serve` and falls back to a direct concurrent
   read of every machine in `fleet.toml`.
 - `GET /api/fleet` on `mesh serve` (default `127.0.0.1:9480`) returns the same snapshot;
-  `GET /api/history?machine=<name>&range=15m|1h|6h|24h` returns the reader's compact history.
+  `GET /api/history?machine=<name>&range=15m|1h|6h|24h|7d` returns
+  `{"machine", "range", "source", "samples"}`. Samples come from the machine's own record files
+  (`source: "records"`, read by a fixed, niced script over the reader's ssh connection, or locally for
+  the reader's own machine; at most 300 buckets, each keeping maxima, the most severe level and the
+  lowest concurrency factor; 7 d buckets are sampled maxima). When the records are unreadable the reader
+  falls back to its in-memory 24 h buffer (`source: "buffer"`). The concurrency factor in record-based
+  samples is derived from the level with the default per-level map.
 - `heat-governor mcp` is a read-only MCP server over stdio with tools `mesh_status`, `machine_state`
   and `sense`: `claude mcp add heat-governor -- heat-governor mcp`.
 

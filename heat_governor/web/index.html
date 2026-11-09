@@ -224,6 +224,7 @@ html[data-mode="dark"] { --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500;
 .drow-l { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
 .hint { font-size:.74rem; color:var(--ink-faint); margin:-4px 0 12px }
 @media (max-width:900px){ .hint { display:none } }
+.srcnote { font-size:.74rem; color:var(--ink-faint); margin:8px 2px 0 }
 .picker { position:relative }
 .addbtn { appearance:none; border:1px dashed var(--line-strong); background:transparent; color:var(--ink-soft); border-radius:999px; padding:5px 13px; font-size:13px; cursor:pointer; transition:border-color .2s, color .2s }
 .addbtn:hover:not(:disabled) { border-color:var(--accent); color:var(--ink) }
@@ -353,6 +354,7 @@ function useFleet() {
 const HISTORY_REFRESH_MS = 15000;
 function useHistory(names, rk) {
   const [data, setData] = useState({});
+  const [src, setSrc] = useState({});
   const key = names.join("\n") + "|" + rk;
   useEffect(() => {
     let alive = true, timer = null;
@@ -363,6 +365,7 @@ function useHistory(names, rk) {
           if (!r.ok) throw new Error("HTTP " + r.status);
           const d = await r.json();
           if (alive) setData(o => ({ ...o, [n + "|" + rk]: Array.isArray(d.samples) ? d.samples : [] }));
+          if (alive) setSrc(o => ({ ...o, [n + "|" + rk]: d.source }));
         } catch (e) { /* keep what is shown; the next refresh retries */ }
       }));
       if (alive) timer = setTimeout(load, HISTORY_REFRESH_MS);
@@ -370,7 +373,9 @@ function useHistory(names, rk) {
     load();
     return () => { alive = false; clearTimeout(timer); };
   }, [key]);
-  return n => data[n + "|" + rk];
+  const of = n => data[n + "|" + rk];
+  of.src = n => src[n + "|" + rk];
+  return of;
 }
 
 // ---- theme mode: Auto follows the host theme, Light/Dark override ----
@@ -534,8 +539,10 @@ function Flow({ fleet }) {
   </svg></div>`;
 }
 
-// ---- machine trends: real samples from the reader's buffer (/api/history) ----
-const RANGES = { "15m": { s: 900, label: "15 min" }, "1h": { s: 3600, label: "1 hour" }, "6h": { s: 21600, label: "6 hours" }, "24h": { s: 86400, label: "24 hours" } };
+// ---- machine trends: each machine's own records, or the reader's buffer when those are unreadable (/api/history) ----
+const RANGES = { "15m": { s: 900, label: "15 min" }, "1h": { s: 3600, label: "1 hour" }, "6h": { s: 21600, label: "6 hours" }, "24h": { s: 86400, label: "24 hours" }, "7d": { s: 604800, label: "7 days" } };
+const BUFFER_NOTE = "From this session only: the machine's records were unreadable.";
+const isBuffer = source => source === "buffer";
 const CF = [1, .5, .25, 0];
 // samples -> chart series on a wall-clock window ending now. A null entry is inserted wherever
 // consecutive samples are further apart than 3x their usual spacing, so missing periods draw as gaps.
@@ -577,6 +584,11 @@ function nearest(h, ms) {
 }
 const hhmm = ms => { const d = new Date(ms); return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0"); };
 const hhmmss = ms => hhmm(ms) + ":" + String(new Date(ms).getUTCSeconds()).padStart(2, "0");
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayLabel = ms => { const d = new Date(ms); return MONTHS[d.getUTCMonth()] + " " + d.getUTCDate(); };
+// a point in time at the precision the range needs: seconds for 15m, the date for 7d
+const stamp = (rk, ms) => rk === "15m" ? hhmmss(ms) : rk === "7d" ? dayLabel(ms) + " " + hhmm(ms) : hhmm(ms);
+const axisLabel = (rk, ms) => rk === "7d" ? dayLabel(ms) : hhmm(ms);
 const pathOf = (xs, ys) => { let d = "", pen = false; xs.forEach((x, i) => { const y = ys[i]; if (y == null) { pen = false; return; } d += (pen ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1); pen = true; }); return d; };
 // filled area down to base, one closed shape per unbroken run
 const areaOf = (xs, ys, base) => { let d = "", run = []; const flush = () => { if (run.length) { d += "M" + run[0][0].toFixed(1) + "," + base + run.map(([x, y]) => "L" + x.toFixed(1) + "," + y.toFixed(1)).join("") + "L" + run[run.length - 1][0].toFixed(1) + "," + base + "Z"; } run = []; };
@@ -653,7 +665,7 @@ function TrendChart({ b, h, rk }) {
         <text x=${R + 14} y=${(aTop + aBot) / 2 + 4}>admitting</text>
         <path d=${areaOf(xs, cfY, aBot)} fill="color-mix(in srgb,var(--ink) 10%,transparent)" stroke="none"/>
         <path d=${pathOf(xs, cfY)} fill="none" stroke="var(--ink-soft)" stroke-width="1.5"/></g>`}
-      ${xt.map((ms, k) => html`<text key=${"x" + k} x=${x(ms)} y=${axisY} text-anchor=${k === 0 ? "start" : k === 4 ? "end" : "middle"}>${hhmm(ms)}</text>`)}
+      ${xt.map((ms, k) => html`<text key=${"x" + k} x=${x(ms)} y=${axisY} text-anchor=${k === 0 ? "start" : k === 4 ? "end" : "middle"}>${axisLabel(rk, ms)}</text>`)}
       ${ix != null && html`<g pointer-events="none">
         <line x1=${x(h.t[ix])} x2=${x(h.t[ix])} y1=${T} y2=${governed ? aBot : B} stroke="var(--ink-faint)" stroke-width="1"/>
         ${h.gpu && h.gpu[ix] != null && html`<circle cx=${x(h.t[ix])} cy=${y(h.gpu[ix])} r="4.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"/>`}
@@ -662,7 +674,7 @@ function TrendChart({ b, h, rk }) {
       <rect x=${L} y="0" width=${R - L} height=${H} fill="transparent"/>
     </svg>
     ${ix != null && html`<div class="tip" style=${tipLeft > 55 ? { right: (100 - tipLeft + 2) + "%" } : { left: (tipLeft + 2) + "%" }}>
-      <div class="tt">${rk === "15m" ? hhmmss(h.t[ix]) : hhmm(h.t[ix])} UTC</div>
+      <div class="tt">${stamp(rk, h.t[ix])} UTC</div>
       ${h.temp[ix] == null ? html`<div class="r"><span>no reading</span></div>` : html`
         <div class="r"><span><i style=${{ background: "var(--s1)" }}></i>${b.gpus ? "hottest GPU" : "zone"}</span><b>${fmt(h.temp[ix])} °C</b></div>
         ${h.gpu && html`<div class="r"><span><i style=${{ background: "var(--s2)" }}></i>GPU</span><b>${fmt(h.gpu[ix])} °C</b></div>`}
@@ -705,21 +717,22 @@ function summarize(b, h) {
 }
 const tableTimes = h => Array.from({ length: 12 }, (_, k) => h.t1 - k * (h.t1 - h.t0) / 11);
 
-function Single({ b, h, rk, table }) {
+function Single({ b, h, rk, table, buffer }) {
   const s = summarize(b, h), governed = !!b.limits && !!s.share;
   const stats = governed
-    ? [[fmt(s.peak) + "°", "peak at " + hhmm(h.t[s.pk])], [fmt(s.mean) + "°", "average"], [Math.round((1 - s.share[0]) * 100) + "%", "time above warm"], [Math.round(s.held * 100) + "%", "time admitting less"]]
-    : [[fmt(s.peak) + "°", "peak at " + hhmm(h.t[s.pk])], [fmt(s.mean) + "°", "average"], [fmt(s.swing) + "°", "swing"], ["—", "no limit band"]];
+    ? [[fmt(s.peak) + "°", "peak at " + stamp(rk, h.t[s.pk])], [fmt(s.mean) + "°", "average"], [Math.round((1 - s.share[0]) * 100) + "%", "time above warm"], [Math.round(s.held * 100) + "%", "time admitting less"]]
+    : [[fmt(s.peak) + "°", "peak at " + stamp(rk, h.t[s.pk])], [fmt(s.mean) + "°", "average"], [fmt(s.swing) + "°", "swing"], ["—", "no limit band"]];
   const rows = tableTimes(h).map(ms => ({ ms, i: nearest(h, ms) }));
   return html`<${React.Fragment}>
     <div class="stats">${stats.map(([v, l], i) => html`<div class="stat" key=${i}><b>${v}</b><span>${l}</span></div>`)}</div>
     ${table ? html`<div class="chartcard tablewrap"><table class="dt">
         <thead><tr><th>Time (UTC)</th><th>${b.gpus ? "Hottest GPU" : "Zone"}</th>${h.gpu && html`<th>GPU</th>`}<th>Memory</th>${governed && html`<th>Level</th><th>Admitting</th>`}</tr></thead>
-        <tbody>${rows.map(({ ms, i }) => html`<tr key=${ms}><td>${rk === "15m" ? hhmmss(ms) : hhmm(ms)}</td><td>${i < 0 || h.temp[i] == null ? "—" : fmt(h.temp[i]) + " °C"}</td>
+        <tbody>${rows.map(({ ms, i }) => html`<tr key=${ms}><td>${stamp(rk, ms)}</td><td>${i < 0 || h.temp[i] == null ? "—" : fmt(h.temp[i]) + " °C"}</td>
           ${h.gpu && html`<td>${i < 0 || h.gpu[i] == null ? "—" : fmt(h.gpu[i]) + " °C"}</td>`}
           <td>${i < 0 || h.mem[i] == null ? "—" : fmt(h.mem[i], 0) + "%"}</td>
           ${governed && html`<td>${i < 0 || h.level[i] == null ? "—" : LEVELS[h.level[i]]}</td><td>${i < 0 || h.cf[i] == null ? "—" : "×" + fmt(h.cf[i], 2)}</td>`}</tr>`)}</tbody>
       </table></div>` : html`<${TrendChart} b=${b} h=${h} rk=${rk} key=${b.name + rk} />`}
+    ${buffer && html`<p class="srcnote">${BUFFER_NOTE}</p>`}
     ${s.share && html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>
       <div class="seg2" role="img" aria-label=${LEVELS.map((l, i) => `${l} ${Math.round(s.share[i] * 100)}%`).join(", ")}>
         ${s.share.map((x, i) => x > 0 && html`<span key=${i} style=${{ flex: x, background: lvColor(i) }} title=${`${LEVELS[i]} ${Math.round(x * 100)}%`}></span>`)}
@@ -775,7 +788,7 @@ function CompareChart({ list, rk }) {
         <circle cx=${x(e.h.t[e.li])} cy=${e.vy} r="4" fill=${e.c} stroke="var(--surface)" stroke-width="2"/>
         <path d=${`M${x(e.h.t[e.li]) + 6},${e.vy} L${R + 8},${e.vy} L${R + 14},${e.ly}`} fill="none" stroke="var(--line-strong)" stroke-width="1"/>
         <text class="end" x=${R + 18} y=${e.ly + 4}>${e.b.name} ${fmt(e.h.temp[e.li])}°</text></g>`)}
-      ${timeTicks(t0, t1).map((ms, k) => html`<text key=${"x" + k} x=${x(ms)} y=${B + 18} text-anchor=${k === 0 ? "start" : k === 4 ? "end" : "middle"}>${hhmm(ms)}</text>`)}
+      ${timeTicks(t0, t1).map((ms, k) => html`<text key=${"x" + k} x=${x(ms)} y=${B + 18} text-anchor=${k === 0 ? "start" : k === 4 ? "end" : "middle"}>${axisLabel(rk, ms)}</text>`)}
       ${list.map((o, r) => { const yy = stripTop + r * rowH;
         return html`<g key=${"s" + o.b.name}>
           <line x1=${R + 8} x2=${R + 14} y1=${yy + 5} y2=${yy + 5} stroke=${o.c} stroke-width="2"/>
@@ -790,7 +803,7 @@ function CompareChart({ list, rk }) {
       </g>`}
     </svg>
     ${ct != null && html`<div class="tip" style=${tipLeft > 55 ? { right: (100 - tipLeft + 2) + "%" } : { left: (tipLeft + 2) + "%" }}>
-      <div class="tt">${rk === "15m" ? hhmmss(ct) : hhmm(ct)} UTC</div>
+      <div class="tt">${stamp(rk, ct)} UTC</div>
       ${[...list].sort((a, b) => (val(b, "temp") ?? -1) - (val(a, "temp") ?? -1)).map(o => { const v = val(o, "temp"), l = val(o, "level"); return html`<div class="r" key=${o.b.name}>
         <span><i style=${{ background: o.c }}></i>${o.b.name}</span>
         <b>${v == null ? "—" : fmt(v) + " °C"}${l != null ? " · " + LEVELS[l] : ""}</b></div>`; })}
@@ -818,7 +831,7 @@ function Compare({ items, slots, rk, table, onRemove, histOf, nowS }) {
     </table></div>
     ${table ? html`<div class="chartcard tablewrap"><table class="dt">
         <thead><tr><th>Time (UTC)</th>${list.map(o => html`<th key=${o.b.name}>${o.b.name}</th>`)}</tr></thead>
-        <tbody>${times.map(ms => html`<tr key=${ms}><td>${rk === "15m" ? hhmmss(ms) : hhmm(ms)}</td>
+        <tbody>${times.map(ms => html`<tr key=${ms}><td>${stamp(rk, ms)}</td>
           ${list.map(o => { const i = nearest(o.h, ms); return html`<td key=${o.b.name}>${i < 0 || o.h.temp[i] == null ? "—" : fmt(o.h.temp[i]) + " °C"}</td>`; })}</tr>`)}</tbody>
       </table></div>` : html`<${CompareChart} list=${list} rk=${rk} key=${rk + list.map(o => o.b.name).join()} />`}
     ${list.some(o => o.b.limits && summarize(o.b, o.h).share) && html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>
@@ -873,13 +886,12 @@ function Detail({ items, slots, fleet, nowS, keptS, onClose, onAdd, onRemove }) 
   const one = items.length === 1, b = items[0];
   const raw = one ? histOf(b.name) : null;
   const h = one ? toHist(raw, rk, nowS) : null;
-  const kept = keptS ? (keptS >= 3600 ? Math.round(keptS / 3600) + " h" : Math.round(keptS / 60) + " min") : "";
   return html`<${React.Fragment}>
     <div class="scrim"></div>
     <aside class=${"drawer " + (one ? b.state : "")} role="dialog" aria-label=${one ? b.name + " trends" : "Comparing " + items.length + " machines"}>
       <div class="dh">
         <div style=${{ minWidth: 0 }}>
-          <span class="eyebrow">Trends · read by the fleet reader${kept ? " · last " + kept + " kept" : ""}</span>
+          <span class="eyebrow">Trends · from each machine's own records</span>
           ${one ? html`<h2><${Mark} b=${b} />${b.name}${b.hub && html`<span class="tag">reader</span>`}</h2>
             <div class="sub">${subLine(b)} · ${viaLine(b)}</div>`
           : html`<h2>Comparing ${items.length} machines</h2>
@@ -904,9 +916,10 @@ function Detail({ items, slots, fleet, nowS, keptS, onClose, onAdd, onRemove }) 
       </div>
       <p class="hint">You can also click machines in the list to add or remove them.</p>
       ${one ? (b.state === "unsupported" ? html`<div class="nodata">No readings. ${HINT.sensors}</div>`
-              : h ? html`<${Single} b=${b} h=${h} rk=${rk} table=${table} />`
+              : h ? html`<${Single} b=${b} h=${h} rk=${rk} table=${table} buffer=${isBuffer(histOf.src(b.name))} />`
               : html`<div class="nodata">${raw === undefined ? "Loading history…" : `No readings in the last ${RANGES[rk].label}.`}</div>`)
-            : html`<${Compare} items=${items} slots=${slots} rk=${rk} table=${table} onRemove=${onRemove} histOf=${histOf} nowS=${nowS} />`}
+            : html`<${Compare} items=${items} slots=${slots} rk=${rk} table=${table} onRemove=${onRemove} histOf=${histOf} nowS=${nowS} />
+              ${items.some(m => isBuffer(histOf.src(m.name))) && html`<p class="srcnote">${BUFFER_NOTE}</p>`}`}
     </aside>
   </${React.Fragment}>`;
 }

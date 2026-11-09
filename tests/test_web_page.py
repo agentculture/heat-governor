@@ -207,3 +207,25 @@ def test_server_serves_page_and_every_referenced_vendor_file():
                 assert r.read() == (VENDOR / name).read_bytes()
     finally:
         srv.stop()
+
+
+# -- d2: records history, 7d range, buffer note ------------------------------------
+
+
+def test_trend_ranges_include_7d():
+    m = re.search(r"const RANGES = \{(.*?)\};", PAGE)
+    assert m
+    keys = re.findall(r'"(\w+)": \{ s:', m.group(1))
+    assert keys == ["15m", "1h", "6h", "24h", "7d"]
+    assert '"7d": { s: 604800' in m.group(1)
+
+
+def test_buffer_note_only_when_source_is_buffer():
+    note = "From this session only: the machine's records were unreadable."
+    assert PAGE.count(note) == 1
+    assert 'source === "buffer"' in PAGE
+
+
+def test_7d_axis_shows_dates():
+    assert "const dayLabel" in PAGE
+    assert 'rk === "7d" ? dayLabel' in PAGE

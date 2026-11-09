@@ -11,7 +11,8 @@ Public API::
     reader.start(); reader.stop(); reader.close()
     reader.poll_once(name)            # one read of one machine (the threads call this)
     reader.snapshot() -> dict         # JSON-serialisable, see below
-    reader.history(name, since_s=86400, max_points=300) -> list[dict]
+    reader.history(name, since_s=86400, max_points=300) -> list[dict]   # in-memory buffer only
+    reader.trend(name, since_s=86400, max_points=300) -> {"source", "samples"}
 
 Threads: one daemon thread per machine (``fleet-reader:<name>``), so a hung or slow box
 never delays the others. :meth:`stop` sets an event and joins with a bounded deadline; a
@@ -33,6 +34,16 @@ kept (labelled by ``state`` and ``age_s``) but ``admit`` and ``concurrency_facto
 History is compact: per box, a ring of ``(wall time, hottest temp, GPU temp, level index,
 concurrency factor, memory used %)`` in parallel ``array`` columns (41 bytes per sample),
 one sample per new document, bounded to 24 h at the poll interval.
+
+Trends (what the page draws) come first from the machine's own record files:
+:meth:`FleetReader.trend` asks the transport's ``history(since, until, max_points)`` (see
+:mod:`heat_governor.history`; up to 7 days), caches the answer per ``(machine, range,
+points)`` for :data:`TREND_TTL_S` (:data:`TREND_LONG_TTL_S` for windows over 26 h) in a
+bounded cache, and falls back to the in-memory buffer (``"source": "buffer"``) when the
+transport has no ``history``, the call fails (remembered for the same TTL so a page refresh
+does not retry ssh every time), or the records answer is empty while the buffer is not. It
+runs on the caller's (HTTP handler) thread without the reader lock, bounded by the
+transport's own timeout, so the polling threads are never blocked.
 """
 
 from __future__ import annotations
@@ -47,6 +58,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from heat_governor.fleet import Fleet, Machine
+from heat_governor.history import LONG_RANGE_S
 from heat_governor.pair import MAX_PEER_STALE_S
 from heat_governor.policy import LEVELS
 from heat_governor.transport import GRACE_S, LocalTransport, SshTransport
@@ -55,6 +67,9 @@ SCHEMA = 1
 HISTORY_S = 86_400
 DEFAULT_MAX_POINTS = 300
 STOP_JOIN_S = 1.0
+TREND_TTL_S = 60.0
+TREND_LONG_TTL_S = 300.0
+TREND_CACHE_MAX = 64
 
 # the /state fields a fleet view shows; everything else (sensors, units, ...) is dropped
 THERMAL_FIELDS = (
@@ -361,6 +376,9 @@ class FleetReader:
         self._stop.set()  # not running until start()
         self._started_clock = clock()
         self._started_wall = wall()
+        # (name, since_s, max_points) -> (expires on the reader clock, samples or None=failed)
+        self._trend_cache: dict[tuple, tuple[float, list | None]] = {}
+        self._trend_lock = threading.Lock()  # guards the cache dict only, never held over I/O
 
     # -- one read
     def poll_once(self, name: str) -> None:
@@ -472,6 +490,48 @@ class FleetReader:
         with self._lock:
             rows = box.ring.samples(since)
         return [_sample_dict(s) for s in downsample(rows, max_points)]
+
+    def trend(
+        self, name: str, since_s: float = HISTORY_S, max_points: int = DEFAULT_MAX_POINTS
+    ) -> dict:
+        """``{"source": "records"|"buffer", "samples": [...]}`` for the last ``since_s``:
+        the machine's record files when its transport can read them, else the buffer (see the
+        module docstring). ``KeyError`` for an unknown name."""
+        box = self._boxes[name]
+        key = (name, float(since_s), int(max_points))
+        now = self.clock()
+        with self._trend_lock:
+            hit = self._trend_cache.get(key)
+        samples: list | None = None
+        if hit is not None and hit[0] > now:
+            samples = hit[1]
+        else:
+            fn = getattr(box.transport, "history", None)
+            if callable(fn):
+                until = self.wall()
+                try:
+                    doc = fn(until - since_s, until, max_points)
+                    samples = list(doc["samples"])
+                except Exception:  # noqa: BLE001 - any failure falls back to the buffer
+                    samples = None
+                ttl = TREND_LONG_TTL_S if since_s > LONG_RANGE_S else TREND_TTL_S
+                self._remember(key, self.clock() + ttl, samples)
+        if samples:
+            return {"source": "records", "samples": samples}
+        buffered = self.history(name, since_s, max_points)
+        if buffered or samples is None:
+            return {"source": "buffer", "samples": buffered}
+        return {"source": "records", "samples": samples}
+
+    def _remember(self, key: tuple, expires: float, samples: list | None) -> None:
+        now = self.clock()
+        with self._trend_lock:
+            cache = self._trend_cache
+            for k in [k for k, (exp, _) in cache.items() if exp <= now]:
+                del cache[k]
+            while len(cache) >= TREND_CACHE_MAX:
+                del cache[min(cache, key=lambda k: cache[k][0])]
+            cache[key] = (expires, samples)
 
     # -- threads
     @property

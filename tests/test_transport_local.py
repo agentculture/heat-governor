@@ -114,3 +114,35 @@ def test_close_and_context_manager(server):
     with LocalTransport(timeout_s=1.0, port=server.address[1]) as t:
         assert t.fetch()["host"] == "box"
     t.close()  # idempotent
+
+
+# -- records history (d2) ---------------------------------------------------------
+
+
+def test_local_history_reads_this_machines_records(tmp_path, monkeypatch):
+    import json as _json
+
+    rd = tmp_path / "heat-governor" / "records"
+    rd.mkdir(parents=True)
+    t0 = 1_794_000_000.0
+    day = time.strftime("%Y%m%d", time.gmtime(t0))
+    (rd / f"{day}.jsonl").write_text(
+        _json.dumps({"t": t0 + 5, "temp_c": 48.5, "level": "cool", "system": {}}) + "\n"
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    out = LocalTransport(timeout_s=1.0).history(t0, t0 + 60, 5)
+    assert [s["temp_c"] for s in out["samples"]] == [48.5]
+    assert out["files"] == [f"{day}.jsonl"]
+
+
+def test_local_history_refuses_bad_arguments():
+    with pytest.raises(Unreachable):
+        LocalTransport(timeout_s=1.0).history(float("nan"), 1.0, 5)
+
+
+def test_local_history_failure_is_unreachable(monkeypatch):
+    import heat_governor.transport as transport
+
+    monkeypatch.setattr(transport, "PYTHON", "/nonexistent/python3")
+    with pytest.raises(Unreachable):
+        LocalTransport(timeout_s=1.0).history(1.0, 100.0, 5)
