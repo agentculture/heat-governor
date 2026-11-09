@@ -68,7 +68,8 @@ def test_devfreq_mode_alone_is_refused(capsys, monkeypatch, spawned) -> None:
     prof = dataclasses.replace(platforms.SPARK, name="odd", gpu="devfreq")
     _use(monkeypatch, prof)
     rc, _o, err = _run(capsys, "gpu-clock", "lock", "2000", "--apply")
-    assert rc == 1 and "unsupported platform" in err
+    assert rc == 1
+    assert "unsupported platform" in err
     assert spawned == []
 
 
@@ -133,6 +134,7 @@ def test_daemon_gpu_clock_never_probes_helper_on_ventunoq(tmp_path, monkeypatch)
     )
     d = Daemon(VENTUNOQ, opts, sensor=Sensor(VENTUNOQ.zones, sys_root=sysr), docker=None)
     clock = d._default_gpuclock(opts)
-    assert clock is not None and clock.unsupported
+    assert clock is not None
+    assert clock.unsupported
     assert clock.probe() is False
     assert spawned == []

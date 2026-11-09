@@ -396,7 +396,7 @@ def test_downsample_keeps_peaks():
     ]
     out = downsample(rows, 10)
     assert len(out) == 10
-    assert all(r[1] == 6.0 and r[3] == 3 and r[4] == 0.25 and r[5] == 58.0 for r in out)
+    assert all((r[1], r[3], r[4], r[5]) == (6.0, 3, 0.25, 58.0) for r in out)
     assert out[-1][0] == 999.0
     assert downsample(rows[:5], 10) == rows[:5]
 
@@ -488,9 +488,12 @@ def test_memory_object_derives_total_and_drops_raw_sensors():
 def test_memory_null_without_mem_keys_and_total_null_at_full():
     assert extract(doc(1.0))["memory"] is None
     m = extract(doc(1.0, sensors=mem_sensors(used=100.0)))["memory"]
-    assert m["total_mib"] is None and m["used_pct"] == 100.0
+    assert m["total_mib"] is None
+    assert m["used_pct"] == 100.0
     m = extract(doc(1.0, sensors={"mem:used_pct": 40.0}))["memory"]
-    assert m["avail_mib"] is None and m["total_mib"] is None and m["swap_used_mib"] is None
+    assert m["avail_mib"] is None
+    assert m["total_mib"] is None
+    assert m["swap_used_mib"] is None
 
 
 def test_memory_temp_is_max_over_memory_zones_not_pmic():
@@ -523,8 +526,11 @@ def test_default_transport_by_machine_kind(tmp_path):
     fleet = Fleet(machines=(Machine("s", "ssh", "spark"), Machine("l", "local")), timeout_s=3)
     ssh = default_transport(fleet, state_dir=tmp_path)(fleet.machines[0])
     local = default_transport(fleet, state_dir=tmp_path)(fleet.machines[1])
-    assert isinstance(ssh, SshTransport) and ssh.host == "spark" and ssh.timeout_s == 3
-    assert isinstance(local, LocalTransport) and local.timeout_s == 3
+    assert isinstance(ssh, SshTransport)
+    assert ssh.host == "spark"
+    assert ssh.timeout_s == 3
+    assert isinstance(local, LocalTransport)
+    assert local.timeout_s == 3
 
 
 def test_reader_does_not_import_daemon():
@@ -625,7 +631,8 @@ def test_trend_falls_back_when_records_are_empty_but_buffer_is_not():
     reader.poll_once("a")
     clock.t += 61
     out = reader.trend("a", since_s=3600)
-    assert out["source"] == "buffer" and out["samples"][0]["temp_c"] == 57.0
+    assert out["source"] == "buffer"
+    assert out["samples"][0]["temp_c"] == 57.0
 
 
 def test_trend_without_transport_history_uses_buffer():

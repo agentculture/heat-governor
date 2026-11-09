@@ -38,7 +38,8 @@ def _machine(host: str) -> str:
 def test_loads_machines(tmp_path):
     cfg = fleet.load_fleet(_write(tmp_path, GOOD))
     assert [m.name for m in cfg.machines] == ["local-box", "box-a", "box-b"]
-    assert cfg.machines[0].transport == "local" and cfg.machines[0].host == ""
+    assert cfg.machines[0].transport == "local"
+    assert cfg.machines[0].host == ""
     assert cfg.machines[1].host == "box-a.example.ts.net"
     assert cfg.machines[2].transport == "ssh"  # default
     assert (cfg.poll_s, cfg.timeout_s) == (5.0, 4.0)
@@ -56,7 +57,8 @@ def test_default_path_beside_config(tmp_path):
 def test_missing_file_is_user_error(tmp_path):
     with pytest.raises(CliError) as e:
         fleet.load_fleet(tmp_path / "nope.toml")
-    assert e.value.code == EXIT_USER_ERROR and e.value.remediation
+    assert e.value.code == EXIT_USER_ERROR
+    assert e.value.remediation
 
 
 @pytest.mark.parametrize(
@@ -92,8 +94,9 @@ def test_missing_file_is_user_error(tmp_path):
 )
 def test_bad_hosts_rejected(tmp_path, host):
     text = f'[[machines]]\nname = "m"\nhost = {fleet_toml_str(host)}\ntransport = "ssh"\n'
+    path = _write(tmp_path, text)
     with pytest.raises(CliError) as e:
-        fleet.load_fleet(_write(tmp_path, text))
+        fleet.load_fleet(path)
     assert e.value.code == EXIT_USER_ERROR
     assert e.value.remediation
 
@@ -128,9 +131,11 @@ def test_good_hosts_accepted(tmp_path, host):
     ],
 )
 def test_invalid_files_rejected(tmp_path, text):
+    path = _write(tmp_path, text)
     with pytest.raises(CliError) as e:
-        fleet.load_fleet(_write(tmp_path, text))
-    assert e.value.code == EXIT_USER_ERROR and e.value.remediation
+        fleet.load_fleet(path)
+    assert e.value.code == EXIT_USER_ERROR
+    assert e.value.remediation
 
 
 def test_example_doc_loads():

@@ -21,7 +21,8 @@ def test_compatible_is_nul_separated(tmp_path):
 def test_compatible_and_model_share_device_tree(tmp_path):
     make_sys(tmp_path, VENTUNOQ_ZONES, model="Arduino VENTUNO Q", compatible=["arduino,monza"])
     dt = tmp_path / "proc" / "device-tree"
-    assert (dt / "model").exists() and (dt / "compatible").exists()
+    assert (dt / "model").exists()
+    assert (dt / "compatible").exists()
 
 
 def test_devfreq_files(tmp_path):

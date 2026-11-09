@@ -66,14 +66,14 @@ def factory_for(table: dict):
     return lambda m: FakeTransport(table[m.name])
 
 
-@pytest.fixture()
+@pytest.fixture
 def fleet_file(tmp_path: Path) -> Path:
     p = tmp_path / "fleet.toml"
     p.write_text(FLEET_TOML)
     return p
 
 
-@pytest.fixture()
+@pytest.fixture
 def fakes(monkeypatch):
     table = {
         "cool": doc(40.0),
@@ -97,32 +97,44 @@ def test_status_direct_json(fleet_file, fakes, capsys):
     rc, out, err = run(
         capsys, "mesh", "status", "--fleet", str(fleet_file), "--url", NO_SERVER, "--json"
     )
-    assert rc == 0 and err == ""
+    assert rc == 0
+    assert err == ""
     st = json.loads(out)
     assert st["source"] == "direct"
     names = [m["name"] for m in st["machines"]]
     assert names == ["dead", "hot", "cool"]  # most severe first
     by = {m["name"]: m for m in st["machines"]}
-    assert by["hot"]["state"] == "ok" and by["hot"]["level"] == "hot"
-    assert by["hot"]["admit"] is False and by["cool"]["admit"] is True
-    assert by["cool"]["age_s"] is not None and by["cool"]["age_s"] < 10
-    assert by["cool"]["version"] == "9.9.9" and by["cool"]["temp_c"] == 40.0
-    assert by["dead"]["state"] == "unreachable" and by["dead"]["admit"] is None
+    assert by["hot"]["state"] == "ok"
+    assert by["hot"]["level"] == "hot"
+    assert by["hot"]["admit"] is False
+    assert by["cool"]["admit"] is True
+    assert by["cool"]["age_s"] is not None
+    assert by["cool"]["age_s"] < 10
+    assert by["cool"]["version"] == "9.9.9"
+    assert by["cool"]["temp_c"] == 40.0
+    assert by["dead"]["state"] == "unreachable"
+    assert by["dead"]["admit"] is None
     assert "no route" in by["dead"]["last_error"]
     assert st["reader"]["timeout_s"] == 1
-    assert by["cool"]["mem_used_pct"] == 91.0 and by["cool"]["mem_total_mib"] == 122222
+    assert by["cool"]["mem_used_pct"] == 91.0
+    assert by["cool"]["mem_total_mib"] == 122222
     assert by["cool"]["mem_temp_c"] == 45.7
-    assert by["dead"]["mem_used_pct"] is None and by["dead"]["mem_temp_c"] is None
+    assert by["dead"]["mem_used_pct"] is None
+    assert by["dead"]["mem_temp_c"] is None
 
 
 def test_status_direct_text(fleet_file, fakes, capsys):
     rc, out, _ = run(capsys, "mesh", "status", "--fleet", str(fleet_file), "--url", NO_SERVER)
     assert rc == 0
     lines = out.strip().splitlines()
-    assert len(lines) == 4 and lines[0].startswith("dead")
-    assert "age" in lines[1] and "88.0C" in lines[1]
-    assert "mem 91% of 119G" in lines[1] and "ddr 46C" in lines[1]
-    assert "mem -" in lines[0] and "ddr" not in lines[0]
+    assert len(lines) == 4
+    assert lines[0].startswith("dead")
+    assert "age" in lines[1]
+    assert "88.0C" in lines[1]
+    assert "mem 91% of 119G" in lines[1]
+    assert "ddr 46C" in lines[1]
+    assert "mem -" in lines[0]
+    assert "ddr" not in lines[0]
     assert lines[-1].startswith("reader: source direct")
 
 
@@ -154,9 +166,11 @@ def test_status_via_server(fakes, capsys):
     finally:
         server.stop()
         reader.close()
-    assert rc == 0 and err == ""
+    assert rc == 0
+    assert err == ""
     st = json.loads(out)
-    assert st["source"] == "mesh serve" and st["url"] == url
+    assert st["source"] == "mesh serve"
+    assert st["url"] == url
     assert [m["name"] for m in st["machines"]] == ["b", "a"]
     assert all(m["age_s"] is not None for m in st["machines"])
 
@@ -172,7 +186,8 @@ def test_status_missing_fleet_and_no_server_is_exit_2(tmp_path, capsys):
         NO_SERVER,
         "--json",
     )
-    assert rc == 2 and out == ""
+    assert rc == 2
+    assert out == ""
     assert "fleet.example.toml" in json.loads(err)["remediation"]
 
 
@@ -180,17 +195,22 @@ def test_status_bad_fleet_is_exit_1(tmp_path, capsys):
     bad = tmp_path / "fleet.toml"
     bad.write_text("machines = 3\n")
     rc, out, err = run(capsys, "mesh", "status", "--fleet", str(bad), "--url", NO_SERVER)
-    assert rc == 1 and out == "" and "hint:" in err
+    assert rc == 1
+    assert out == ""
+    assert "hint:" in err
 
 
 def test_serve_missing_fleet_is_exit_1(tmp_path, capsys):
     rc, out, err = run(capsys, "mesh", "serve", "--fleet", str(tmp_path / "none.toml"))
-    assert rc == 1 and out == "" and "fleet.example.toml" in err
+    assert rc == 1
+    assert out == ""
+    assert "fleet.example.toml" in err
 
 
 def test_serve_bad_listen_is_exit_1(fleet_file, capsys):
     rc, _, err = run(capsys, "mesh", "serve", "--fleet", str(fleet_file), "--listen", "nope")
-    assert rc == 1 and "HOST:PORT" in err
+    assert rc == 1
+    assert "HOST:PORT" in err
 
 
 def test_serve_core_binds_loopback_by_default(fakes):
@@ -214,9 +234,11 @@ def test_serve_default_address(monkeypatch):
 
     monkeypatch.setattr(mesh, "MeshServer", Spy)
     monkeypatch.setattr(mesh, "transport_factory", lambda m: FakeTransport({}))
+    fleet_ = Fleet((Machine("a", host="a.example"),), 1.0, 1.0)
     with pytest.raises(mesh.CliError) as ei:
-        mesh.start_mesh(Fleet((Machine("a", host="a.example"),), 1.0, 1.0))
-    assert seen["addr"] == ("127.0.0.1", 9480) and ei.value.code == 2
+        mesh.start_mesh(fleet_)
+    assert seen["addr"] == ("127.0.0.1", 9480)
+    assert ei.value.code == 2
 
 
 @pytest.mark.parametrize("json_mode", [False, True])
@@ -229,10 +251,13 @@ def test_serve_runs_and_shuts_down(fleet_file, fakes, monkeypatch, capsys, json_
     monkeypatch.setattr(mesh, "_wait_for_signal", fake_wait)
     argv = ["mesh", "serve", "--fleet", str(fleet_file), "--listen", "127.0.0.1:0"]
     rc, out, err = run(capsys, *argv, *(["--json"] if json_mode else []))
-    assert rc == 0 and err == "" and state["running"]
+    assert rc == 0
+    assert err == ""
+    assert state["running"]
     if json_mode:
         info = json.loads(out)
-        assert info["host"] == "127.0.0.1" and info["machines"] == 3
+        assert info["host"] == "127.0.0.1"
+        assert info["machines"] == 3
         assert info["serving"].startswith("http://127.0.0.1:")
     else:
         assert "http://127.0.0.1:" in out
@@ -241,8 +266,11 @@ def test_serve_runs_and_shuts_down(fleet_file, fakes, monkeypatch, capsys, json_
 @pytest.mark.parametrize("json_mode", [False, True])
 def test_overview(capsys, json_mode):
     rc, out, err = run(capsys, "mesh", "overview", *(["--json"] if json_mode else []))
-    assert rc == 0 and err == ""
-    assert "mesh serve" in out and "mesh status" in out and "9480" in out
+    assert rc == 0
+    assert err == ""
+    assert "mesh serve" in out
+    assert "mesh status" in out
+    assert "9480" in out
     assert "fleet.toml" in out
     if json_mode:
         assert json.loads(out)["subject"] == "heat-governor mesh"
@@ -250,7 +278,8 @@ def test_overview(capsys, json_mode):
 
 def test_bare_mesh_prints_overview(capsys):
     rc, out, _ = run(capsys, "mesh")
-    assert rc == 0 and "mesh status" in out
+    assert rc == 0
+    assert "mesh status" in out
 
 
 def test_catalog_learn_overview_list_mesh(capsys):
@@ -259,14 +288,17 @@ def test_catalog_learn_overview_list_mesh(capsys):
         assert ("mesh", verb) in paths
     assert ("mesh",) in paths
     _, learn, _ = run(capsys, "learn")
-    assert "mesh" in learn and "status" in learn
+    assert "mesh" in learn
+    assert "status" in learn
     _, lj, _ = run(capsys, "learn", "--json")
     cmds = [c["path"] for c in json.loads(lj)["commands"]]
-    assert ["mesh", "status"] in cmds and ["mesh", "serve"] in cmds
+    assert ["mesh", "status"] in cmds
+    assert ["mesh", "serve"] in cmds
     _, ov, _ = run(capsys, "overview")
     assert "mesh" in ov
     rc, out, _ = run(capsys, "explain", "mesh", "status")
-    assert rc == 0 and "mesh status" in out
+    assert rc == 0
+    assert "mesh status" in out
 
 
 def test_status_never_reports_admit_for_a_box_that_is_not_ok():
@@ -346,6 +378,8 @@ def test_status_text_memory_without_ddr_or_total():
         ],
     }
     text = render_status(build_status(snap, "mesh serve", None))
-    assert "mem 82% of 61G " in text and "mem 40% " in text and "ddr" not in text
+    assert "mem 82% of 61G " in text
+    assert "mem 40% " in text
+    assert "ddr" not in text
     cols = {line.index("cool") for line in text.splitlines()[:2]}
     assert len(cols) == 1  # level column stays aligned

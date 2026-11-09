@@ -96,8 +96,9 @@ def test_hang_is_bounded(fake, tmp_path, monkeypatch):
 @pytest.mark.parametrize("mode", ["fail", "empty", "junk"])
 def test_bad_outputs_are_unreachable(fake, tmp_path, monkeypatch, mode):
     monkeypatch.setenv("FAKE_SSH_MODE", mode)
+    transport_ = make(fake, tmp_path)
     with pytest.raises(Unreachable) as exc:
-        make(fake, tmp_path).fetch()
+        transport_.fetch()
     assert str(exc.value)
 
 
@@ -183,8 +184,9 @@ def test_history_refuses_non_numeric_before_any_process(exec_fake, tmp_path, arg
 @pytest.mark.parametrize("mode", ["fail", "junk", "empty"])
 def test_history_bad_outputs_are_unreachable(fake, tmp_path, monkeypatch, mode):
     monkeypatch.setenv("FAKE_SSH_MODE", mode)
+    transport_ = make(fake, tmp_path)
     with pytest.raises(Unreachable):
-        make(fake, tmp_path).history(1.0, 100.0, 10)
+        transport_.history(1.0, 100.0, 10)
 
 
 def test_history_hang_is_bounded(fake, tmp_path, monkeypatch):
@@ -193,7 +195,8 @@ def test_history_hang_is_bounded(fake, tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_SSH_MODE", "hang")
     monkeypatch.setattr(transport, "timeout_for", lambda span: 0.5)
     start = time.monotonic()
+    transport_ = make(fake, tmp_path)
     with pytest.raises(Unreachable) as exc:
-        make(fake, tmp_path).history(1.0, 100.0, 10)
+        transport_.history(1.0, 100.0, 10)
     assert time.monotonic() - start < 3.0
     assert "timed out" in str(exc.value)

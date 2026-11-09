@@ -110,7 +110,8 @@ def test_only_critical_rows_and_tiles_animate():
     assert "aura" in keyframes
     # one-shot entrance animations (drawer, scrim) are the only other keyframes
     assert set(keyframes) <= {"aura", "slide", "fade"}
-    assert "pulse" not in style and "ripple" not in style
+    assert "pulse" not in style
+    assert "ripple" not in style
 
 
 def test_reduced_motion_keeps_static_critical_glow():
@@ -119,7 +120,8 @@ def test_reduced_motion_keeps_static_critical_glow():
     assert m, "reduced-motion rule missing"
     body = m.group(1)
     assert "animation:none" in body.replace(" ", "")
-    assert ".critical" in body and "box-shadow" in body
+    assert ".critical" in body
+    assert "box-shadow" in body
 
 
 def test_single_band_label_and_states():
@@ -151,18 +153,22 @@ def test_hints_are_short_and_name_no_board():
         for board in ("VENTUNO", "Jetson", "DGX", "Spark", "Thor", "Orin"):
             assert board not in t, t
     assert '<dt>Memory<${Info} k="memory" />' in PAGE
-    assert "t.memory" in PAGE and "m.temp_c" in PAGE  # DDR shown only when temp_c is present
+    assert "t.memory" in PAGE
+    assert "m.temp_c" in PAGE  # DDR shown only when temp_c is present
     assert "s.mem_used_pct" in PAGE  # samples feed the trend
     assert "<span>Memory</span>" in PAGE  # tooltip row
     assert "<th>Memory</th>" in PAGE  # table column
-    assert "http://" not in PAGE and "https://" not in PAGE
+    assert "http://" not in PAGE
+    assert "https://" not in PAGE
 
 
 def test_vendored_files_exist_with_licences():
     for name, lic in VENDORED.items():
         f = VENDOR / name
-        assert f.is_file() and f.stat().st_size > 0, name
-        assert (VENDOR / lic).is_file() and (VENDOR / lic).stat().st_size > 0, lic
+        assert f.is_file(), name
+        assert f.stat().st_size > 0, name
+        assert (VENDOR / lic).is_file(), lic
+        assert (VENDOR / lic).stat().st_size > 0, lic
     assert "Apache License" in (VENDOR / "htm-LICENSE.txt").read_text()
     assert "MIT License" in (VENDOR / "react-LICENSE.txt").read_text()
     assert "SIL OPEN FONT LICENSE" in (VENDOR / "lato-OFL.txt").read_text().upper()
@@ -234,7 +240,9 @@ def test_7d_axis_shows_dates():
 def test_gpu_fact_shows_clock_power_and_ceiling_only_when_set():
     """d3: the GPU fact is built from gpu_mhz / gpu_power_w / gpu_util_pct, shows the clock
     ceiling only when the helper reports one, and board power feeds the Power fact."""
-    assert "gpu_mhz" in PAGE and "gpu_power_w" in PAGE and "gpu_util_pct" in PAGE
+    assert "gpu_mhz" in PAGE
+    assert "gpu_power_w" in PAGE
+    assert "gpu_util_pct" in PAGE
     assert "ceiling " in PAGE
     assert "String(b.gpu_clock)" not in PAGE  # the raw helper status is no longer shown
 
@@ -248,4 +256,6 @@ def test_fact_values_never_split_from_their_units():
     gpu_block = PAGE[
         PAGE.index("const ceil =") : PAGE.index('.join(" · ") || "—";', PAGE.index("const ceil ="))
     ]
-    assert '" MHz"' not in gpu_block and '" W"' not in gpu_block and '" °C"' not in gpu_block
+    assert '" MHz"' not in gpu_block
+    assert '" W"' not in gpu_block
+    assert '" °C"' not in gpu_block
