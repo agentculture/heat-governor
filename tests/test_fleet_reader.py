@@ -695,3 +695,10 @@ def test_extract_carries_gpu_clock_and_power(box):
     doc = {"level": "cool", "at": 1.0, "temp_c": 50.0, "sensors": sensors}
     out = extract(doc)
     assert {k: out[k] for k in want} == want
+
+
+def test_extract_carries_the_gpu_clock_ceiling_status():
+    """d3: thor/orin publish their helper status ("ok (helper status: 1575)"); the page turns
+    it into "ceiling 1575 MHz", so the reader must carry it."""
+    doc = {"level": "cool", "at": 1.0, "temp_c": 50.0, "gpu_clock": "ok (helper status: 1575)"}
+    assert extract(doc)["gpu_clock"] == "ok (helper status: 1575)"

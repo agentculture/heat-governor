@@ -90,6 +90,7 @@ THERMAL_FIELDS = (
     "reason",
     "rate_c_s",
     "hottest_zone",
+    "gpu_clock",  # the clock-ceiling helper status, e.g. "ok (helper status: 1575)"
 )
 
 
