@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import threading
 import urllib.error
 import urllib.request
 
@@ -149,3 +150,58 @@ def test_head(server):
     with urllib.request.urlopen(req, timeout=5) as r:  # nosec B310
         assert r.status == 200
         assert r.read() == b""
+
+
+class BlockingReader(FakeReader):
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = threading.Event()
+        self.entered = threading.Semaphore(0)
+
+    def trend(self, name: str, since_s: int = 86400, max_points: int = 300) -> dict:
+        self.entered.release()
+        self.release.wait(10)
+        return super().trend(name, since_s, max_points)
+
+
+def test_history_concurrency_limit():
+    reader = BlockingReader()
+    srv = MeshServer(reader, port=0)
+    srv.start()
+    try:
+        results: list = []
+        threads = [
+            threading.Thread(
+                target=lambda: results.append(get(srv, "/api/history?machine=spark-a"))
+            )
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for _ in range(4):
+            assert reader.entered.acquire(timeout=5)
+        code, headers, body = get(srv, "/api/history?machine=spark-a")
+        assert code == 503
+        assert headers.get("Retry-After")
+        assert json.loads(body) == {"error": "busy, retry shortly"}
+        reader.release.set()
+        for t in threads:
+            t.join(10)
+        assert sorted(r[0] for r in results) == [200] * 4
+        assert get(srv, "/api/history?machine=spark-a")[0] == 200
+    finally:
+        reader.release.set()
+        srv.stop()
+
+
+def test_unexpected_error_is_logged_and_sanitized(server, capsys):
+    def boom() -> dict:
+        raise RuntimeError("secret-detail-xyz")
+
+    server.reader.snapshot = boom
+    code, _h, body = get(server, "/api/fleet")
+    assert code == 500
+    assert json.loads(body) == {"error": "internal error"}
+    assert b"secret-detail-xyz" not in body
+    err = capsys.readouterr().err
+    assert "Traceback" in err and "secret-detail-xyz" in err
