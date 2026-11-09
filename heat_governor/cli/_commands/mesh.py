@@ -25,8 +25,7 @@ from heat_governor.fleet import Fleet, load_fleet
 from heat_governor.fleet_reader import FleetReader, TransportFactory
 from heat_governor.mesh_server import DEFAULT_HOST, DEFAULT_PORT, MeshServer
 
-_SCHEME = "http"  # loopback by design; no TLS on 127.0.0.1
-DEFAULT_URL = f"{_SCHEME}://{DEFAULT_HOST}:{DEFAULT_PORT}"
+DEFAULT_URL = f"http://{DEFAULT_HOST}:{DEFAULT_PORT}"  # NOSONAR python:S5332 -- loopback
 _JSON_HELP = "Emit structured JSON."
 SERVER_TIMEOUT_S = 2.0
 DIRECT_SLACK_S = 1.0
@@ -121,7 +120,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     fleet = _load(args)
     reader, server = start_mesh(fleet, getattr(args, "listen", None))
     host, port = server.address[:2]
-    url = f"{_SCHEME}://{host}:{port}"
+    url = f"http://{host}:{port}"  # NOSONAR python:S5332 -- mesh serve binds loopback by default
     try:
         if _json(args):
             emit_result(
