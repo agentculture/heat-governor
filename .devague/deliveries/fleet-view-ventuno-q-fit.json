@@ -2,7 +2,7 @@
   "plan_slug": "fleet-view-ventuno-q-fit",
   "schema_version": 2,
   "created": "2026-11-09T04:31:42Z",
-  "updated": "2026-11-09T04:31:42Z",
+  "updated": "2026-11-09T04:45:30Z",
   "deviations": [
     {
       "id": "d1",
@@ -20,6 +20,23 @@
       "status": "approved",
       "classification": "acceptable",
       "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "trend history comes from each machine's own heat-governor record files (records/YYYYMMDD.jsonl, 18 days on the remote boxes): the reader runs a second fixed, read-only, niced downsampling command over the existing SSH connection (numeric arguments only) and cultureos reads its own files locally; results cached briefly; the reader's in-memory buffer becomes the fallback; the trend panel gains a 7d range. No daemon changes.",
+      "task_ref": "t7",
+      "reason": "user on 2026-11-09: history must persist per machine; the reader-only buffer (q6) is wiped on every mesh serve restart while every daemon already records 1 Hz history to disk; decider 0.51 ssh_backfill / 0.47 plus persist, remote load acceptable P=0.78; user approved with a 7-day range",
+      "affects": [
+        "t6",
+        "t8",
+        "t9",
+        "c8",
+        "c28"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 2
     }
   ],
   "evidence": [],
