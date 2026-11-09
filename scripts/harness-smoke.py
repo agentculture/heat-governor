@@ -110,6 +110,14 @@ STEWARD_WAIVED_PORTABILITY_PATHS = frozenset(
     {
         ".claude/skills/recall/SKILL.md",
         ".claude/skills/remember/SKILL.md",
+        # Generated devague records of the 2026-11-08 fleet-view frame. They quote per-user
+        # paths as recorded survey observations (e.g. "~/.ssh/config sets only IdentityFile"),
+        # nothing reads them as config, and devague forbids hand-editing its state. Listed by
+        # exact path, so any other doc or config that gains a ~/.<dotfile> ref still fails.
+        ".devague/frames/fleet-view-ventuno-q-fit.json",
+        ".devague/plans/fleet-view-ventuno-q-fit.json",
+        "docs/specs/2026-11-08-fleet-view-ventuno-q-fit.md",
+        "docs/plans/2026-11-08-fleet-view-ventuno-q-fit-split.md",
     }
 )
 

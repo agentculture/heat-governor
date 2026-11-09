@@ -1,4 +1,5 @@
-# Example fleet.toml. Copy to ~/.config/heat-governor/fleet.toml (beside config.toml).
+# Example fleet.toml. Copy it into the heat-governor config directory, beside config.toml
+# (run `heat-governor config path` to see where that is).
 # Hostnames below are placeholders; use your own.
 
 # Seconds between polls (1 to 3600) and per-machine timeout (0.5 to 120).
