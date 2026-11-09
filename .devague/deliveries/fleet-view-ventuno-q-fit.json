@@ -1,0 +1,28 @@
+{
+  "plan_slug": "fleet-view-ventuno-q-fit",
+  "schema_version": 2,
+  "created": "2026-11-09T04:31:42Z",
+  "updated": "2026-11-09T04:31:42Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "add per-machine memory state to the fleet view: the reader carries mem used %, available, derived total and swap (already published by every daemon's /state sensors, 0.13.0 included) plus memory temperature where a DDR/DRAM/EMC/SDRAM thermal zone exists (VENTUNO Q ddrss-*; not exposed on Jetson or GB10), stores memory % in the compact history, and the page, mesh status and the trend tooltip/table show a Memory fact with an (i) hint",
+      "task_ref": "t7",
+      "reason": "user request on 2026-11-09 after the run; probe showed memory already in every daemon's state document, memory temperature only on the VENTUNO Q",
+      "affects": [
+        "t9",
+        "t10",
+        "t12",
+        "c8",
+        "c28"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 1
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}
