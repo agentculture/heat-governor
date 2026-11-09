@@ -25,7 +25,9 @@
   --dim:rgba(251,248,241,.86); --header:rgba(245,240,230,.86); --glow:none;
   --radius:16px; --ease:cubic-bezier(.22,1,.36,1);
   --font-body:"Lato",-apple-system,"Segoe UI",system-ui,sans-serif;
-  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace }
+  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --lv-cool:var(--cool); --lv-warm:var(--warm); --lv-hot:color-mix(in srgb,var(--hot) 55%,var(--warm)); --lv-critical:var(--hot);
+  --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4; --c6:#6250d6 }
 html[data-mode="dark"] { color-scheme:dark;
   --s1:#e06a2a; --s2:#7282e0;
   --bg:#0e1117; --surface:#151922; --surface-2:#1b202b; --raise:#252b39;
@@ -34,7 +36,8 @@ html[data-mode="dark"] { color-scheme:dark;
   --cool:#8ecbe8; --warm:#f2a65a; --hot:#ff5a3c; --accent:#ff8a3d; --accent-tint:rgba(255,138,61,.10);
   --heat:linear-gradient(90deg,#8ecbe8,#5b8fb0 30%,#7a5a6e 52%,#d8643f 72%,#ff8a3d 86%,#ffc27a);
   --dim:rgba(21,25,34,.86); --header:rgba(14,17,23,.82);
-  --glow:radial-gradient(70% 100% at 50% 100%, rgba(255,138,61,.07), transparent 70%) }
+  --glow:radial-gradient(70% 100% at 50% 100%, rgba(255,138,61,.07), transparent 70%);
+  --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#9085e9 }
 
 * { box-sizing:border-box }
 html { background:var(--bg); transition:background .4s var(--ease) }
@@ -163,7 +166,7 @@ h2 { font-weight:700; font-size:1.1rem; margin:2.6rem 0 1rem }
 .lane[data-open="true"], .tile[data-open="true"] { border-color:var(--accent) }
 
 /* detail drawer */
-.scrim { position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:20; animation:fade .25s var(--ease) }
+.scrim { position:fixed; inset:0; pointer-events:none; background:rgba(0,0,0,.12); z-index:20; animation:fade .25s var(--ease) }
 .drawer { position:fixed; top:0; right:0; bottom:0; z-index:21; width:min(800px,100vw); background:var(--bg); border-left:1px solid var(--line);
   box-shadow:-20px 0 60px rgba(0,0,0,.25); overflow-y:auto; overscroll-behavior:contain; animation:slide .35s var(--ease);
   padding-top:max(20px,env(safe-area-inset-top,0px)); padding-bottom:max(32px,env(safe-area-inset-bottom,0px));
@@ -215,11 +218,6 @@ table.dt { width:100%; border-collapse:collapse; font-size:.8rem; font-variant-n
 .dt th { color:var(--ink-faint); font-weight:700 } .dt td { color:var(--ink-soft) }
 .linkbtn { appearance:none; border:0; background:none; color:var(--accent); cursor:pointer; font-size:.82rem; padding:4px 2px }
 .nodata { padding:44px 20px; text-align:center; color:var(--ink-faint); border:1px dashed var(--line-strong); border-radius:14px }
-:root { --lv-cool:var(--cool); --lv-warm:var(--warm); --lv-hot:color-mix(in srgb,var(--hot) 55%,var(--warm)); --lv-critical:var(--hot) }
-
-:root { --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4; --c6:#6250d6 }
-html[data-mode="dark"] { --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#9085e9 }
-.scrim { pointer-events:none; background:rgba(0,0,0,.12) }
 @media (max-width:900px){ .scrim { pointer-events:auto; background:rgba(0,0,0,.3) } }
 .drow-l { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
 .hint { font-size:.74rem; color:var(--ink-faint); margin:-4px 0 12px }
@@ -286,47 +284,67 @@ const platLabel = p => PLATFORM_LABEL[p] || titleCase(p);
 // Elder Futhark initial of the machine's name: c→ᚲ, s→ᛋ, th→ᚦ, o→ᛟ, n→ᚾ, m→ᛗ, h→ᚺ, g→ᚷ
 const rune = n => n.startsWith("th") ? "ᚦ" : ({ c:"ᚲ", s:"ᛋ", o:"ᛟ", n:"ᚾ", m:"ᛗ", h:"ᚺ", g:"ᚷ" })[n[0]] || "ᚠ";
 const fmt = (n, d=1) => n == null ? "—" : Number(n).toFixed(d);
-const fin = v => typeof v === "number" && isFinite(v);
+const fin = v => Number.isFinite(v);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const SEVERITY = { critical:6, hot:5, warm:4, unreachable:3, stale:2.5, unsupported:2, cool:0 };
 const STATES = ["critical", "hot", "warm", "cool", "stale", "unreachable", "unsupported"];
 const LEVELS = ["cool", "warm", "hot", "critical"];
 
 // ---- /api/fleet machine -> one row of the UI ----
+const field = (t, k) => (t ? t[k] : null);
+const num = (t, k) => (t && fin(t[k]) ? t[k] : null);
+function boxState(m, t) {
+  if (m.state === "unsupported") return "unsupported";
+  if (m.state === "ok") return LEVELS.includes(t && t.level) ? t.level : "stale";
+  return m.state === "stale" ? "stale" : "unreachable";
+}
+const platformKey = (t, unsupported) => (t && t.platform) || (unsupported ? "unsupported" : "unknown");
+const limitsOf = t => (t && t.limits && fin(t.limits.warm_c) && fin(t.limits.crit_c) ? t.limits : null);
+const gpusOf = t => (t && Array.isArray(t.gpus_c) && t.gpus_c.length ? t.gpus_c : null);
+const containersOf = t => (t && Array.isArray(t.containers) ? t.containers : []);
+const memOf = t => (t && t.memory && typeof t.memory === "object" && fin(t.memory.used_pct) ? t.memory : null);
+function peerOf(t) {
+  const pair = t && t.pair && typeof t.pair === "object" ? t.pair : null;
+  if (!pair) return { name: null, status: null };
+  return { name: pair.peer_host || pair.peer || "peer", status: pair.peer_status };
+}
 function toBox(m) {
   const t = m.thermal || null;
   const unsupported = m.state === "unsupported";
-  const lim = t && t.limits && fin(t.limits.warm_c) && fin(t.limits.crit_c) ? t.limits : null;
-  const state = unsupported ? "unsupported" : m.state === "ok" ? (LEVELS.includes(t && t.level) ? t.level : "stale") : (m.state === "stale" ? "stale" : "unreachable");
-  const pair = t && t.pair && typeof t.pair === "object" ? t.pair : null;
+  const peer = peerOf(t);
   return {
     name: m.name, transport: m.transport, host: m.host, hub: m.transport === "local",
-    pkey: (t && t.platform) || (unsupported ? "unsupported" : "unknown"),
-    state, age: m.age_s, health: m.health || {},
+    pkey: platformKey(t, unsupported),
+    state: boxState(m, t), age: m.age_s, health: m.health || {},
     // no made-up reading: unsupported machines show none, unreachable ones their last
-    temp: unsupported || !t ? null : (fin(t.temp_c) ? t.temp_c : null),
-    gpu_temp: unsupported || !t ? null : (fin(t.gpu_temp_c) ? t.gpu_temp_c : null),
-    gpus: t && Array.isArray(t.gpus_c) && t.gpus_c.length ? t.gpus_c : null,
-    limits: unsupported ? null : lim,
-    level: t ? t.level : null, admit: t ? t.admit : null, cf: t ? t.concurrency_factor : null,
-    reason: t ? t.reason : null, rate: t && fin(t.rate_c_s) ? t.rate_c_s : null,
-    containers: t && Array.isArray(t.containers) ? t.containers : [], applying: t ? !!t.applying : false,
-    version: t ? t.version : null, zone: t ? t.hottest_zone : null, gpu_clock: t ? t.gpu_clock : null,
-    gpu_mhz: t && fin(t.gpu_mhz) ? t.gpu_mhz : null, gpu_power_w: t && fin(t.gpu_power_w) ? t.gpu_power_w : null,
-    gpu_util_pct: t && fin(t.gpu_util_pct) ? t.gpu_util_pct : null,
-    fan_rpm: t && fin(t.fan_rpm) ? t.fan_rpm : null, power_w: t && fin(t.power_w) ? t.power_w : null,
-    zones: t && fin(t.zones) ? t.zones : null,
-    pair: pair ? (pair.peer_host || pair.peer || "peer") : null, pair_status: pair ? pair.peer_status : null,
-    mem: t && t.memory && typeof t.memory === "object" && fin(t.memory.used_pct) ? t.memory : null,
+    temp: unsupported ? null : num(t, "temp_c"),
+    gpu_temp: unsupported ? null : num(t, "gpu_temp_c"),
+    gpus: gpusOf(t),
+    limits: unsupported ? null : limitsOf(t),
+    level: field(t, "level"), admit: field(t, "admit"), cf: field(t, "concurrency_factor"),
+    reason: field(t, "reason"), rate: num(t, "rate_c_s"),
+    containers: containersOf(t), applying: !!(t && t.applying),
+    version: field(t, "version"), zone: field(t, "hottest_zone"), gpu_clock: field(t, "gpu_clock"),
+    gpu_mhz: num(t, "gpu_mhz"), gpu_power_w: num(t, "gpu_power_w"),
+    gpu_util_pct: num(t, "gpu_util_pct"),
+    fan_rpm: num(t, "fan_rpm"), power_w: num(t, "power_w"),
+    zones: num(t, "zones"),
+    pair: peer.name, pair_status: peer.status,
+    mem: memOf(t),
     hasReading: !!t,
   };
 }
 // "91% · 10.7 GiB free of 122 GiB" (+ " · DDR 46 °C" only where the board exposes a memory zone)
+const gib = v => fmt(v / 1024, v >= 100 * 1024 ? 0 : 1) + "\u00a0GiB";
+function freeText(m) {
+  if (!fin(m.avail_mib)) return "";
+  const total = fin(m.total_mib) ? " of\u00a0" + gib(m.total_mib) : "";
+  return " · " + gib(m.avail_mib) + "\u00a0free" + total;
+}
 function memText(b) {
-  const m = b.mem; if (!m) return "—";
-  const gb = v => fmt(v / 1024, v >= 100 * 1024 ? 0 : 1) + "\u00a0GiB";
-  const free = fin(m.avail_mib) ? " · " + gb(m.avail_mib) + "\u00a0free" + (fin(m.total_mib) ? " of\u00a0" + gb(m.total_mib) : "") : "";
-  return fmt(m.used_pct, 0) + "%" + free + (fin(m.temp_c) ? " · DDR\u00a0" + fmt(m.temp_c, 0) + "\u00a0°C" : "");
+  const m = b.mem;
+  if (!m) return "—";
+  return fmt(m.used_pct, 0) + "%" + freeText(m) + (fin(m.temp_c) ? " · DDR\u00a0" + fmt(m.temp_c, 0) + "\u00a0°C" : "");
 }
 
 // ---- live data ----
@@ -382,7 +400,7 @@ function useHistory(names, rk) {
 
 // ---- theme mode: Auto follows the host theme, Light/Dark override ----
 function useMode(pref) {
-  const sys = () => { const t = document.documentElement.getAttribute("data-theme"); if (t === "dark" || t === "light") return t;
+  const sys = () => { const t = document.documentElement.dataset.theme; if (t === "dark" || t === "light") return t;
     return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; };
   const [sysMode, setSys] = useState(sys);
   useEffect(() => {
@@ -394,39 +412,71 @@ function useMode(pref) {
   return pref === "system" ? sysMode : pref;
 }
 
+// where the single band label sits: right-aligned near the top, left-aligned near the bottom, else centred
+function bandAnchor(a, z) {
+  const mid = (a + z) / 2;
+  if (mid > 85) return { right: (100 - z) + "%" };
+  if (mid < 15) return { left: a + "%" };
+  return { left: mid + "%", transform: "translateX(-50%)" };
+}
 function Scale({ temp, limits, lo = 30, hi, small }) {
   hi = hi || Math.max(110, (limits && limits.crit_c + 6) || 110);
   const pct = v => Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100));
+  if (temp == null) {
+    const ticks = !small && html`<div class="ticks"><span style=${{ left: 0 }}>no reading</span></div>`;
+    return html`<div><div class="scale off" role="img" aria-label="no reading"></div>${ticks}</div>`;
+  }
   // one band from warm to crit with a single label, so close limits never collide
   const a = limits ? pct(limits.warm_c) : null, z = limits ? pct(limits.crit_c) : null;
-  const mid = limits ? (a + z) / 2 : 0;
-  const anchor = mid > 85 ? { right: (100 - z) + "%" } : mid < 15 ? { left: a + "%" } : { left: mid + "%", transform: "translateX(-50%)" };
-  if (temp == null) return html`<div><div class="scale off" role="img" aria-label="no reading"></div>${!small && html`<div class="ticks"><span style=${{ left: 0 }}>no reading</span></div>`}</div>`;
+  const label = fmt(temp) + " °C" + (limits ? ", warm to critical band " + limits.warm_c + " to " + limits.crit_c + " °C" : "");
+  const band = limits && html`<div class="band" style=${{ left: a + "%", width: (z - a) + "%" }}></div>`;
+  const ticks = !small && limits && html`<div class="ticks"><span style=${bandAnchor(a, z)}>${limits.warm_c}–${limits.crit_c}°</span></div>`;
   return html`<div>
-    <div class="scale" role="img" aria-label=${`${fmt(temp)} °C${limits ? `, warm to critical band ${limits.warm_c} to ${limits.crit_c} °C` : ""}`}>
+    <div class="scale" role="img" aria-label=${label}>
       <div class="dim" style=${{ left: pct(temp) + "%" }}></div>
-      ${limits && html`<div class="band" style=${{ left: a + "%", width: (z - a) + "%" }}></div>`}
+      ${band}
       <div class="head" style=${{ left: pct(temp) + "%" }}></div>
     </div>
-    ${!small && limits && html`<div class="ticks"><span style=${anchor}>${limits.warm_c}–${limits.crit_c}°</span></div>`}
+    ${ticks}
   </div>`;
 }
 
 const Mark = ({ b }) => html`<span class="mark rune" aria-hidden="true">${rune(b.name)}</span>`;
-const ageText = s => s == null ? "" : s < 90 ? Math.round(s) + "s" : s < 5400 ? Math.round(s / 60) + "m" : Math.round(s / 3600) + "h";
-const statusText = b => b.state === "unreachable" ? (b.hasReading ? `unreachable · ${ageText(b.age)}` : "unreachable") :
-  b.state === "stale" ? `stale · ${ageText(b.age)}` : b.state === "unsupported" ? "not supported" : b.state;
-const whyText = b => b.state === "unsupported" ? "heat-governor can't read this machine" :
-  (b.state === "unreachable" || b.state === "stale") ? (b.hasReading ? "last reading shown" : "no readings") :
-  `${b.reason || "steady"}${b.rate != null ? " · " + (b.rate > 0 ? "+" : "") + fmt(b.rate, 2) + " °C/s" : ""}`;
+function ageText(s) {
+  if (s == null) return "";
+  if (s < 90) return Math.round(s) + "s";
+  if (s < 5400) return Math.round(s / 60) + "m";
+  return Math.round(s / 3600) + "h";
+}
+function statusText(b) {
+  if (b.state === "unreachable") return b.hasReading ? "unreachable · " + ageText(b.age) : "unreachable";
+  if (b.state === "stale") return "stale · " + ageText(b.age);
+  if (b.state === "unsupported") return "not supported";
+  return b.state;
+}
+function rateText(r) {
+  if (r == null) return "";
+  return " · " + (r > 0 ? "+" : "") + fmt(r, 2) + " °C/s";
+}
+function whyText(b) {
+  if (b.state === "unsupported") return "heat-governor can't read this machine";
+  if (b.state === "unreachable" || b.state === "stale") return b.hasReading ? "last reading shown" : "no readings";
+  return (b.reason || "steady") + rateText(b.rate);
+}
 const subLine = b => b.state === "unsupported" ? "not supported" : [platLabel(b.pkey), b.version ? "v" + b.version : ""].filter(Boolean).join(" · ");
-const viaLine = b => b.hub ? "this machine · local" : `${b.host || b.name} · ${b.transport || "ssh"}`;
+const viaLine = b => b.hub ? "this machine · local" : (b.host || b.name) + " · " + (b.transport || "ssh");
 // per-GPU strip for multi-GPU boxes: one cell per GPU, coloured against the box's limits
+function gpuColour(t, limits) {
+  if (t >= limits.crit_c) return "var(--hot)";
+  if (t >= limits.warm_c) return "var(--warm)";
+  return "var(--cool)";
+}
 function Gpus({ b }) {
   if (!b.gpus || !b.limits) return null;
-  const c = t => t >= b.limits.crit_c ? "var(--hot)" : t >= b.limits.warm_c ? "var(--warm)" : "var(--cool)";
+  const cells = b.gpus.map((t, i) => html`<i key=${i} title=${"GPU " + i + ": " + fmt(t, 0) + " °C"}
+    style=${{ background: gpuColour(t, b.limits), opacity: .35 + .65 * Math.min(1, Math.max(0, (t - 55) / 35)) }}></i>`);
   return html`<span class="gpus" role="img" aria-label=${"GPU temperatures: " + b.gpus.map(t => fmt(t, 0)).join(", ") + " °C"}>
-    ${b.gpus.map((t, i) => html`<i key=${i} title=${`GPU ${i}: ${fmt(t, 0)} °C`} style=${{ background: c(t), opacity: .35 + .65 * Math.min(1, Math.max(0, (t - 55) / 35)) }}></i>`)}</span>`;
+    ${cells}</span>`;
 }
 
 // small (i) hint: hover or focus shows a plain-language explanation; never opens the machine
@@ -448,29 +498,49 @@ function Info({ k }) {
     <i class="i" aria-hidden="true">i</i><span class="tipx" role="tooltip">${HINT[k]}</span></span>`;
 }
 
-function Facts({ b }) {
-  if (b.state === "unsupported") return html`<dl class="facts">
-    <dt>Sensors<${Info} k="sensors" /></dt><dd>none readable</dd>
-    <dt>Containers</dt><dd>not governed</dd></dl>`;
-  const live = b.state !== "unreachable" && b.state !== "stale";
+const unitText = (v, unit) => (v == null ? "" : fmt(v, 0) + unit);
+function gpuText(b) {
   // the clock ceiling shows only when the root helper reports one ("ok (helper status: 1575)")
   const ceil = b.gpu_clock && /helper status:\s*(\d+)/.exec("" + b.gpu_clock);
-  const gpu = [
-    b.gpu_temp != null ? fmt(b.gpu_temp, 0) + "\u00a0°C" : "",
-    b.gpu_mhz != null ? fmt(b.gpu_mhz, 0) + "\u00a0MHz" : "",
-    b.gpu_power_w != null ? fmt(b.gpu_power_w, 0) + "\u00a0W" : "",
-    b.gpu_util_pct != null ? fmt(b.gpu_util_pct, 0) + "%" : "",
+  return [
+    unitText(b.gpu_temp, "\u00a0°C"),
+    unitText(b.gpu_mhz, "\u00a0MHz"),
+    unitText(b.gpu_power_w, "\u00a0W"),
+    unitText(b.gpu_util_pct, "%"),
     ceil ? "ceiling\u00a0" + ceil[1] + "\u00a0MHz" : "",
   ].filter(Boolean).join(" · ") || "—";
+}
+function admitText(b) {
+  const live = b.state !== "unreachable" && b.state !== "stale";
+  if (!live || b.admit == null) return "unknown";
+  return (b.admit ? "yes" : "holding") + " · ×" + fmt(b.cf, 2);
+}
+function containersText(b) {
+  if (!b.hasReading) return "—";
+  return b.containers.length + (b.applying ? ", applying" : ", dry-run");
+}
+const pairText = b => (b.pair ? b.pair + ", " + (b.pair_status || "?") : "—");
+function Facts({ b }) {
+  if (b.state === "unsupported") {
+    return html`<dl class="facts">
+    <dt>Sensors<${Info} k="sensors" /></dt><dd>none readable</dd>
+    <dt>Containers</dt><dd>not governed</dd></dl>`;
+  }
+  const gpusOrPair = b.gpus
+    ? html`<dt>GPUs<${Info} k="gpus" /></dt><dd><${Gpus} b=${b} /></dd>`
+    : html`<dt>Pair<${Info} k="pair" /></dt><dd>${pairText(b)}</dd>`;
+  const fan = b.fan_rpm != null && html`<dt>Fan<${Info} k="fan" /></dt><dd>${fmt(b.fan_rpm, 0)} rpm</dd>`;
+  const power = b.power_w != null && html`<dt>Power<${Info} k="power" /></dt><dd>${fmt(b.power_w, 2) + "\u00a0W"}</dd>`;
+  const zones = b.zones != null && html`<dt>Zones<${Info} k="zones" /></dt><dd>${b.zones}${b.zone ? " · " + b.zone : ""}</dd>`;
   return html`<dl class="facts">
-    <dt>Admitting<${Info} k="admit" /></dt><dd>${live && b.admit != null ? (b.admit ? "yes" : "holding") + " · ×" + fmt(b.cf, 2) : "unknown"}</dd>
-    <dt>Containers<${Info} k="containers" /></dt><dd>${b.hasReading ? `${b.containers.length}${b.applying ? ", applying" : ", dry-run"}` : "—"}</dd>
-    <dt>GPU<${Info} k="gpu" /></dt><dd>${gpu}</dd>
+    <dt>Admitting<${Info} k="admit" /></dt><dd>${admitText(b)}</dd>
+    <dt>Containers<${Info} k="containers" /></dt><dd>${containersText(b)}</dd>
+    <dt>GPU<${Info} k="gpu" /></dt><dd>${gpuText(b)}</dd>
     <dt>Memory<${Info} k="memory" /></dt><dd>${memText(b)}</dd>
-    ${b.gpus ? html`<dt>GPUs<${Info} k="gpus" /></dt><dd><${Gpus} b=${b} /></dd>` : html`<dt>Pair<${Info} k="pair" /></dt><dd>${b.pair ? `${b.pair}, ${b.pair_status || "?"}` : "—"}</dd>`}
-    ${b.fan_rpm != null && html`<dt>Fan<${Info} k="fan" /></dt><dd>${fmt(b.fan_rpm, 0)} rpm</dd>`}
-    ${b.power_w != null && html`<dt>Power<${Info} k="power" /></dt><dd>${fmt(b.power_w, 2) + "\u00a0W"}</dd>`}
-    ${b.zones != null && html`<dt>Zones<${Info} k="zones" /></dt><dd>${b.zones}${b.zone ? " · " + b.zone : ""}</dd>`}
+    ${gpusOrPair}
+    ${fan}
+    ${power}
+    ${zones}
   </dl>`;
 }
 
@@ -510,42 +580,68 @@ function Tile({ b, open, onOpen }) {
 
 // Fleet map: one node per platform group around the hub (the machine the reader runs on); each node
 // is coloured by its worst member and names the states that need attention.
+const FLOW_COLOUR = { cool:"var(--cool)", warm:"var(--warm)", hot:"var(--hot)", critical:"var(--hot)" };
+const ISSUES = ["critical", "hot", "warm", "stale", "unreachable", "unsupported"];
+const stateWord = s => (s === "unsupported" ? "not supported" : s);
+function countBy(list, key) {
+  const c = {};
+  for (const b of list) c[b[key]] = (c[b[key]] || 0) + 1;
+  return c;
+}
+// at most two items per line, so the summary always fits inside its box
+const twoPerLine = items => Array.from({ length: Math.ceil(items.length / 2) }, (_, k) => items.slice(k * 2, k * 2 + 2).join(" · "));
+function quietLine(pairs, gpus) {
+  const parts = [];
+  if (pairs) parts.push(pairs + (pairs > 1 ? " pairs" : " pair"));
+  if (gpus) parts.push(gpus + " GPUs");
+  parts.push("all cool");
+  return parts.join(" · ");
+}
+function flowGroup(p, ms) {
+  const worst = ms.reduce((w, b) => SEVERITY[b.state] > SEVERITY[w] ? b.state : w, "cool");
+  const c = countBy(ms, "state");
+  const issues = ISSUES.filter(s => c[s]).map(s => (ms.length === 1 ? stateWord(s) : c[s] + " " + stateWord(s)));
+  const pairs = Math.floor(ms.filter(b => b.pair).length / 2);
+  const gpus = ms.reduce((n, b) => n + (b.gpus ? b.gpus.length : 0), 0);
+  const sub = issues.length ? twoPerLine(issues) : [quietLine(pairs, gpus)];
+  return { p, n: ms.length, worst, sub };
+}
+const flowLabel = g => g.n > 1 ? platLabel(g.p) + " × " + g.n : platLabel(g.p);
+const flowFill = s => s === "unsupported" ? "transparent" : FLOW_COLOUR[s] || "var(--ink-faint)";
+const flowDashed = s => s === "unsupported" || s === "unreachable" || s === "stale";
+// one platform node and its link to the hub
+function FlowNode({ g, x, y, gw, gh, hx, hy }) {
+  const cx = x < hx ? x + gw : x, cy = y + gh / 2;
+  const mx = (cx + hx) / 2, ex = x < hx ? hx - 110 : hx + 110;
+  const link = "M" + cx + " " + cy + " C " + mx + " " + cy + ", " + mx + " " + hy + ", " + ex + " " + hy;
+  const unsupported = g.worst === "unsupported";
+  const lines = g.sub.map((ln, k) => html`<text key=${k} x=${x + 36} y=${y + 49 + k * 16} font-size="12" fill="var(--ink-soft)">${ln}</text>`);
+  return html`<g opacity=${unsupported ? .6 : 1}>
+      <path d=${link} fill="none" stroke="var(--line-strong)" stroke-width="1.5" stroke-dasharray=${flowDashed(g.worst) ? "4 5" : "none"}/>
+      <rect x=${x} y=${y} width=${gw} height=${gh} rx="14" fill="var(--surface-2)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray=${unsupported ? "4 4" : "none"}/>
+      <circle cx=${x + 22} cy=${y + 24} r="5" fill=${flowFill(g.worst)} stroke=${unsupported ? "var(--ink-faint)" : "none"} stroke-dasharray="2 2"/>
+      <text x=${x + 36} y=${y + 29} font-weight="700" font-size="15" fill="var(--ink)">${flowLabel(g)}</text>
+      ${lines}</g>`;
+}
 function Flow({ fleet }) {
-  const colour = s => ({ cool:"var(--cool)", warm:"var(--warm)", hot:"var(--hot)", critical:"var(--hot)" })[s] || "var(--ink-faint)";
   const hub = fleet.find(b => b.hub);
   const others = fleet.filter(b => b !== hub);
   const keys = [...new Set(others.map(b => b.pkey))];
-  const groups = keys.map(p => {
-    const ms = others.filter(b => b.pkey === p);
-    const worst = ms.reduce((w, b) => SEVERITY[b.state] > SEVERITY[w] ? b.state : w, "cool");
-    const c = ms.reduce((o, b) => (o[b.state] = (o[b.state] || 0) + 1, o), {});
-    const issues = ["critical", "hot", "warm", "stale", "unreachable", "unsupported"].filter(s => c[s]).map(s => ms.length === 1 ? (s === "unsupported" ? "not supported" : s) : `${c[s]} ${s === "unsupported" ? "not supported" : s}`);
-    const pairs = Math.floor(ms.filter(b => b.pair).length / 2);
-    const gpus = ms.reduce((n, b) => n + (b.gpus ? b.gpus.length : 0), 0);
-    // at most two items per line, so the summary always fits inside its box
-    const sub = issues.length ? Array.from({ length: Math.ceil(issues.length / 2) }, (_, k) => issues.slice(k * 2, k * 2 + 2).join(" · "))
-      : [[pairs ? `${pairs} pair${pairs > 1 ? "s" : ""}` : "", gpus ? `${gpus} GPUs` : "", "all cool"].filter(Boolean).join(" · ")];
-    return { p, n: ms.length, worst, sub };
-  });
+  const groups = keys.map(p => flowGroup(p, others.filter(b => b.pkey === p)));
   // groups alternate left and right of the hub; the map grows taller as groups are added
   const lines = Math.max(1, ...groups.map(g => g.sub.length));
   const rows = Math.max(2, Math.ceil(groups.length / 2)), gw = 220, gh = 48 + lines * 16, rowGap = 22;
   const W = 900, H = rows * gh + (rows - 1) * rowGap + 40, hx = W / 2, hy = H / 2;
-  const spots = groups.map((g, i) => [i % 2 ? W - 30 - gw : 30, 20 + Math.floor(i / 2) * (gh + rowGap)]);
-  const label = g => g.n > 1 ? `${platLabel(g.p)} × ${g.n}` : platLabel(g.p);
-  const colourOf = s => s === "unsupported" ? "transparent" : colour(s);
-  const dashed = s => s === "unsupported" || s === "unreachable" || s === "stale";
   const hubName = hub ? hub.name : "reader";
-  return html`<div class="flow"><svg viewBox=${`0 0 ${W} ${H}`} role="img" aria-label=${"Fleet: " + (groups.map(g => `${g.n} ${platLabel(g.p)}`).join(", ") || "no other machines") + ", read by " + hubName}>
-    ${groups.map((g, i) => { const [x, y] = spots[i]; const cx = x < hx ? x + gw : x, cy = y + gh / 2; return html`<g key=${g.p} opacity=${g.worst === "unsupported" ? .6 : 1}>
-      <path d=${`M${cx} ${cy} C ${(cx + hx) / 2} ${cy}, ${(cx + hx) / 2} ${hy}, ${x < hx ? hx - 110 : hx + 110} ${hy}`} fill="none" stroke="var(--line-strong)" stroke-width="1.5" stroke-dasharray=${dashed(g.worst) ? "4 5" : "none"}/>
-      <rect x=${x} y=${y} width=${gw} height=${gh} rx="14" fill="var(--surface-2)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray=${g.worst === "unsupported" ? "4 4" : "none"}/>
-      <circle cx=${x + 22} cy=${y + 24} r="5" fill=${colourOf(g.worst)} stroke=${g.worst === "unsupported" ? "var(--ink-faint)" : "none"} stroke-dasharray="2 2"/>
-      <text x=${x + 36} y=${y + 29} font-weight="700" font-size="15" fill="var(--ink)">${label(g)}</text>
-      ${g.sub.map((ln, k) => html`<text key=${k} x=${x + 36} y=${y + 49 + k * 16} font-size="12" fill="var(--ink-soft)">${ln}</text>`)}</g>`; })}
+  const label = "Fleet: " + (groups.map(g => g.n + " " + platLabel(g.p)).join(", ") || "no other machines") + ", read by " + hubName;
+  const nodes = groups.map((g, i) => html`<${FlowNode} key=${g.p} g=${g} x=${i % 2 ? W - 30 - gw : 30} y=${20 + Math.floor(i / 2) * (gh + rowGap)}
+    gw=${gw} gh=${gh} hx=${hx} hy=${hy} />`);
+  const hubSub = hub ? platLabel(hub.pkey) + " · " + statusText(hub) : "fleet reader";
+  return html`<div class="flow"><svg viewBox=${"0 0 " + W + " " + H} role="img" aria-label=${label}>
+    ${nodes}
     <rect x=${hx - 110} y=${hy - 34} width="220" height="68" rx="16" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.5"/>
     <text x=${hx} y=${hy - 4} text-anchor="middle" font-weight="900" font-size="16" fill="var(--ink)">${hubName}</text>
-    <text x=${hx} y=${hy + 16} text-anchor="middle" font-size="12" fill="var(--ink-soft)">${hub ? `${platLabel(hub.pkey)} · ${statusText(hub)}` : "fleet reader"}</text>
+    <text x=${hx} y=${hy + 16} text-anchor="middle" font-size="12" fill="var(--ink-soft)">${hubSub}</text>
   </svg></div>`;
 }
 
@@ -578,7 +674,10 @@ function toHist(samples, rk, nowS) {
     h.mem.push(s && fin(s.mem_used_pct) ? s.mem_used_pct : null);
     if (h.gpus) h.gpus.forEach((g, j) => g.push(s && Array.isArray(s.gpus_c) && fin(s.gpus_c[j]) ? s.gpus_c[j] : null));
   };
-  rows.forEach((s, i) => { if (i && s.ms - rows[i - 1].ms > gap) push((s.ms + rows[i - 1].ms) / 2, null); push(s.ms, s); });
+  rows.forEach((s, i) => {
+    if (i && s.ms - rows[i - 1].ms > gap) push((s.ms + rows[i - 1].ms) / 2, null);
+    push(s.ms, s);
+  });
   // still silent since the last sample (unreachable now): close the line with a gap marker
   if (t1 - rows[rows.length - 1].ms > gap) push(t1, null);
   if (!h.gpu.some(v => v != null)) h.gpu = null;
@@ -597,7 +696,11 @@ const hhmmss = ms => hhmm(ms) + ":" + String(new Date(ms).getUTCSeconds()).padSt
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const dayLabel = ms => { const d = new Date(ms); return MONTHS[d.getUTCMonth()] + " " + d.getUTCDate(); };
 // a point in time at the precision the range needs: seconds for 15m, the date for 7d
-const stamp = (rk, ms) => rk === "15m" ? hhmmss(ms) : rk === "7d" ? dayLabel(ms) + " " + hhmm(ms) : hhmm(ms);
+function stamp(rk, ms) {
+  if (rk === "15m") return hhmmss(ms);
+  if (rk === "7d") return dayLabel(ms) + " " + hhmm(ms);
+  return hhmm(ms);
+}
 const axisLabel = (rk, ms) => rk === "7d" ? dayLabel(ms) : hhmm(ms);
 const pathOf = (xs, ys) => { let d = "", pen = false; xs.forEach((x, i) => { const y = ys[i]; if (y == null) { pen = false; return; } d += (pen ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1); pen = true; }); return d; };
 // filled area down to base, one closed shape per unbroken run
@@ -611,6 +714,110 @@ function levelRuns(h) {
   return runs.filter(r => r.l != null).map(r => ({ l: r.l, a: h.t[r.i], z: r.j + 1 < h.t.length && h.level[r.j + 1] != null ? h.t[r.j + 1] : h.t[r.j] }));
 }
 const timeTicks = (t0, t1) => [0, .25, .5, .75, 1].map(f => t0 + f * (t1 - t0));
+// the first time label hangs right of its tick, the last left of it, the rest centre on theirs
+function tickAnchor(k) {
+  if (k === 0) return "start";
+  return k === 4 ? "end" : "middle";
+}
+// index of the last sample with a temperature, or the last sample when none has one
+function lastReading(h) {
+  for (let i = h.t.length - 1; i >= 0; i--) {
+    if (h.temp[i] != null) return i;
+  }
+  return h.t.length - 1;
+}
+// index of the sample closest to time ms, however far away it is
+function closestIndex(h, ms) {
+  let best = 0;
+  for (let i = 1; i < h.t.length; i++) {
+    if (Math.abs(h.t[i] - ms) < Math.abs(h.t[best] - ms)) best = i;
+  }
+  return best;
+}
+// SVG x of a pointer event, in viewBox units
+function svgX(svg, clientX, W) {
+  const rc = svg.getBoundingClientRect();
+  return (clientX - rc.left) * W / rc.width;
+}
+const tipStyle = left => (left > 55 ? { right: (100 - left + 2) + "%" } : { left: (left + 2) + "%" });
+const orDash = (v, f) => (v == null ? "—" : f(v));
+const degText = v => orDash(v, x => fmt(x) + " °C");
+const pctText = v => orDash(v, x => fmt(x, 0) + "%");
+const cfText = v => orDash(v, x => "×" + fmt(x, 2));
+const levelName = l => orDash(l, x => LEVELS[x]);
+// the value of series s at sample i, or null when i is -1 (no sample near enough)
+const sampleAt = (s, i) => (i < 0 ? null : s[i]);
+function yTicks(lo, hi, step) {
+  const yt = [];
+  for (let v = lo; v <= hi; v += step) yt.push(v);
+  return yt;
+}
+// arrow keys move the read-out cursor by d (Shift: ten steps); 0 for any other key
+function arrowStep(e, unit) {
+  const n = (e.shiftKey ? 10 : 1) * unit;
+  if (e.key === "ArrowLeft") return -n;
+  if (e.key === "ArrowRight") return n;
+  return 0;
+}
+// a cursor moved left stops at lo, one moved right stops at hi
+const stepCursor = (c, d, lo, hi) => (d < 0 ? Math.max(lo, c + d) : Math.min(hi, c + d));
+
+// horizontal grid lines with their °C labels
+const yGrid = (yt, y, L, R) => yt.map(v => html`<g key=${"y" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="var(--line)" stroke-width="1"/>
+        <text x=${L - 8} y=${y(v) + 4} text-anchor="end">${v}°</text></g>`);
+const xLabels = (rk, t0, t1, x, axisY) => timeTicks(t0, t1).map((ms, k) => html`<text key=${"x" + k} x=${x(ms)} y=${axisY} text-anchor=${tickAnchor(k)}>${axisLabel(rk, ms)}</text>`);
+const bandKey = lim => html`<span><i class="sw" style=${{ background: "color-mix(in srgb,var(--ink) 9%,transparent)", border: "1px solid var(--ink-faint)" }}></i>${lim.warm_c}–${lim.crit_c}°<${Info} k="band" /></span>`;
+const bandRect = (lim, lo, hi, y, L, R) => html`<rect x=${L} width=${R - L} y=${y(Math.min(hi, lim.crit_c))} height=${Math.max(0, y(Math.max(lo, lim.warm_c)) - y(Math.min(hi, lim.crit_c)))}
+        fill="color-mix(in srgb,var(--ink) 6%,transparent)"/>`;
+// end labels, nudged apart when the two lines finish close together
+function endLabels(b, h, i, y) {
+  const ends = [{ k: "t", v: h.temp[i], c: "var(--s1)", lab: (b.gpus ? "GPU max " : "") + fmt(h.temp[i]) + "°" }];
+  if (h.gpu && h.gpu[i] != null) ends.push({ k: "g", v: h.gpu[i], c: "var(--s2)", lab: "GPU " + fmt(h.gpu[i]) + "°" });
+  ends.forEach(e => { e.y = y(e.v); });
+  if (ends.length === 2 && Math.abs(ends[0].y - ends[1].y) < 14) {
+    const m = (ends[0].y + ends[1].y) / 2, up = ends[0].y < ends[1].y ? 0 : 1;
+    ends[up].y = m - 7;
+    ends[1 - up].y = m + 7;
+  }
+  return ends;
+}
+// the level strip and the admitting area under the temperature plot (governed machines only)
+function admitStrip({ h, x, xs, cfY, L, R, stripY, aTop, aBot }) {
+  const cells = levelRuns(h).map((rn, k) => html`<rect key=${"r" + k} x=${x(rn.a)} y=${stripY} width=${Math.max(1, x(rn.z) - x(rn.a))} height="10" rx="2" fill=${lvColor(rn.l)}/>`);
+  return html`<g>
+        <text x=${L - 8} y=${stripY + 9} text-anchor="end">level</text>
+        ${cells}
+        <line x1=${L} x2=${R} y1=${aBot} y2=${aBot} stroke="var(--line)" stroke-width="1"/>
+        <line x1=${L} x2=${R} y1=${aTop} y2=${aTop} stroke="var(--line)" stroke-width="1"/>
+        <text x=${L - 8} y=${aTop + 4} text-anchor="end">×1</text>
+        <text x=${L - 8} y=${aBot + 4} text-anchor="end">×0</text>
+        <text x=${R + 14} y=${(aTop + aBot) / 2 + 4}>admitting</text>
+        <path d=${areaOf(xs, cfY, aBot)} fill="color-mix(in srgb,var(--ink) 10%,transparent)" stroke="none"/>
+        <path d=${pathOf(xs, cfY)} fill="none" stroke="var(--ink-soft)" stroke-width="1.5"/></g>`;
+}
+// the read-out cursor: a vertical line and a dot on each line that has a value there
+function trendCursor(h, ix, x, y, top, bottom) {
+  const cx = x(h.t[ix]);
+  const gpuDot = h.gpu && h.gpu[ix] != null && html`<circle cx=${cx} cy=${y(h.gpu[ix])} r="4.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"/>`;
+  const tempDot = h.temp[ix] != null && html`<circle cx=${cx} cy=${y(h.temp[ix])} r="4.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>`;
+  return html`<g pointer-events="none">
+        <line x1=${cx} x2=${cx} y1=${top} y2=${bottom} stroke="var(--ink-faint)" stroke-width="1"/>
+        ${gpuDot}
+        ${tempDot}
+      </g>`;
+}
+// tooltip rows for sample ix
+function trendTipRows(b, h, ix, governed) {
+  if (h.temp[ix] == null) return html`<div class="r"><span>no reading</span></div>`;
+  const gpuRow = h.gpu && html`<div class="r"><span><i style=${{ background: "var(--s2)" }}></i>GPU</span><b>${fmt(h.gpu[ix])} °C</b></div>`;
+  const levelRows = governed && html`<div class="r"><span><i class="sw" style=${{ background: lvColor(h.level[ix]) }}></i>level</span><b>${levelName(h.level[ix])}</b></div>
+          <div class="r"><span>admitting</span><b>${cfText(h.cf[ix])}</b></div>`;
+  return html`
+        <div class="r"><span><i style=${{ background: "var(--s1)" }}></i>${b.gpus ? "hottest GPU" : "zone"}</span><b>${fmt(h.temp[ix])} °C</b></div>
+        ${gpuRow}
+        <div class="r"><span>Memory</span><b>${pctText(h.mem[ix])}</b></div>
+        ${levelRows}`;
+}
 
 function TrendChart({ b, h, rk }) {
   const [idx, setIdx] = useState(null);
@@ -621,90 +828,83 @@ function TrendChart({ b, h, rk }) {
   const lo = Math.floor((Math.min(...vals) - 3) / 5) * 5, hi = Math.ceil((Math.max(...vals, governed ? b.limits.crit_c + 1 : -Infinity) + 2) / 5) * 5;
   const step = hi - lo > 40 ? 10 : 5;
   const x = ms => L + (R - L) * clamp((ms - h.t0) / (h.t1 - h.t0), 0, 1), y = v => B - (B - T) * (v - lo) / (hi - lo), ya = v => aBot - (aBot - aTop) * v;
+  const yOf = v => (v == null ? null : y(v));
   const xs = h.t.map(x);
-  const yt = []; for (let v = lo; v <= hi; v += step) yt.push(v);
-  const runs = governed ? levelRuns(h) : [];
-  const cfY = h.cf.map(v => v == null ? null : ya(v));
-  const lastI = (() => { for (let i = N - 1; i >= 0; i--) if (h.temp[i] != null) return i; return N - 1; })();
+  const cfY = h.cf.map(v => (v == null ? null : ya(v)));
+  const lastI = lastReading(h);
   const silentS = Math.round((h.t1 - h.t[lastI]) / 1000);
-  // end labels, nudged apart when the two lines finish close together
-  const ends = [{ k: "t", v: h.temp[lastI], c: "var(--s1)", lab: (b.gpus ? "GPU max " : "") + fmt(h.temp[lastI]) + "°" }];
-  if (h.gpu && h.gpu[lastI] != null) ends.push({ k: "g", v: h.gpu[lastI], c: "var(--s2)", lab: "GPU " + fmt(h.gpu[lastI]) + "°" });
-  ends.forEach(e => { e.y = y(e.v); });
-  if (ends.length === 2 && Math.abs(ends[0].y - ends[1].y) < 14) { const m = (ends[0].y + ends[1].y) / 2, up = ends[0].y < ends[1].y ? 0 : 1; ends[up].y = m - 7; ends[1 - up].y = m + 7; }
+  const ends = endLabels(b, h, lastI, y);
   const pickRef = useRef(null);
-  const pick = clientX => { const svg = pickRef.current; if (!svg) return; const rc = svg.getBoundingClientRect(); const px = (clientX - rc.left) * W / rc.width;
-    const ms = h.t0 + clamp((px - L) / (R - L), 0, 1) * (h.t1 - h.t0); let best = 0; for (let i = 1; i < N; i++) if (Math.abs(h.t[i] - ms) < Math.abs(h.t[best] - ms)) best = i; setIdx(best); };
+  const pick = clientX => {
+    const svg = pickRef.current;
+    if (!svg) return;
+    const px = svgX(svg, clientX, W);
+    setIdx(closestIndex(h, h.t0 + clamp((px - L) / (R - L), 0, 1) * (h.t1 - h.t0)));
+  };
   const onKey = e => {
-    const n = e.shiftKey ? 10 : 1;
-    if (e.key === "ArrowLeft") { e.preventDefault(); setIdx(i => Math.max(0, (i ?? N - 1) - n)); }
-    if (e.key === "ArrowRight") { e.preventDefault(); setIdx(i => Math.min(N - 1, (i ?? N - 1) + n)); }
+    const d = arrowStep(e, 1);
+    if (d) { e.preventDefault(); setIdx(i => stepCursor(i ?? N - 1, d, 0, N - 1)); }
     if (e.key === "Escape" && idx != null) { e.stopPropagation(); setIdx(null); }
   };
   const ix = idx == null ? null : Math.min(idx, N - 1);
-  const tipLeft = ix == null ? 0 : x(h.t[ix]) / W * 100;
-  const xt = timeTicks(h.t0, h.t1);
+  const label = b.name + " temperature over the last " + RANGES[rk].label + ": from " + fmt(h.temp.find(v => v != null)) + " to " + fmt(h.temp[lastI]) + " °C. Use left and right arrows to read values.";
+  const gpuKey = h.gpu && html`<span><i style=${{ background: "var(--s2)" }}></i>GPU</span>`;
+  const band = governed && [bandRect(b.limits, lo, hi, y, L, R), html`
+        <line x1=${L} x2=${R} y1=${y(b.limits.crit_c)} y2=${y(b.limits.crit_c)} stroke="var(--ink-faint)" stroke-width="1"/>`];
+  const gpuLine = h.gpu && html`<path d=${pathOf(xs, h.gpu.map(yOf))} fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const silent = silentS * 1000 > h.gap && html`<text x=${R} y=${T + 10} text-anchor="end">no data for ${ageText(silentS)}</text>`;
+  const endMarks = ends.map(e => html`<g key=${e.k}><circle cx=${x(h.t[lastI])} cy=${y(e.v)} r="4" fill=${e.c} stroke="var(--surface)" stroke-width="2"/>
+        <line x1=${x(h.t[lastI]) + 6} x2=${R + 10} y1=${e.y} y2=${e.y} stroke="var(--line-strong)" stroke-width="1"/>
+        <text class="end" x=${R + 14} y=${e.y + 4}>${e.lab}</text></g>`);
+  const strip = governed && admitStrip({ h, x, xs, cfY, L, R, stripY, aTop, aBot });
+  const cursor = ix != null && trendCursor(h, ix, x, y, T, governed ? aBot : B);
+  const tip = ix != null && html`<div class="tip" style=${tipStyle(x(h.t[ix]) / W * 100)}>
+      <div class="tt">${stamp(rk, h.t[ix])} UTC</div>
+      ${trendTipRows(b, h, ix, governed)}
+    </div>`;
   return html`<div class="chartcard">
     <div class="legend2">
       <span><i style=${{ background: "var(--s1)" }}></i>${b.gpus ? "hottest GPU" : "hottest zone"}</span>
-      ${h.gpu && html`<span><i style=${{ background: "var(--s2)" }}></i>GPU</span>`}
-      ${governed && html`<span><i class="sw" style=${{ background: "color-mix(in srgb,var(--ink) 9%,transparent)", border: "1px solid var(--ink-faint)" }}></i>${b.limits.warm_c}–${b.limits.crit_c}°<${Info} k="band" /></span>`}
+      ${gpuKey}
+      ${governed && bandKey(b.limits)}
     </div>
-    <svg class="trend" ref=${pickRef} viewBox=${`0 0 ${W} ${H}`} tabIndex="0" role="img"
-      aria-label=${`${b.name} temperature over the last ${RANGES[rk].label}: from ${fmt(h.temp.find(v => v != null))} to ${fmt(h.temp[lastI])} °C. Use left and right arrows to read values.`}
+    <svg class="trend" ref=${pickRef} viewBox=${"0 0 " + W + " " + H} tabIndex="0" role="img"
+      aria-label=${label}
       onPointerMove=${e => pick(e.clientX)} onPointerDown=${e => pick(e.clientX)} onPointerLeave=${() => setIdx(null)}
       onFocus=${() => setIdx(i => i ?? lastI)} onBlur=${() => setIdx(null)} onKeyDown=${onKey}>
-      ${yt.map(v => html`<g key=${"y" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="var(--line)" stroke-width="1"/>
-        <text x=${L - 8} y=${y(v) + 4} text-anchor="end">${v}°</text></g>`)}
-      ${governed && html`<rect x=${L} width=${R - L} y=${y(Math.min(hi, b.limits.crit_c))} height=${Math.max(0, y(Math.max(lo, b.limits.warm_c)) - y(Math.min(hi, b.limits.crit_c)))}
-        fill="color-mix(in srgb,var(--ink) 6%,transparent)"/>
-        <line x1=${L} x2=${R} y1=${y(b.limits.crit_c)} y2=${y(b.limits.crit_c)} stroke="var(--ink-faint)" stroke-width="1"/>`}
-      ${h.gpu && html`<path d=${pathOf(xs, h.gpu.map(v => v == null ? null : y(v)))} fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`}
-      <path d=${pathOf(xs, h.temp.map(v => v == null ? null : y(v)))} fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      ${silentS * 1000 > h.gap && html`<text x=${R} y=${T + 10} text-anchor="end">no data for ${ageText(silentS)}</text>`}
-      ${ends.map(e => html`<g key=${e.k}><circle cx=${x(h.t[lastI])} cy=${y(e.v)} r="4" fill=${e.c} stroke="var(--surface)" stroke-width="2"/>
-        <line x1=${x(h.t[lastI]) + 6} x2=${R + 10} y1=${e.y} y2=${e.y} stroke="var(--line-strong)" stroke-width="1"/>
-        <text class="end" x=${R + 14} y=${e.y + 4}>${e.lab}</text></g>`)}
-      ${governed && html`<g>
-        <text x=${L - 8} y=${stripY + 9} text-anchor="end">level</text>
-        ${runs.map((rn, k) => html`<rect key=${"r" + k} x=${x(rn.a)} y=${stripY} width=${Math.max(1, x(rn.z) - x(rn.a))} height="10" rx="2" fill=${lvColor(rn.l)}/>`)}
-        <line x1=${L} x2=${R} y1=${aBot} y2=${aBot} stroke="var(--line)" stroke-width="1"/>
-        <line x1=${L} x2=${R} y1=${aTop} y2=${aTop} stroke="var(--line)" stroke-width="1"/>
-        <text x=${L - 8} y=${aTop + 4} text-anchor="end">×1</text>
-        <text x=${L - 8} y=${aBot + 4} text-anchor="end">×0</text>
-        <text x=${R + 14} y=${(aTop + aBot) / 2 + 4}>admitting</text>
-        <path d=${areaOf(xs, cfY, aBot)} fill="color-mix(in srgb,var(--ink) 10%,transparent)" stroke="none"/>
-        <path d=${pathOf(xs, cfY)} fill="none" stroke="var(--ink-soft)" stroke-width="1.5"/></g>`}
-      ${xt.map((ms, k) => html`<text key=${"x" + k} x=${x(ms)} y=${axisY} text-anchor=${k === 0 ? "start" : k === 4 ? "end" : "middle"}>${axisLabel(rk, ms)}</text>`)}
-      ${ix != null && html`<g pointer-events="none">
-        <line x1=${x(h.t[ix])} x2=${x(h.t[ix])} y1=${T} y2=${governed ? aBot : B} stroke="var(--ink-faint)" stroke-width="1"/>
-        ${h.gpu && h.gpu[ix] != null && html`<circle cx=${x(h.t[ix])} cy=${y(h.gpu[ix])} r="4.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"/>`}
-        ${h.temp[ix] != null && html`<circle cx=${x(h.t[ix])} cy=${y(h.temp[ix])} r="4.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>`}
-      </g>`}
+      ${yGrid(yTicks(lo, hi, step), y, L, R)}
+      ${band}
+      ${gpuLine}
+      <path d=${pathOf(xs, h.temp.map(yOf))} fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${silent}
+      ${endMarks}
+      ${strip}
+      ${xLabels(rk, h.t0, h.t1, x, axisY)}
+      ${cursor}
       <rect x=${L} y="0" width=${R - L} height=${H} fill="transparent"/>
     </svg>
-    ${ix != null && html`<div class="tip" style=${tipLeft > 55 ? { right: (100 - tipLeft + 2) + "%" } : { left: (tipLeft + 2) + "%" }}>
-      <div class="tt">${stamp(rk, h.t[ix])} UTC</div>
-      ${h.temp[ix] == null ? html`<div class="r"><span>no reading</span></div>` : html`
-        <div class="r"><span><i style=${{ background: "var(--s1)" }}></i>${b.gpus ? "hottest GPU" : "zone"}</span><b>${fmt(h.temp[ix])} °C</b></div>
-        ${h.gpu && html`<div class="r"><span><i style=${{ background: "var(--s2)" }}></i>GPU</span><b>${fmt(h.gpu[ix])} °C</b></div>`}
-        <div class="r"><span>Memory</span><b>${h.mem[ix] == null ? "—" : fmt(h.mem[ix], 0) + "%"}</b></div>
-        ${governed && html`<div class="r"><span><i class="sw" style=${{ background: lvColor(h.level[ix]) }}></i>level</span><b>${h.level[ix] == null ? "—" : LEVELS[h.level[ix]]}</b></div>
-          <div class="r"><span>admitting</span><b>${h.cf[ix] == null ? "—" : "×" + fmt(h.cf[ix], 2)}</b></div>`}`}
-    </div>`}
+    ${tip}
   </div>`;
 }
 
+// latest non-null value of a series, or null
+function lastValue(s) {
+  for (let i = s.length - 1; i >= 0; i--) {
+    if (s[i] != null) return s[i];
+  }
+  return null;
+}
 function Minis({ b, h }) {
-  const all = h.gpus.flat().filter(v => v != null); if (!all.length || !b.limits) return null;
+  const all = h.gpus.flat().filter(v => v != null);
+  if (!all.length || !b.limits) return null;
   const lo = Math.min(...all) - 1, hi = Math.max(...all, b.limits.crit_c) + 1;
   const x = ms => 2 + 116 * clamp((ms - h.t0) / (h.t1 - h.t0), 0, 1), y = v => 32 - 28 * (v - lo) / (hi - lo);
-  const now = k => { const s = h.gpus[k]; for (let i = s.length - 1; i >= 0; i--) if (s[i] != null) return s[i]; return null; };
+  const now = k => lastValue(h.gpus[k]);
   return html`<div class="chartcard"><h3>Each GPU</h3><div class="minis">
     ${h.gpus.map((s, k) => html`<div class="mini" key=${k}>GPU ${k} · <b>${fmt(now(k), 0)}°</b>
-      <svg viewBox="0 0 120 36" preserveAspectRatio="none" role="img" aria-label=${`GPU ${k}, now ${fmt(now(k), 0)} °C`}>
+      <svg viewBox="0 0 120 36" preserveAspectRatio="none" role="img" aria-label=${"GPU " + k + ", now " + fmt(now(k), 0) + " °C"}>
         <line x1="2" x2="118" y1=${y(b.limits.warm_c)} y2=${y(b.limits.warm_c)} stroke="var(--line-strong)" stroke-width="1" vector-effect="non-scaling-stroke"/>
-        <path d=${pathOf(h.t.map(x), s.map(v => v == null ? null : y(v)))} fill="none" stroke="var(--s2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+        <path d=${pathOf(h.t.map(x), s.map(v => (v == null ? null : y(v))))} fill="none" stroke="var(--s2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
       </svg></div>`)}
   </div></div>`;
 }
@@ -726,30 +926,57 @@ function summarize(b, h) {
   return { pk, peak: h.temp[pk], mean, swing: Math.max(...v) - Math.min(...v), share, held };
 }
 const tableTimes = h => Array.from({ length: 12 }, (_, k) => h.t1 - k * (h.t1 - h.t0) / 11);
+const shareTitle = (l, x) => l + " " + Math.round(x * 100) + "%";
+const shareLabel = share => LEVELS.map((l, i) => shareTitle(l, share[i])).join(", ");
+// one bar split by the share of time spent at each level
+function shareBar(share, label) {
+  const parts = share.map((x, i) => x > 0 && html`<span key=${i} style=${{ flex: x, background: lvColor(i) }} title=${shareTitle(LEVELS[i], x)}></span>`);
+  return html`<div class="seg2" role="img" aria-label=${label}>
+        ${parts}
+      </div>`;
+}
 
+function singleStats(s, h, rk, governed) {
+  const peak = [fmt(s.peak) + "°", "peak at " + stamp(rk, h.t[s.pk])], mean = [fmt(s.mean) + "°", "average"];
+  if (governed) return [peak, mean, [Math.round((1 - s.share[0]) * 100) + "%", "time above warm"], [Math.round(s.held * 100) + "%", "time admitting less"]];
+  return [peak, mean, [fmt(s.swing) + "°", "swing"], ["—", "no limit band"]];
+}
+function singleRow(h, rk, governed, ms, i) {
+  const gpuCell = h.gpu && html`<td>${degText(sampleAt(h.gpu, i))}</td>`;
+  const levelCells = governed && html`<td>${levelName(sampleAt(h.level, i))}</td><td>${cfText(sampleAt(h.cf, i))}</td>`;
+  return html`<tr key=${ms}><td>${stamp(rk, ms)}</td><td>${degText(sampleAt(h.temp, i))}</td>
+          ${gpuCell}
+          <td>${pctText(sampleAt(h.mem, i))}</td>
+          ${levelCells}</tr>`;
+}
+function singleTable(b, h, rk, governed) {
+  const rows = tableTimes(h).map(ms => singleRow(h, rk, governed, ms, nearest(h, ms)));
+  const gpuHead = h.gpu && html`<th>GPU</th>`;
+  const levelHead = governed && html`<th>Level</th><th>Admitting</th>`;
+  return html`<div class="chartcard tablewrap"><table class="dt">
+        <thead><tr><th>Time (UTC)</th><th>${b.gpus ? "Hottest GPU" : "Zone"}</th>${gpuHead}<th>Memory</th>${levelHead}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+}
+function levelShare(share, rk) {
+  const labels = share.map((x, i) => html`<span key=${i}><i style=${{ background: lvColor(i) }}></i><b>${Math.round(x * 100)}%</b>${LEVELS[i]}</span>`);
+  return html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>
+      ${shareBar(share, shareLabel(share))}
+      <div class="sharelab">${labels}</div>
+    </div>`;
+}
 function Single({ b, h, rk, table, buffer }) {
   const s = summarize(b, h), governed = !!b.limits && !!s.share;
-  const stats = governed
-    ? [[fmt(s.peak) + "°", "peak at " + stamp(rk, h.t[s.pk])], [fmt(s.mean) + "°", "average"], [Math.round((1 - s.share[0]) * 100) + "%", "time above warm"], [Math.round(s.held * 100) + "%", "time admitting less"]]
-    : [[fmt(s.peak) + "°", "peak at " + stamp(rk, h.t[s.pk])], [fmt(s.mean) + "°", "average"], [fmt(s.swing) + "°", "swing"], ["—", "no limit band"]];
-  const rows = tableTimes(h).map(ms => ({ ms, i: nearest(h, ms) }));
+  const stats = singleStats(s, h, rk, governed).map(([v, l], i) => html`<div class="stat" key=${i}><b>${v}</b><span>${l}</span></div>`);
+  const body = table ? singleTable(b, h, rk, governed) : html`<${TrendChart} b=${b} h=${h} rk=${rk} key=${b.name + rk} />`;
+  const note = buffer && html`<p class="srcnote">${BUFFER_NOTE}</p>`;
+  const minis = h.gpus && html`<${Minis} b=${b} h=${h} />`;
   return html`<${React.Fragment}>
-    <div class="stats">${stats.map(([v, l], i) => html`<div class="stat" key=${i}><b>${v}</b><span>${l}</span></div>`)}</div>
-    ${table ? html`<div class="chartcard tablewrap"><table class="dt">
-        <thead><tr><th>Time (UTC)</th><th>${b.gpus ? "Hottest GPU" : "Zone"}</th>${h.gpu && html`<th>GPU</th>`}<th>Memory</th>${governed && html`<th>Level</th><th>Admitting</th>`}</tr></thead>
-        <tbody>${rows.map(({ ms, i }) => html`<tr key=${ms}><td>${stamp(rk, ms)}</td><td>${i < 0 || h.temp[i] == null ? "—" : fmt(h.temp[i]) + " °C"}</td>
-          ${h.gpu && html`<td>${i < 0 || h.gpu[i] == null ? "—" : fmt(h.gpu[i]) + " °C"}</td>`}
-          <td>${i < 0 || h.mem[i] == null ? "—" : fmt(h.mem[i], 0) + "%"}</td>
-          ${governed && html`<td>${i < 0 || h.level[i] == null ? "—" : LEVELS[h.level[i]]}</td><td>${i < 0 || h.cf[i] == null ? "—" : "×" + fmt(h.cf[i], 2)}</td>`}</tr>`)}</tbody>
-      </table></div>` : html`<${TrendChart} b=${b} h=${h} rk=${rk} key=${b.name + rk} />`}
-    ${buffer && html`<p class="srcnote">${BUFFER_NOTE}</p>`}
-    ${s.share && html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>
-      <div class="seg2" role="img" aria-label=${LEVELS.map((l, i) => `${l} ${Math.round(s.share[i] * 100)}%`).join(", ")}>
-        ${s.share.map((x, i) => x > 0 && html`<span key=${i} style=${{ flex: x, background: lvColor(i) }} title=${`${LEVELS[i]} ${Math.round(x * 100)}%`}></span>`)}
-      </div>
-      <div class="sharelab">${s.share.map((x, i) => html`<span key=${i}><i style=${{ background: lvColor(i) }}></i><b>${Math.round(x * 100)}%</b>${LEVELS[i]}</span>`)}</div>
-    </div>`}
-    ${h.gpus && html`<${Minis} b=${b} h=${h} />`}
+    <div class="stats">${stats}</div>
+    ${body}
+    ${note}
+    ${s.share && levelShare(s.share, rk)}
+    ${minis}
   </${React.Fragment}>`;
 }
 
@@ -765,67 +992,106 @@ function CompareChart({ list, rk }) {
   const lo = Math.floor((Math.min(...vals) - 3) / 5) * 5, hi = Math.ceil((Math.max(...vals, lim ? lim.crit_c + 1 : -Infinity) + 2) / 5) * 5;
   const step = hi - lo > 40 ? 10 : 5;
   const x = ms => L + (R - L) * clamp((ms - t0) / (t1 - t0), 0, 1), y = v => B - (B - T) * (v - lo) / (hi - lo);
-  const yt = []; for (let v = lo; v <= hi; v += step) yt.push(v);
-  const lastOf = h => { for (let i = h.t.length - 1; i >= 0; i--) if (h.temp[i] != null) return i; return h.t.length - 1; };
   // end labels: sorted by height, pushed apart to at least 15px, kept inside the plot
-  const ends = list.map(o => { const li = lastOf(o.h); return { ...o, li, vy: y(o.h.temp[li]), ly: y(o.h.temp[li]) }; }).sort((a, b) => a.ly - b.ly);
+  const ends = list.map(o => { const li = lastReading(o.h); return { ...o, li, vy: y(o.h.temp[li]), ly: y(o.h.temp[li]) }; }).sort((a, b) => a.ly - b.ly);
   for (let i = 1; i < ends.length; i++) ends[i].ly = Math.max(ends[i].ly, ends[i - 1].ly + 15);
   const over = ends.length ? ends[ends.length - 1].ly - (B - 2) : 0;
   if (over > 0) ends.forEach(e => { e.ly -= over; });
   for (let i = ends.length - 2; i >= 0; i--) ends[i].ly = Math.min(ends[i].ly, ends[i + 1].ly - 15);
-  const pick = cx => { const svg = ref.current; if (!svg) return; const rc = svg.getBoundingClientRect(); const px = (cx - rc.left) * W / rc.width; setCt(t0 + clamp((px - L) / (R - L), 0, 1) * (t1 - t0)); };
-  const onKey = e => { const n = (e.shiftKey ? 10 : 1) * stepMs;
-    if (e.key === "ArrowLeft") { e.preventDefault(); setCt(c => Math.max(t0, (c ?? t1) - n)); }
-    if (e.key === "ArrowRight") { e.preventDefault(); setCt(c => Math.min(t1, (c ?? t1) + n)); }
-    if (e.key === "Escape" && ct != null) { e.stopPropagation(); setCt(null); } };
-  const at = o => { if (ct == null) return -1; return nearest(o.h, ct); };
-  const val = (o, k) => { const i = at(o); return i < 0 ? null : o.h[k][i]; };
+  const pick = cx => {
+    const svg = ref.current;
+    if (!svg) return;
+    const px = svgX(svg, cx, W);
+    setCt(t0 + clamp((px - L) / (R - L), 0, 1) * (t1 - t0));
+  };
+  const onKey = e => {
+    const d = arrowStep(e, stepMs);
+    if (d) { e.preventDefault(); setCt(c => stepCursor(c ?? t1, d, t0, t1)); }
+    if (e.key === "Escape" && ct != null) { e.stopPropagation(); setCt(null); }
+  };
+  const at = o => (ct == null ? -1 : nearest(o.h, ct));
+  const val = (o, k) => sampleAt(o.h[k], at(o));
   const tipLeft = ct == null ? 0 : x(ct) / W * 100;
   return html`<div class="chartcard">
     <div class="legend2">
       ${list.map(o => html`<span key=${o.b.name}><i style=${{ background: o.c }}></i>${o.b.name}</span>`)}
-      ${lim && html`<span><i class="sw" style=${{ background: "color-mix(in srgb,var(--ink) 9%,transparent)", border: "1px solid var(--ink-faint)" }}></i>${lim.warm_c}–${lim.crit_c}°<${Info} k="band" /></span>`}
+      ${lim && bandKey(lim)}
     </div>
-    <svg class="trend" ref=${ref} viewBox=${`0 0 ${W} ${H}`} tabIndex="0" role="img"
-      aria-label=${`Hottest temperature of ${list.map(o => o.b.name).join(", ")} over the last ${RANGES[rk].label}. Use left and right arrows to read values.`}
+    <svg class="trend" ref=${ref} viewBox=${"0 0 " + W + " " + H} tabIndex="0" role="img"
+      aria-label=${"Hottest temperature of " + list.map(o => o.b.name).join(", ") + " over the last " + RANGES[rk].label + ". Use left and right arrows to read values."}
       onPointerMove=${e => pick(e.clientX)} onPointerDown=${e => pick(e.clientX)} onPointerLeave=${() => setCt(null)}
       onFocus=${() => setCt(c => c ?? t1)} onBlur=${() => setCt(null)} onKeyDown=${onKey}>
-      ${yt.map(v => html`<g key=${"y" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="var(--line)" stroke-width="1"/>
-        <text x=${L - 8} y=${y(v) + 4} text-anchor="end">${v}°</text></g>`)}
-      ${lim && html`<rect x=${L} width=${R - L} y=${y(Math.min(hi, lim.crit_c))} height=${Math.max(0, y(Math.max(lo, lim.warm_c)) - y(Math.min(hi, lim.crit_c)))} fill="color-mix(in srgb,var(--ink) 6%,transparent)"/>`}
-      ${list.map(o => html`<path key=${o.b.name} d=${pathOf(o.h.t.map(x), o.h.temp.map(v => v == null ? null : y(v)))} fill="none" stroke=${o.c} stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`)}
+      ${yGrid(yTicks(lo, hi, step), y, L, R)}
+      ${lim && bandRect(lim, lo, hi, y, L, R)}
+      ${list.map(o => html`<path key=${o.b.name} d=${pathOf(o.h.t.map(x), o.h.temp.map(v => (v == null ? null : y(v))))} fill="none" stroke=${o.c} stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`)}
       ${ends.map(e => html`<g key=${"e" + e.b.name}>
         <circle cx=${x(e.h.t[e.li])} cy=${e.vy} r="4" fill=${e.c} stroke="var(--surface)" stroke-width="2"/>
-        <path d=${`M${x(e.h.t[e.li]) + 6},${e.vy} L${R + 8},${e.vy} L${R + 14},${e.ly}`} fill="none" stroke="var(--line-strong)" stroke-width="1"/>
+        <path d=${"M" + (x(e.h.t[e.li]) + 6) + "," + e.vy + " L" + (R + 8) + "," + e.vy + " L" + (R + 14) + "," + e.ly} fill="none" stroke="var(--line-strong)" stroke-width="1"/>
         <text class="end" x=${R + 18} y=${e.ly + 4}>${e.b.name} ${fmt(e.h.temp[e.li])}°</text></g>`)}
-      ${timeTicks(t0, t1).map((ms, k) => html`<text key=${"x" + k} x=${x(ms)} y=${B + 18} text-anchor=${k === 0 ? "start" : k === 4 ? "end" : "middle"}>${axisLabel(rk, ms)}</text>`)}
-      ${list.map((o, r) => { const yy = stripTop + r * rowH;
-        return html`<g key=${"s" + o.b.name}>
-          <line x1=${R + 8} x2=${R + 14} y1=${yy + 5} y2=${yy + 5} stroke=${o.c} stroke-width="2"/>
-          <text x=${R + 18} y=${yy + 9}>${o.b.name}</text>
-          ${o.b.limits ? levelRuns(o.h).map((rn, k) => html`<rect key=${k} x=${x(rn.a)} y=${yy} width=${Math.max(1, x(rn.z) - x(rn.a))} height="10" rx="2" fill=${lvColor(rn.l)}/>`)
-            : html`<rect x=${L} y=${yy} width=${R - L} height="10" rx="2" fill="none" stroke="var(--line-strong)" stroke-dasharray="3 3"/>`}
-        </g>`; })}
+      ${xLabels(rk, t0, t1, x, B + 18)}
+      ${list.map((o, r) => compareStrip(o, stripTop + r * rowH, x, L, R))}
       <text x=${L - 8} y=${stripTop + 9} text-anchor="end">level</text>
       ${ct != null && html`<g pointer-events="none">
         <line x1=${x(ct)} x2=${x(ct)} y1=${T} y2=${stripTop + list.length * rowH} stroke="var(--ink-faint)" stroke-width="1"/>
         ${list.map(o => { const i = at(o); return i >= 0 && o.h.temp[i] != null && html`<circle key=${"h" + o.b.name} cx=${x(o.h.t[i])} cy=${y(o.h.temp[i])} r="4.5" fill=${o.c} stroke="var(--surface)" stroke-width="2"/>`; })}
       </g>`}
     </svg>
-    ${ct != null && html`<div class="tip" style=${tipLeft > 55 ? { right: (100 - tipLeft + 2) + "%" } : { left: (tipLeft + 2) + "%" }}>
+    ${ct != null && html`<div class="tip" style=${tipStyle(tipLeft)}>
       <div class="tt">${stamp(rk, ct)} UTC</div>
-      ${[...list].sort((a, b) => (val(b, "temp") ?? -1) - (val(a, "temp") ?? -1)).map(o => { const v = val(o, "temp"), l = val(o, "level"); return html`<div class="r" key=${o.b.name}>
-        <span><i style=${{ background: o.c }}></i>${o.b.name}</span>
-        <b>${v == null ? "—" : fmt(v) + " °C"}${l != null ? " · " + LEVELS[l] : ""}</b></div>`; })}
+      ${[...list].sort((a, b) => (val(b, "temp") ?? -1) - (val(a, "temp") ?? -1)).map(o => compareTipRow(o, val(o, "temp"), val(o, "level")))}
     </div>`}
   </div>`;
 }
+// one machine's level strip in the comparison (a dashed outline when it has no limits)
+function compareStrip(o, yy, x, L, R) {
+  const cells = o.b.limits
+    ? levelRuns(o.h).map((rn, k) => html`<rect key=${k} x=${x(rn.a)} y=${yy} width=${Math.max(1, x(rn.z) - x(rn.a))} height="10" rx="2" fill=${lvColor(rn.l)}/>`)
+    : html`<rect x=${L} y=${yy} width=${R - L} height="10" rx="2" fill="none" stroke="var(--line-strong)" stroke-dasharray="3 3"/>`;
+  return html`<g key=${"s" + o.b.name}>
+          <line x1=${R + 8} x2=${R + 14} y1=${yy + 5} y2=${yy + 5} stroke=${o.c} stroke-width="2"/>
+          <text x=${R + 18} y=${yy + 9}>${o.b.name}</text>
+          ${cells}
+        </g>`;
+}
+function compareTipRow(o, v, l) {
+  return html`<div class="r" key=${o.b.name}>
+        <span><i style=${{ background: o.c }}></i>${o.b.name}</span>
+        <b>${degText(v)}${l != null ? " · " + LEVELS[l] : ""}</b></div>`;
+}
 
+function compareTable(list, times, rk) {
+  const head = list.map(o => html`<th key=${o.b.name}>${o.b.name}</th>`);
+  const rows = times.map(ms => {
+    const cells = list.map(o => html`<td key=${o.b.name}>${degText(sampleAt(o.h.temp, nearest(o.h, ms)))}</td>`);
+    return html`<tr key=${ms}><td>${stamp(rk, ms)}</td>
+          ${cells}</tr>`;
+  });
+  return html`<div class="chartcard tablewrap"><table class="dt">
+        <thead><tr><th>Time (UTC)</th>${head}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+}
+function compareLevels(list, rk) {
+  const rows = list.map(o => ({ o, s: summarize(o.b, o.h) })).filter(({ o, s }) => o.b.limits && s.share);
+  if (!rows.length) return null;
+  const lines = rows.map(({ o, s }) => html`<div class="lvrow" key=${o.b.name}>
+        <span class="nm"><i class="key" style=${{ background: o.c }}></i>${o.b.name}</span>
+        ${shareBar(s.share, o.b.name + ": " + shareLabel(s.share))}
+        <span class="pct">${Math.round((1 - s.share[0]) * 100)}% above warm</span></div>`);
+  const keys = LEVELS.map((l, i) => html`<span key=${l}><i style=${{ background: lvColor(i) }}></i>${l}</span>`);
+  return html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>
+      <div class="lvrows">${lines}</div>
+      <div class="sharelab">${keys}</div>
+    </div>`;
+}
 function Compare({ items, slots, rk, table, onRemove, histOf, nowS }) {
   const list = items.map(b => ({ b, h: toHist(histOf(b.name), rk, nowS), c: slotColor(slots[b.name] ?? 0) })).filter(o => o.h);
-  if (!list.length) return html`<div class="nodata">${items.some(b => histOf(b.name) === undefined) ? "Loading history…" : `None of these machines has readings in the last ${RANGES[rk].label}.`}</div>`;
+  if (!list.length) {
+    const msg = items.some(b => histOf(b.name) === undefined) ? "Loading history…" : "None of these machines has readings in the last " + RANGES[rk].label + ".";
+    return html`<div class="nodata">${msg}</div>`;
+  }
   const missing = items.filter(b => !list.some(o => o.b === b));
-  const times = tableTimes(list[0].h);
+  const body = table ? compareTable(list, tableTimes(list[0].h), rk) : html`<${CompareChart} list=${list} rk=${rk} key=${rk + list.map(o => o.b.name).join()} />`;
   return html`<${React.Fragment}>
     <div class="chartcard tablewrap"><table class="dt cmp">
       <thead><tr><th>Machine</th><th>Now</th><th>Peak</th><th>Average</th><th>Above warm</th><th></th></tr></thead>
@@ -839,22 +1105,18 @@ function Compare({ items, slots, rk, table, onRemove, histOf, nowS }) {
         <td colspan="4">no readings in the last ${RANGES[rk].label}</td>
         <td><button class="rm" onClick=${() => onRemove(b.name)} aria-label=${"Remove " + b.name}>×</button></td></tr>`)}</tbody>
     </table></div>
-    ${table ? html`<div class="chartcard tablewrap"><table class="dt">
-        <thead><tr><th>Time (UTC)</th>${list.map(o => html`<th key=${o.b.name}>${o.b.name}</th>`)}</tr></thead>
-        <tbody>${times.map(ms => html`<tr key=${ms}><td>${stamp(rk, ms)}</td>
-          ${list.map(o => { const i = nearest(o.h, ms); return html`<td key=${o.b.name}>${i < 0 || o.h.temp[i] == null ? "—" : fmt(o.h.temp[i]) + " °C"}</td>`; })}</tr>`)}</tbody>
-      </table></div>` : html`<${CompareChart} list=${list} rk=${rk} key=${rk + list.map(o => o.b.name).join()} />`}
-    ${list.some(o => o.b.limits && summarize(o.b, o.h).share) && html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>
-      <div class="lvrows">${list.map(o => ({ o, s: summarize(o.b, o.h) })).filter(({ o, s }) => o.b.limits && s.share).map(({ o, s }) => html`<div class="lvrow" key=${o.b.name}>
-        <span class="nm"><i class="key" style=${{ background: o.c }}></i>${o.b.name}</span>
-        <div class="seg2" role="img" aria-label=${o.b.name + ": " + LEVELS.map((l, i) => `${l} ${Math.round(s.share[i] * 100)}%`).join(", ")}>
-          ${s.share.map((x, i) => x > 0 && html`<span key=${i} style=${{ flex: x, background: lvColor(i) }} title=${`${LEVELS[i]} ${Math.round(x * 100)}%`}></span>`)}</div>
-        <span class="pct">${Math.round((1 - s.share[0]) * 100)}% above warm</span></div>`)}</div>
-      <div class="sharelab">${LEVELS.map((l, i) => html`<span key=${l}><i style=${{ background: lvColor(i) }}></i>${l}</span>`)}</div>
-    </div>`}
+    ${body}
+    ${compareLevels(list, rk)}
   </${React.Fragment}>`;
 }
 
+// most urgent first, then hottest; machines without a reading last
+const byHeat = (a, b) => (SEVERITY[b.state] - SEVERITY[a.state]) || ((b.temp ?? -1) - (a.temp ?? -1));
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric:true });
+function optMeta(b, added) {
+  if (b.temp == null) return "no readings";
+  return added ? "added" : fmt(b.temp) + "° · " + platLabel(b.pkey);
+}
 function AddPicker({ fleet, items, onAdd }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -865,11 +1127,10 @@ function AddPicker({ fleet, items, onAdd }) {
     addEventListener("pointerdown", off); return () => removeEventListener("pointerdown", off);
   }, [open]);
   const full = items.length >= MAXC, names = new Set(items.map(b => b.name));
-  const opts = fleet.filter(b => !q || b.name.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => (SEVERITY[b.state] - SEVERITY[a.state]) || ((b.temp ?? -1) - (a.temp ?? -1)));
+  const opts = fleet.filter(b => !q || b.name.toLowerCase().includes(q.toLowerCase())).sort(byHeat);
   return html`<div class="picker" ref=${wrap}>
     <button class="addbtn" aria-expanded=${open} aria-haspopup="listbox" disabled=${full} onClick=${() => setOpen(o => !o)}>
-      ${full ? `${MAXC} machines max` : "+ Add machine"}</button>
+      ${full ? MAXC + " machines max" : "+ Add machine"}</button>
     ${open && html`<div class="pop" onKeyDown=${e => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }}>
       <input id="add-machine-search" class="search" type="search" placeholder="Find a machine" value=${q} onInput=${e => setQ(e.target.value)} autoFocus aria-label="Find a machine to add" />
       <div class="opts" role="listbox" aria-label="Machines">
@@ -877,61 +1138,123 @@ function AddPicker({ fleet, items, onAdd }) {
           return html`<button key=${b.name} role="option" aria-selected=${names.has(b.name)} class=${"opt2 " + b.state} disabled=${off}
             onClick=${() => { onAdd(b.name); setQ(""); if (items.length + 1 >= MAXC) setOpen(false); }}>
             <span class="status"></span><span class="nm">${b.name}</span>
-            <span class="meta">${b.temp == null ? "no readings" : names.has(b.name) ? "added" : fmt(b.temp) + "° · " + platLabel(b.pkey)}</span></button>`; })}
+            <span class="meta">${optMeta(b, names.has(b.name))}</span></button>`; })}
       </div></div>`}
   </div>`;
+}
+
+// the drawer takes focus on open, closes on Escape and hands focus back on close
+function useDrawerFocus(closeRef, onClose) {
+  useEffect(() => {
+    const prev = document.activeElement;
+    if (closeRef.current) closeRef.current.focus();
+    const on = e => { if (e.key === "Escape") onClose(); };
+    addEventListener("keydown", on);
+    return () => {
+      removeEventListener("keydown", on);
+      if (prev && prev.focus) prev.focus();
+    };
+  }, []);
+}
+function detailTitle(items, slots, onRemove) {
+  if (items.length === 1) {
+    const b = items[0];
+    const tag = b.hub && html`<span class="tag">reader</span>`;
+    return html`<h2><${Mark} b=${b} />${b.name}${tag}</h2>
+            <div class="sub">${subLine(b)} · ${viaLine(b)}</div>`;
+  }
+  const chips = items.map(m => html`<span class="mchip" key=${m.name}><i class="key" style=${{ background: slotColor(slots[m.name] ?? 0) }}></i>${m.name}
+              <button onClick=${() => onRemove(m.name)} aria-label=${"Remove " + m.name}>×</button></span>`);
+  return html`<h2>Comparing ${items.length} machines</h2>
+            <div class="chips">${chips}</div>`;
+}
+function singleBody(b, h, raw, rk, table, histOf) {
+  if (b.state === "unsupported") return html`<div class="nodata">No readings. ${HINT.sensors}</div>`;
+  if (h) return html`<${Single} b=${b} h=${h} rk=${rk} table=${table} buffer=${isBuffer(histOf.src(b.name))} />`;
+  const msg = raw === undefined ? "Loading history…" : "No readings in the last " + RANGES[rk].label + ".";
+  return html`<div class="nodata">${msg}</div>`;
+}
+function compareBody({ items, slots, rk, table, onRemove, histOf, nowS }) {
+  const note = items.some(m => isBuffer(histOf.src(m.name))) && html`<p class="srcnote">${BUFFER_NOTE}</p>`;
+  return html`<${Compare} items=${items} slots=${slots} rk=${rk} table=${table} onRemove=${onRemove} histOf=${histOf} nowS=${nowS} />
+              ${note}`;
 }
 
 function Detail({ items, slots, fleet, nowS, keptS, onClose, onAdd, onRemove }) {
   const [rk, setRk] = useState("1h");
   const [table, setTable] = useState(false);
   const closeRef = useRef(null);
-  useEffect(() => {
-    const prev = document.activeElement; closeRef.current && closeRef.current.focus();
-    const on = e => { if (e.key === "Escape") onClose(); };
-    addEventListener("keydown", on);
-    return () => { removeEventListener("keydown", on); prev && prev.focus && prev.focus(); };
-  }, []);
+  useDrawerFocus(closeRef, onClose);
   const histOf = useHistory(items.filter(b => b.state !== "unsupported").map(b => b.name), rk);
   const one = items.length === 1, b = items[0];
   const raw = one ? histOf(b.name) : null;
   const h = one ? toHist(raw, rk, nowS) : null;
+  const now = one && html`<div class="dnow">
+        <span class="temp">${fmt(b.temp)}<small>°C</small></span>
+        <span class="status">${statusText(b)}</span>
+        <span class="why">${whyText(b)}</span>
+      </div>`;
+  const rangeButtons = Object.keys(RANGES).map(k => html`<button key=${k} aria-pressed=${rk === k} onClick=${() => setRk(k)}>${k}</button>`);
+  const ranges = !(one && b.state === "unsupported") && html`<div class="pills sm" role="group" aria-label="Time range">
+            ${rangeButtons}
+          </div>`;
+  const tableToggle = (!one || h) && html`<button class="linkbtn" onClick=${() => setTable(t => !t)} aria-pressed=${table}>${table ? "Show chart" : "Show table"}</button>`;
+  const body = one ? singleBody(b, h, raw, rk, table, histOf) : compareBody({ items, slots, rk, table, onRemove, histOf, nowS });
   return html`<${React.Fragment}>
     <div class="scrim"></div>
     <aside class=${"drawer " + (one ? b.state : "")} role="dialog" aria-label=${one ? b.name + " trends" : "Comparing " + items.length + " machines"}>
       <div class="dh">
         <div style=${{ minWidth: 0 }}>
           <span class="eyebrow">Trends · from each machine's own records</span>
-          ${one ? html`<h2><${Mark} b=${b} />${b.name}${b.hub && html`<span class="tag">reader</span>`}</h2>
-            <div class="sub">${subLine(b)} · ${viaLine(b)}</div>`
-          : html`<h2>Comparing ${items.length} machines</h2>
-            <div class="chips">${items.map(m => html`<span class="mchip" key=${m.name}><i class="key" style=${{ background: slotColor(slots[m.name] ?? 0) }}></i>${m.name}
-              <button onClick=${() => onRemove(m.name)} aria-label=${"Remove " + m.name}>×</button></span>`)}</div>`}
+          ${detailTitle(items, slots, onRemove)}
         </div>
         <button class="xbtn" ref=${closeRef} onClick=${onClose} aria-label="Close">×</button>
       </div>
-      ${one && html`<div class="dnow">
-        <span class="temp">${fmt(b.temp)}<small>°C</small></span>
-        <span class="status">${statusText(b)}</span>
-        <span class="why">${whyText(b)}</span>
-      </div>`}
+      ${now}
       <div class="drow">
         <div class="drow-l">
-          ${!(one && b.state === "unsupported") && html`<div class="pills sm" role="group" aria-label="Time range">
-            ${Object.keys(RANGES).map(k => html`<button key=${k} aria-pressed=${rk === k} onClick=${() => setRk(k)}>${k}</button>`)}
-          </div>`}
+          ${ranges}
           <${AddPicker} fleet=${fleet} items=${items} onAdd=${onAdd} />
         </div>
-        ${(!one || h) && html`<button class="linkbtn" onClick=${() => setTable(t => !t)} aria-pressed=${table}>${table ? "Show chart" : "Show table"}</button>`}
+        ${tableToggle}
       </div>
       <p class="hint">You can also click machines in the list to add or remove them.</p>
-      ${one ? (b.state === "unsupported" ? html`<div class="nodata">No readings. ${HINT.sensors}</div>`
-              : h ? html`<${Single} b=${b} h=${h} rk=${rk} table=${table} buffer=${isBuffer(histOf.src(b.name))} />`
-              : html`<div class="nodata">${raw === undefined ? "Loading history…" : `No readings in the last ${RANGES[rk].label}.`}</div>`)
-            : html`<${Compare} items=${items} slots=${slots} rk=${rk} table=${table} onRemove=${onRemove} histOf=${histOf} nowS=${nowS} />
-              ${items.some(m => isBuffer(histOf.src(m.name))) && html`<p class="srcnote">${BUFFER_NOTE}</p>`}`}
+      ${body}
     </aside>
   </${React.Fragment}>`;
+}
+
+// add a machine to the picks with the lowest free colour slot; it keeps that colour while picked
+function addPick(sel, name) {
+  const { picked: p, slots: s } = sel;
+  if (p.includes(name) || p.length >= MAXC) return { picked: p, slots: s };
+  const used = new Set(p.map(n => s[n]));
+  let k = 0;
+  while (used.has(k)) k++;
+  return { picked: [...p, name], slots: { ...s, [name]: k } };
+}
+// clicking a machine opens it alone, removes it when picked, or adds it to the comparison
+function togglePick(sel, name) {
+  const { picked: p, slots: s } = sel;
+  if (!p.length) return { picked: [name], slots: { [name]: 0 } };
+  if (p.includes(name)) return { picked: p.filter(n => n !== name), slots: s };
+  return addPick(sel, name);
+}
+function eyebrowText(doc, err, count, updated) {
+  if (!doc) return err ? "Reader not answering · " + err : "Connecting to the fleet reader…";
+  if (err) return "Reader not answering · showing " + updated;
+  return "Live · " + count + " machine" + (count === 1 ? "" : "s") + " · updated " + updated;
+}
+function machineList({ fleet, shown, doc, view, picked, onOpen }) {
+  if (!fleet.length) return html`<div class="empty">${doc ? "No machines in the fleet file." : "Waiting for the fleet reader…"}</div>`;
+  if (!shown.length) return html`<div class="empty">No machine matches these filters.</div>`;
+  const Item = view === "rows" ? Lane : Tile;
+  const cards = shown.map(b => html`<${Item} b=${b} key=${b.name} open=${picked.includes(b.name)} onOpen=${onOpen} />`);
+  return view === "rows" ? html`<div class="lanes">${cards}</div>` : html`<div class="tiles">${cards}</div>`;
+}
+function matches({ plat, states, q }) {
+  const needle = q.toLowerCase();
+  return b => (plat === "all" || b.pkey === plat) && (!states.length || states.includes(b.state)) && (!q || b.name.toLowerCase().includes(needle));
 }
 
 function Machines({ doc, err }) {
@@ -946,46 +1269,35 @@ function Machines({ doc, err }) {
   // picks and their colour slots change together, so rapid clicks never share a colour
   const [sel, setSel] = useState({ picked: [], slots: {} });
   const { picked, slots } = sel;
-  // colour follows the machine: each gets the lowest free slot when added and keeps it
-  const add = name => setSel(({ picked: p, slots: s }) => {
-    if (p.includes(name) || p.length >= MAXC) return { picked: p, slots: s };
-    const used = new Set(p.map(n => s[n])); let k = 0; while (used.has(k)) k++;
-    return { picked: [...p, name], slots: { ...s, [name]: k } }; });
+  const add = name => setSel(x => addPick(x, name));
   const remove = name => setSel(({ picked: p, slots: s }) => ({ picked: p.filter(n => n !== name), slots: s }));
-  const onOpen = name => setSel(({ picked: p, slots: s }) => {
-    if (!p.length) return { picked: [name], slots: { [name]: 0 } };
-    if (p.includes(name)) return { picked: p.filter(n => n !== name), slots: s };
-    if (p.length >= MAXC) return { picked: p, slots: s };
-    const used = new Set(p.map(n => s[n])); let k = 0; while (used.has(k)) k++;
-    return { picked: [...p, name], slots: { ...s, [name]: k } }; });
+  const onOpen = name => setSel(x => togglePick(x, name));
   const items = picked.map(n => fleet.find(b => b.name === n)).filter(Boolean);
-  const counts = useMemo(() => fleet.reduce((c, b) => (c[b.state] = (c[b.state] || 0) + 1, c), {}), [fleet]);
-  const platCounts = useMemo(() => fleet.reduce((c, b) => (c[b.pkey] = (c[b.pkey] || 0) + 1, c), {}), [fleet]);
-  const shown = fleet
-    .filter(b => plat === "all" || b.pkey === plat)
-    .filter(b => !states.length || states.includes(b.state))
-    .filter(b => !q || b.name.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => sort === "hot" ? (SEVERITY[b.state] - SEVERITY[a.state]) || ((b.temp ?? -1) - (a.temp ?? -1)) : a.name.localeCompare(b.name, undefined, { numeric:true }));
+  const counts = useMemo(() => countBy(fleet, "state"), [fleet]);
+  const platCounts = useMemo(() => countBy(fleet, "pkey"), [fleet]);
+  const shown = fleet.filter(matches({ plat, states, q })).sort(sort === "hot" ? byHeat : byName);
   const platKeys = ["all", ...new Set(fleet.map(b => b.pkey))];
   const toggle = st => setStates(xs => xs.includes(st) ? xs.filter(x => x !== st) : [...xs, st]);
   const filtered = plat !== "all" || states.length || q;
   const updated = fin(reader.now) ? hhmmss(reader.now * 1000) + " UTC" : "";
-  const eyebrow = !doc ? (err ? "Reader not answering · " + err : "Connecting to the fleet reader…")
-    : err ? `Reader not answering · showing ${updated}` : `Live · ${fleet.length} machine${fleet.length === 1 ? "" : "s"} · updated ${updated}`;
+  const chips = STATES.filter(st => counts[st]).map(st => html`
+        <button key=${st} class=${"chip " + st} aria-pressed=${states.includes(st)} onClick=${() => toggle(st)}><b>${counts[st]}</b>${stateWord(st)}</button>`);
+  const platPills = platKeys.map(p => html`
+          <button key=${p} aria-pressed=${plat === p} onClick=${() => setPlat(p)}>${p === "all" ? "All" : platLabel(p)}<span class="n">${p === "all" ? fleet.length : platCounts[p]}</span></button>`);
+  const setViewKept = v => { setView(v); store.set("hg-view", v); };
+  const clear = filtered ? html` <button class="clear" onClick=${() => { setPlat("all"); setStates([]); setQ(""); }}>Clear</button>` : "";
   return html`<section>
     <div class="titlebar">
-      <div><span class=${"eyebrow livebar" + (err ? " down" : "")} role="status">${eyebrow}</span><h1>Heat Governor</h1></div>
+      <div><span class=${"eyebrow livebar" + (err ? " down" : "")} role="status">${eyebrowText(doc, err, fleet.length, updated)}</span><h1>Heat Governor</h1></div>
     </div>
     <div class="card"><${Flow} fleet=${fleet} /></div>
 
     <div class="summary" role="group" aria-label="Filter by state">
-      ${STATES.filter(st => counts[st]).map(st => html`
-        <button key=${st} class=${"chip " + st} aria-pressed=${states.includes(st)} onClick=${() => toggle(st)}><b>${counts[st]}</b>${st === "unsupported" ? "not supported" : st}</button>`)}
+      ${chips}
     </div>
     <div class="filters">
       <div class="pills sm" role="group" aria-label="Platform">
-        ${platKeys.map(p => html`
-          <button key=${p} aria-pressed=${plat === p} onClick=${() => setPlat(p)}>${p === "all" ? "All" : platLabel(p)}<span class="n">${p === "all" ? fleet.length : platCounts[p]}</span></button>`)}
+        ${platPills}
       </div>
       <input id="machine-search" class="search" type="search" placeholder="Find a machine" value=${q} onInput=${e => setQ(e.target.value)} aria-label="Find a machine" />
       <div class="pills sm" role="group" aria-label="Sort">
@@ -993,15 +1305,12 @@ function Machines({ doc, err }) {
         <button aria-pressed=${sort === "name"} onClick=${() => setSort("name")}>Name</button>
       </div>
       <div class="pills sm" role="group" aria-label="View">
-        <button aria-pressed=${view === "rows"} onClick=${() => { setView("rows"); store.set("hg-view", "rows"); }}>Rows</button>
-        <button aria-pressed=${view === "grid"} onClick=${() => { setView("grid"); store.set("hg-view", "grid"); }}>Grid</button>
+        <button aria-pressed=${view === "rows"} onClick=${() => setViewKept("rows")}>Rows</button>
+        <button aria-pressed=${view === "grid"} onClick=${() => setViewKept("grid")}>Grid</button>
       </div>
-      <span class="count">${shown.length} of ${fleet.length}${filtered ? html` <button class="clear" onClick=${() => { setPlat("all"); setStates([]); setQ(""); }}>Clear</button>` : ""}</span>
+      <span class="count">${shown.length} of ${fleet.length}${clear}</span>
     </div>
-    ${!fleet.length ? html`<div class="empty">${doc ? "No machines in the fleet file." : "Waiting for the fleet reader…"}</div>` :
-      !shown.length ? html`<div class="empty">No machine matches these filters.</div>` :
-      view === "rows" ? html`<div class="lanes">${shown.map(b => html`<${Lane} b=${b} key=${b.name} open=${picked.includes(b.name)} onOpen=${onOpen} />`)}</div>`
-                      : html`<div class="tiles">${shown.map(b => html`<${Tile} b=${b} key=${b.name} open=${picked.includes(b.name)} onOpen=${onOpen} />`)}</div>`}
+    ${machineList({ fleet, shown, doc, view, picked, onOpen })}
     ${items.length > 0 && html`<${Detail} items=${items} slots=${slots} fleet=${fleet} nowS=${nowS} keptS=${reader.history_s} onClose=${() => setSel({ picked: [], slots: {} })} onAdd=${add} onRemove=${remove} />`}
   </section>`;
 }
