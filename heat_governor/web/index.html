@@ -312,6 +312,8 @@ function toBox(m) {
     reason: t ? t.reason : null, rate: t && fin(t.rate_c_s) ? t.rate_c_s : null,
     containers: t && Array.isArray(t.containers) ? t.containers : [], applying: t ? !!t.applying : false,
     version: t ? t.version : null, zone: t ? t.hottest_zone : null, gpu_clock: t ? t.gpu_clock : null,
+    gpu_mhz: t && fin(t.gpu_mhz) ? t.gpu_mhz : null, gpu_power_w: t && fin(t.gpu_power_w) ? t.gpu_power_w : null,
+    gpu_util_pct: t && fin(t.gpu_util_pct) ? t.gpu_util_pct : null,
     fan_rpm: t && fin(t.fan_rpm) ? t.fan_rpm : null, power_w: t && fin(t.power_w) ? t.power_w : null,
     zones: t && fin(t.zones) ? t.zones : null,
     pair: pair ? (pair.peer_host || pair.peer || "peer") : null, pair_status: pair ? pair.peer_status : null,
@@ -451,7 +453,15 @@ function Facts({ b }) {
     <dt>Sensors<${Info} k="sensors" /></dt><dd>none readable</dd>
     <dt>Containers</dt><dd>not governed</dd></dl>`;
   const live = b.state !== "unreachable" && b.state !== "stale";
-  const gpu = [b.gpu_temp != null ? fmt(b.gpu_temp, 0) + " °C" : "", b.gpu_clock ? String(b.gpu_clock) : ""].filter(Boolean).join(" · ") || "—";
+  // the clock ceiling shows only when the root helper reports one ("ok (helper status: 1575)")
+  const ceil = b.gpu_clock && /helper status:\s*(\d+)/.exec("" + b.gpu_clock);
+  const gpu = [
+    b.gpu_temp != null ? fmt(b.gpu_temp, 0) + " °C" : "",
+    b.gpu_mhz != null ? fmt(b.gpu_mhz, 0) + " MHz" : "",
+    b.gpu_power_w != null ? fmt(b.gpu_power_w, 0) + " W" : "",
+    b.gpu_util_pct != null ? fmt(b.gpu_util_pct, 0) + "%" : "",
+    ceil ? "ceiling " + ceil[1] + " MHz" : "",
+  ].filter(Boolean).join(" · ") || "—";
   return html`<dl class="facts">
     <dt>Admitting<${Info} k="admit" /></dt><dd>${live && b.admit != null ? (b.admit ? "yes" : "holding") + " · ×" + fmt(b.cf, 2) : "unknown"}</dd>
     <dt>Containers<${Info} k="containers" /></dt><dd>${b.hasReading ? `${b.containers.length}${b.applying ? ", applying" : ", dry-run"}` : "—"}</dd>

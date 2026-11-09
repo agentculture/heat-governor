@@ -657,3 +657,41 @@ def test_trend_is_bounded_by_the_transport_and_does_not_hold_the_lock():
     assert time.monotonic() - start < 0.4
     th.join(timeout=3)
     assert done.is_set()
+
+
+# --- d3: GPU clock, GPU power/util and board power from the /state sensors (shapes live 2026-11-09)
+GPU_SENSOR_SHAPES = {
+    "cultureos": (
+        {"gpu:3d00000.gpu.mhz": 479.0, "gpu:board_power_w": 15.04},
+        {"gpu_mhz": 479.0, "gpu_power_w": None, "gpu_util_pct": None, "power_w": 15.04},
+    ),
+    "spark": (
+        {
+            "gpu:temp_c": 84.0,
+            "gpu:power_w": 65.04,
+            "gpu:sm_mhz": 2177.0,
+            "gpu:gr_mhz": 2177.0,
+            "gpu:util_pct": 96.0,
+            "gpu:mem_mhz": None,
+            "gpu:events": "0x0",
+        },
+        {"gpu_mhz": 2177.0, "gpu_power_w": 65.04, "gpu_util_pct": 96.0, "power_w": None},
+    ),
+    "thor": (
+        {"gpu:gpu-gpc-0.mhz": 1575.0, "gpu:gpu-nvd-0.mhz": 315.0},
+        {"gpu_mhz": 1575.0, "gpu_power_w": None, "gpu_util_pct": None, "power_w": None},
+    ),
+    "orin": (
+        {"gpu:util_pct": 0.0, "gpu:17000000.gpu.mhz": 306.0},
+        {"gpu_mhz": 306.0, "gpu_power_w": None, "gpu_util_pct": 0.0, "power_w": None},
+    ),
+    "none": ({}, {"gpu_mhz": None, "gpu_power_w": None, "gpu_util_pct": None, "power_w": None}),
+}
+
+
+@pytest.mark.parametrize("box", sorted(GPU_SENSOR_SHAPES))
+def test_extract_carries_gpu_clock_and_power(box):
+    sensors, want = GPU_SENSOR_SHAPES[box]
+    doc = {"level": "cool", "at": 1.0, "temp_c": 50.0, "sensors": sensors}
+    out = extract(doc)
+    assert {k: out[k] for k in want} == want

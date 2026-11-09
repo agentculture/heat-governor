@@ -229,3 +229,11 @@ def test_buffer_note_only_when_source_is_buffer():
 def test_7d_axis_shows_dates():
     assert "const dayLabel" in PAGE
     assert 'rk === "7d" ? dayLabel' in PAGE
+
+
+def test_gpu_fact_shows_clock_power_and_ceiling_only_when_set():
+    """d3: the GPU fact is built from gpu_mhz / gpu_power_w / gpu_util_pct, shows the clock
+    ceiling only when the helper reports one, and board power feeds the Power fact."""
+    assert "gpu_mhz" in PAGE and "gpu_power_w" in PAGE and "gpu_util_pct" in PAGE
+    assert "ceiling " in PAGE
+    assert "String(b.gpu_clock)" not in PAGE  # the raw helper status is no longer shown

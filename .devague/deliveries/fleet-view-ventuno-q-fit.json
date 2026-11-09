@@ -2,7 +2,7 @@
   "plan_slug": "fleet-view-ventuno-q-fit",
   "schema_version": 2,
   "created": "2026-11-09T04:31:42Z",
-  "updated": "2026-11-09T04:45:30Z",
+  "updated": "2026-11-09T05:13:38Z",
   "deviations": [
     {
       "id": "d1",
@@ -37,6 +37,19 @@
       "status": "approved",
       "classification": "acceptable",
       "seq": 2
+    },
+    {
+      "id": "d3",
+      "what": "show each machine's GPU clock, GPU power, GPU utilisation and board power: the reader carries gpu_mhz, gpu_power_w, gpu_util_pct and power_w derived from the /state sensors (cultureos devfreq clock + ina232 board power; Spark sm clock, power, util; Jetson gpc clock); the page's GPU fact shows temp \u00b7 clock \u00b7 power \u00b7 util and the clock ceiling only when one is set; the Power fact shows board power",
+      "task_ref": "t7",
+      "reason": "user request 2026-11-09: cultureos GPU clock and power were read by its daemon but dropped by the reader (run-state follow-up 4); the page's GPU fact showed the ceiling helper status instead of the clock",
+      "affects": [
+        "t9"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 3
     }
   ],
   "evidence": [],

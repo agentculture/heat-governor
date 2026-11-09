@@ -156,6 +156,37 @@ def _memory(doc: dict) -> dict | None:
     }
 
 
+def _gpu_power(doc: dict) -> dict:
+    """GPU clock (MHz), GPU power and utilisation, and board power from ``sensors``.
+
+    Clock priority: the SM / graphics clock (nvidia-smi boxes), then a devfreq ``*.gpu.mhz``
+    node (VENTUNO Q, Orin), then a Jetson ``gpu-gpc-*`` clock; video-engine and memory clocks
+    are never taken for the GPU clock. ``power_w`` is board power (an ina232-style monitor),
+    kept apart from ``gpu_power_w``."""
+    sensors = doc.get("sensors")
+    s = sensors if isinstance(sensors, dict) else {}
+    mhz = _num(s.get("gpu:sm_mhz"))
+    if mhz is None:
+        mhz = _num(s.get("gpu:gr_mhz"))
+    if mhz is None:
+        for key in sorted(s):
+            if key.startswith("gpu:") and key.endswith(".gpu.mhz") and _num(s[key]) is not None:
+                mhz = _num(s[key])
+                break
+    if mhz is None:
+        for key in sorted(s):
+            if key.startswith("gpu:") and "gpc" in key and key.endswith(".mhz"):
+                if _num(s[key]) is not None:
+                    mhz = _num(s[key])
+                    break
+    return {
+        "gpu_mhz": mhz,
+        "gpu_power_w": _num(s.get("gpu:power_w")),
+        "gpu_util_pct": _num(s.get("gpu:util_pct")),
+        "power_w": _num(s.get("gpu:board_power_w")),
+    }
+
+
 def extract(doc: dict) -> dict:
     """The thermal fields of a /state document; ``ValueError`` when it is no live decision
     (the same test as :func:`heat_governor.pair.parse`: a known level and a finite ``at``)."""
@@ -168,6 +199,7 @@ def extract(doc: dict) -> dict:
     if not isinstance(out["limits"], dict):
         out["limits"] = None
     out["memory"] = _memory(doc)
+    out.update(_gpu_power(doc))
     return out
 
 
