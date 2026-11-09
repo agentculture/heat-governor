@@ -237,3 +237,15 @@ def test_gpu_fact_shows_clock_power_and_ceiling_only_when_set():
     assert "gpu_mhz" in PAGE and "gpu_power_w" in PAGE and "gpu_util_pct" in PAGE
     assert "ceiling " in PAGE
     assert "String(b.gpu_clock)" not in PAGE  # the raw helper status is no longer shown
+
+
+def test_fact_values_never_split_from_their_units():
+    """A value and its unit are glued with a non-breaking space in the GPU, Memory and Power
+    facts, so a narrow column wraps between items ("60 W"), never inside one ("60 / W")."""
+    nb = "\\u00a0"
+    for unit in ("°C", "MHz", "W", "GiB"):
+        assert (nb + unit) in PAGE, unit
+    gpu_block = PAGE[
+        PAGE.index("const ceil =") : PAGE.index('.join(" · ") || "—";', PAGE.index("const ceil ="))
+    ]
+    assert '" MHz"' not in gpu_block and '" W"' not in gpu_block and '" °C"' not in gpu_block

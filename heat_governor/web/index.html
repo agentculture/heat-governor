@@ -93,7 +93,7 @@ h2 { font-weight:700; font-size:1.1rem; margin:2.6rem 0 1rem }
 /* machine rows */
 .lanes { display:grid; gap:10px }
 .lane { --m:var(--ink-faint);
-  display:grid; grid-template-columns:210px minmax(0,1fr) 230px; gap:26px; align-items:center;
+  display:grid; grid-template-columns:210px minmax(0,1fr) 260px; gap:26px; align-items:center;
   padding:18px 24px; border-radius:var(--radius); background:var(--surface); border:1px solid var(--line);
   transition:border-color .3s var(--ease), background .4s var(--ease) }
 .lane:hover { border-color:var(--line-strong); background:var(--surface-2) }
@@ -324,9 +324,9 @@ function toBox(m) {
 // "91% · 10.7 GiB free of 122 GiB" (+ " · DDR 46 °C" only where the board exposes a memory zone)
 function memText(b) {
   const m = b.mem; if (!m) return "—";
-  const gb = v => fmt(v / 1024, v >= 100 * 1024 ? 0 : 1) + " GiB";
-  const free = fin(m.avail_mib) ? " · " + gb(m.avail_mib) + " free" + (fin(m.total_mib) ? " of " + gb(m.total_mib) : "") : "";
-  return fmt(m.used_pct, 0) + "%" + free + (fin(m.temp_c) ? " · DDR " + fmt(m.temp_c, 0) + " °C" : "");
+  const gb = v => fmt(v / 1024, v >= 100 * 1024 ? 0 : 1) + "\u00a0GiB";
+  const free = fin(m.avail_mib) ? " · " + gb(m.avail_mib) + "\u00a0free" + (fin(m.total_mib) ? " of\u00a0" + gb(m.total_mib) : "") : "";
+  return fmt(m.used_pct, 0) + "%" + free + (fin(m.temp_c) ? " · DDR\u00a0" + fmt(m.temp_c, 0) + "\u00a0°C" : "");
 }
 
 // ---- live data ----
@@ -456,11 +456,11 @@ function Facts({ b }) {
   // the clock ceiling shows only when the root helper reports one ("ok (helper status: 1575)")
   const ceil = b.gpu_clock && /helper status:\s*(\d+)/.exec("" + b.gpu_clock);
   const gpu = [
-    b.gpu_temp != null ? fmt(b.gpu_temp, 0) + " °C" : "",
-    b.gpu_mhz != null ? fmt(b.gpu_mhz, 0) + " MHz" : "",
-    b.gpu_power_w != null ? fmt(b.gpu_power_w, 0) + " W" : "",
+    b.gpu_temp != null ? fmt(b.gpu_temp, 0) + "\u00a0°C" : "",
+    b.gpu_mhz != null ? fmt(b.gpu_mhz, 0) + "\u00a0MHz" : "",
+    b.gpu_power_w != null ? fmt(b.gpu_power_w, 0) + "\u00a0W" : "",
     b.gpu_util_pct != null ? fmt(b.gpu_util_pct, 0) + "%" : "",
-    ceil ? "ceiling " + ceil[1] + " MHz" : "",
+    ceil ? "ceiling\u00a0" + ceil[1] + "\u00a0MHz" : "",
   ].filter(Boolean).join(" · ") || "—";
   return html`<dl class="facts">
     <dt>Admitting<${Info} k="admit" /></dt><dd>${live && b.admit != null ? (b.admit ? "yes" : "holding") + " · ×" + fmt(b.cf, 2) : "unknown"}</dd>
@@ -469,7 +469,7 @@ function Facts({ b }) {
     <dt>Memory<${Info} k="memory" /></dt><dd>${memText(b)}</dd>
     ${b.gpus ? html`<dt>GPUs<${Info} k="gpus" /></dt><dd><${Gpus} b=${b} /></dd>` : html`<dt>Pair<${Info} k="pair" /></dt><dd>${b.pair ? `${b.pair}, ${b.pair_status || "?"}` : "—"}</dd>`}
     ${b.fan_rpm != null && html`<dt>Fan<${Info} k="fan" /></dt><dd>${fmt(b.fan_rpm, 0)} rpm</dd>`}
-    ${b.power_w != null && html`<dt>Power<${Info} k="power" /></dt><dd>${fmt(b.power_w, 2)} W</dd>`}
+    ${b.power_w != null && html`<dt>Power<${Info} k="power" /></dt><dd>${fmt(b.power_w, 2) + "\u00a0W"}</dd>`}
     ${b.zones != null && html`<dt>Zones<${Info} k="zones" /></dt><dd>${b.zones}${b.zone ? " · " + b.zone : ""}</dd>`}
   </dl>`;
 }
