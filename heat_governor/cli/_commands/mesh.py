@@ -25,7 +25,9 @@ from heat_governor.fleet import Fleet, load_fleet
 from heat_governor.fleet_reader import FleetReader, TransportFactory
 from heat_governor.mesh_server import DEFAULT_HOST, DEFAULT_PORT, MeshServer
 
-DEFAULT_URL = f"http://{DEFAULT_HOST}:{DEFAULT_PORT}"
+_SCHEME = "http"  # loopback by design; no TLS on 127.0.0.1
+DEFAULT_URL = f"{_SCHEME}://{DEFAULT_HOST}:{DEFAULT_PORT}"
+_JSON_HELP = "Emit structured JSON."
 SERVER_TIMEOUT_S = 2.0
 DIRECT_SLACK_S = 1.0
 
@@ -119,7 +121,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     fleet = _load(args)
     reader, server = start_mesh(fleet, getattr(args, "listen", None))
     host, port = server.address[:2]
-    url = f"http://{host}:{port}"
+    url = f"{_SCHEME}://{host}:{port}"
     try:
         if _json(args):
             emit_result(
@@ -239,12 +241,18 @@ def _mem_text(r: dict) -> str:
     return f"{text:<16} {ddr:<7}"
 
 
+def _admit_text(admit: object) -> str:
+    if admit is None:
+        return "-"
+    return "admit" if admit else "hold"
+
+
 def render_status(st: dict) -> str:
     rows = st["machines"]
     w = max([len(str(r["name"])) for r in rows] + [4])
     lines = []
     for r in rows:
-        admit = "-" if r["admit"] is None else ("admit" if r["admit"] else "hold")
+        admit = _admit_text(r["admit"])
         lines.append(
             f"{str(r['name']):<{w}}  {str(r['state']):<11} age {_fmt(r['age_s'], '.1f'):>6}s  "
             f"{_fmt(r['temp_c'], '.1f'):>5}C  {_mem_text(r)}  {_fmt(r['level']):<8} {admit:<5} "
@@ -337,22 +345,22 @@ def _no_verb(args: argparse.Namespace) -> int:
 
 def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("mesh", help="The fleet view (see 'heat-governor mesh overview').")
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=_JSON_HELP)
     p.set_defaults(func=_no_verb, json=False)
     noun = p.add_subparsers(dest="mesh_command", parser_class=type(p))
 
     ov = noun.add_parser("overview", help="Describe the mesh noun.")
-    ov.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    ov.add_argument("--json", action="store_true", help=_JSON_HELP)
     ov.set_defaults(func=cmd_overview)
 
     st = noun.add_parser("status", help="Every machine's state, age, temp, level, admission.")
     st.add_argument("--fleet", help="fleet.toml path (default: beside config.toml).")
     st.add_argument("--url", help=f"mesh serve to ask first (default {DEFAULT_URL}).")
-    st.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    st.add_argument("--json", action="store_true", help=_JSON_HELP)
     st.set_defaults(func=cmd_status)
 
     sv = noun.add_parser("serve", help="Serve the fleet page and JSON API (read-only).")
     sv.add_argument("--fleet", help="fleet.toml path (default: beside config.toml).")
     sv.add_argument("--listen", help=f"HOST:PORT to bind (default {DEFAULT_HOST}:{DEFAULT_PORT}).")
-    sv.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    sv.add_argument("--json", action="store_true", help=_JSON_HELP)
     sv.set_defaults(func=cmd_serve)

@@ -126,6 +126,17 @@ _MEM_ZONE = re.compile(r"^(ddr|ddrss|dram|emc|mem)(\b|[-_])", re.IGNORECASE)
 _NOT_MEMORY = ("pmm", "pmic")  # a power-management IC beside the DRAM is not the DRAM
 
 
+def _memory_zone_temps(sensors: dict) -> list[float]:
+    temps = []
+    for key, val in sensors.items():
+        if not (isinstance(key, str) and key.startswith("zone:")) or not _finite(val):
+            continue
+        ztype = key.split(":", 2)[-1]
+        if _MEM_ZONE.match(ztype) and not any(w in ztype.lower() for w in _NOT_MEMORY):
+            temps.append(float(val))
+    return temps
+
+
 def _memory(doc: dict) -> dict | None:
     """The derived memory object from a document's ``sensors`` (``None`` when it has no
     ``mem:*`` key). ``total_mib`` is derived (the document carries none); ``temp_c`` is the
@@ -140,13 +151,7 @@ def _memory(doc: dict) -> dict | None:
     total = None
     if used is not None and avail is not None and used < 100:
         total = round(avail / (1 - used / 100))
-    temps = []
-    for key, val in sensors.items():
-        if not (isinstance(key, str) and key.startswith("zone:")) or not _finite(val):
-            continue
-        ztype = key.split(":", 2)[-1]
-        if _MEM_ZONE.match(ztype) and not any(w in ztype.lower() for w in _NOT_MEMORY):
-            temps.append(float(val))
+    temps = _memory_zone_temps(sensors)
     return {
         "used_pct": used,
         "avail_mib": None if avail is None else round(avail),
@@ -155,6 +160,25 @@ def _memory(doc: dict) -> dict | None:
         "pressure_some_avg10": _num(sensors.get("psi:memory_some_avg10")),
         "temp_c": max(temps) if temps else None,
     }
+
+
+def _first_key_mhz(s: dict, match: Callable[[str], bool]) -> float | None:
+    """The first finite value, in sorted key order, among ``gpu:`` keys that satisfy ``match``."""
+    for key in sorted(s):
+        if key.startswith("gpu:") and match(key) and _num(s[key]) is not None:
+            return _num(s[key])
+    return None
+
+
+def _gpu_mhz(s: dict) -> float | None:
+    for name in ("gpu:sm_mhz", "gpu:gr_mhz"):
+        mhz = _num(s.get(name))
+        if mhz is not None:
+            return mhz
+    mhz = _first_key_mhz(s, lambda k: k.endswith(".gpu.mhz"))
+    if mhz is not None:
+        return mhz
+    return _first_key_mhz(s, lambda k: "gpc" in k and k.endswith(".mhz"))
 
 
 def _gpu_power(doc: dict) -> dict:
@@ -166,22 +190,8 @@ def _gpu_power(doc: dict) -> dict:
     kept apart from ``gpu_power_w``."""
     sensors = doc.get("sensors")
     s = sensors if isinstance(sensors, dict) else {}
-    mhz = _num(s.get("gpu:sm_mhz"))
-    if mhz is None:
-        mhz = _num(s.get("gpu:gr_mhz"))
-    if mhz is None:
-        for key in sorted(s):
-            if key.startswith("gpu:") and key.endswith(".gpu.mhz") and _num(s[key]) is not None:
-                mhz = _num(s[key])
-                break
-    if mhz is None:
-        for key in sorted(s):
-            if key.startswith("gpu:") and "gpc" in key and key.endswith(".mhz"):
-                if _num(s[key]) is not None:
-                    mhz = _num(s[key])
-                    break
     return {
-        "gpu_mhz": mhz,
+        "gpu_mhz": _gpu_mhz(s),
         "gpu_power_w": _num(s.get("gpu:power_w")),
         "gpu_util_pct": _num(s.get("gpu:util_pct")),
         "power_w": _num(s.get("gpu:board_power_w")),
@@ -230,7 +240,7 @@ def _f(v: float | None) -> float:
 
 
 def _opt(v: float) -> float | None:
-    return None if v != v else v  # NaN -> None
+    return None if math.isnan(v) else v  # NaN -> None
 
 
 class Ring:

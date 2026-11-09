@@ -138,7 +138,8 @@ def _call_tool(params: dict) -> dict:
         return _tool_result(handler(params["arguments"]))
     except ToolError as exc:
         return _tool_result(str(exc), is_error=True)
-    except Exception as exc:  # noqa: BLE001 - CliError and anything else: report, keep serving
+    # CliError and anything else: report, keep serving
+    except Exception as exc:  # noqa: BLE001
         message = getattr(exc, "message", None) or f"{exc.__class__.__name__}: {exc}"
         hint = getattr(exc, "remediation", None)
         return _tool_result(f"{message} ({hint})" if hint else message, is_error=True)
@@ -158,6 +159,10 @@ def handle(message: Any) -> dict | None:
         return None if is_notification else _error(id_, INVALID_REQUEST, "params must be an object")
     if is_notification:
         return None
+    return _dispatch_method(id_, method, params)
+
+
+def _dispatch_method(id_: Any, method: str, params: dict) -> dict:
     if method == "initialize":
         asked = params.get("protocolVersion")
         return _reply(

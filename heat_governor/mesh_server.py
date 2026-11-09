@@ -36,6 +36,7 @@ _VENDOR_TYPES = {
     ".woff2": "font/woff2",
     ".txt": "text/plain; charset=utf-8",
 }
+_NOT_FOUND = {"error": "not found"}
 _CSP = (
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
     "script-src 'self' 'unsafe-inline'"
@@ -76,34 +77,33 @@ class MeshServer:
                     {"Cache-Control": "no-store"},
                 )
 
+            def _index(self) -> None:
+                body = _web_file("index.html")
+                if body is None:
+                    return self._json(404, _NOT_FOUND)
+                self._send(200, body, "text/html; charset=utf-8", {"Content-Security-Policy": _CSP})
+
+            def _vendor(self, name: str) -> None:
+                ext = "." + name.rsplit(".", 1)[-1] if "." in name else ""
+                body = None
+                if _VENDOR_NAME.match(name) and name not in (".", "..") and ext in _VENDOR_TYPES:
+                    body = _web_file(name, vendor=True)
+                if body is None:
+                    return self._json(404, _NOT_FOUND)
+                self._send(200, body, _VENDOR_TYPES[ext])
+
             def _route(self) -> None:
                 parts = urlsplit(self.path)
                 path = parts.path
                 if path == "/":
-                    body = _web_file("index.html")
-                    if body is None:
-                        return self._json(404, {"error": "not found"})
-                    return self._send(
-                        200, body, "text/html; charset=utf-8", {"Content-Security-Policy": _CSP}
-                    )
+                    return self._index()
                 if path.startswith("/vendor/"):
-                    name = path[len("/vendor/") :]
-                    ext = "." + name.rsplit(".", 1)[-1] if "." in name else ""
-                    body = None
-                    if (
-                        _VENDOR_NAME.match(name)
-                        and name not in (".", "..")
-                        and ext in _VENDOR_TYPES
-                    ):
-                        body = _web_file(name, vendor=True)
-                    if body is None:
-                        return self._json(404, {"error": "not found"})
-                    return self._send(200, body, _VENDOR_TYPES[ext])
+                    return self._vendor(path[len("/vendor/") :])
                 if path == "/api/fleet":
                     return self._json(200, owner.reader.snapshot())
                 if path == "/api/history":
                     return self._history(parse_qs(parts.query))
-                return self._json(404, {"error": "not found"})
+                return self._json(404, _NOT_FOUND)
 
             def _history(self, query: dict) -> None:
                 name = (query.get("machine") or [""])[0]
