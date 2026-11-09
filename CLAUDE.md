@@ -39,7 +39,8 @@ files, and a CI/deploy pipeline. It is a sibling to
 | GPU clock ceiling via a root helper + narrow sudoers rule (`gpuclock.py`; `gpu-clock` verbs) | Implemented; helper installed on all four boxes 2026-10-23; `lock` at max accepted on GB10 and both Jetsons; effect of a lower ceiling unmeasured |
 | CPU clock, fan speed, active cores, nvpmodel | Not driven (root-only or firmware-owned) |
 
-Read `docs/HANDOFF-2026-10-23.md` (why, and what was measured), `docs/contracts/state.md` (the client
+Read `docs/HANDOFF-2026-10-23.md` (why, and what was measured), `docs/HANDOFF-2026-11-09.md`
+(VENTUNO Q, the fleet view, what is live and still open), `docs/contracts/state.md` (the client
 contract) and `docs/integration.md` (how lobes, sparkrun and mjolnir use it) before changing behaviour.
 
 ### Working on the governing domain
