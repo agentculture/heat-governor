@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-11-08T21:28:47Z",
-  "updated": "2026-11-08T22:26:28Z",
+  "updated": "2026-11-08T22:56:29Z",
   "targets": [
     {
       "id": "c1",
@@ -625,8 +625,8 @@
       "text": "teken cli doctor --strict may invoke verbs beyond --help; a long-running stdio verb (mcp) could hang the rubric \u2014 unverified in the scope survey (s13)",
       "kind": "unknown_nonblocking",
       "task_id": "t11",
-      "resolved": false,
-      "resolution": ""
+      "resolved": true,
+      "resolution": "teken cli doctor --strict ran in ~7 s with exit 0 and does not exercise mcp; the server also exits 0 on EOF and on a TTY stdin (t11, 92f183b)"
     },
     {
       "id": "r2",

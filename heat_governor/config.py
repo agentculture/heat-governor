@@ -656,7 +656,13 @@ def template(profile: Profile) -> str:
         f"ramp_s = {_toml_value(profile.ramp_s)}  # also paces GPU clock rises",
         "# GPU clock ceiling (MHz) at or above each temperature; only with daemon.gpu_clock = true",
         "# and the root helper installed (heat-governor gpu-clock helper). Declared, unmeasured:",
-        f"gpu_clock_bands = {_toml_value([list(b) for b in profile.gpu_clock_bands])}",
+        (
+            f"gpu_clock_bands = {_toml_value([list(b) for b in profile.gpu_clock_bands])}"
+            if profile.gpu_clock_bands
+            # an empty list fails validation; profiles without bands (generic, ventunoq) get
+            # a commented example instead
+            else "# gpu_clock_bands = [[90.0, 2200], [93.0, 1400]]  # none for this platform"
+        ),
         "# allowed in-flight work for clients = base x factor (hot/critical 0 = hold):",
         f"concurrency = {_toml_value(conc)}",
         '# how the GPU is read: "nvidia-smi" | "jetson" | "devfreq" | "none"',
