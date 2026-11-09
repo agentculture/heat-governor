@@ -241,8 +241,17 @@ The dashboard (fleet map, filters, per-machine trends and compare, Polar night
 light and dark) is served from vendored assets and works offline. From another
 device, open it through a tunnel:
 `ssh -L 9480:127.0.0.1:9480 user@host`, then <http://127.0.0.1:9480/>.
-The reader keeps a compact 24 h history in memory; it is lost on restart
-(persisting it is undecided).
+The reader keeps a compact 24 h history in memory (temperatures, level,
+concurrency factor and memory use %); it is lost on restart (persisting it is
+undecided).
+
+Each machine also carries a `memory` object taken from the daemon's published
+sensors: `used_pct`, `avail_mib`, `total_mib` (derived from the two, since the
+document has none), `swap_used_mib`, `pressure_some_avg10` (null on daemons
+older than 0.14) and `temp_c`. `temp_c` is the hottest DDR/DRAM/EMC thermal zone and
+appears only where the board exposes one (the VENTUNO Q does; Jetson and DGX
+Spark boards do not, and report null). The page, `mesh status` (`mem 91% of 122G`,
+plus `ddr 46C` where present) and the trend tooltip and table show it.
 
 For agents, `heat-governor mcp` is a read-only MCP server over stdio. Add it to
 a client as a stdio command, for example:

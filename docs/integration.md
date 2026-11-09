@@ -184,6 +184,12 @@ machines at once:
   and `sense`: `claude mcp add heat-governor -- heat-governor mcp`.
 
 Each machine entry carries `state` (`ok`, `stale`, `unreachable`) judged on the reader's clock; `admit` is
-null unless the machine is `ok`, so a missing reading never reads as permission. The list of machines is
+null unless the machine is `ok`, so a missing reading never reads as permission. Each entry's
+`thermal.memory` is derived from the daemon's `sensors` (`mem:*`, `psi:memory_*`, memory zones): `used_pct`,
+`avail_mib`, `total_mib` (derived as avail / (1 - used/100); null at 100% or when either is missing),
+`swap_used_mib`, `pressure_some_avg10` and `temp_c`. `temp_c` is the hottest zone whose type starts with
+`ddr`, `ddrss`, `dram`, `emc` or `mem` (a PMIC such as `pmm8650au_1_sdram` is not counted), and is null
+on boards that expose no such zone (Jetson, DGX Spark); `memory` itself is null when the document has no
+`mem:*` sensor. History samples carry `mem_used_pct`. The list of machines is
 [`fleet.toml`](fleet.example.toml). A bearer-token tailnet listener and a daemon `GET /history` route
 are **(planned)**.

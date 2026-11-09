@@ -134,6 +134,17 @@ def test_fact_hints_present():
         assert re.search(rf"\b{k}:\s*\"", PAGE), k
 
 
+def test_memory_fact_hint_and_trend_columns():
+    assert re.search(r"\bmemory:\s*\"Memory in use and free on this machine", PAGE)
+    assert "DDR temperature appears only where the board exposes a memory thermal zone" in PAGE
+    assert '<dt>Memory<${Info} k="memory" />' in PAGE
+    assert "t.memory" in PAGE and "m.temp_c" in PAGE  # DDR shown only when temp_c is present
+    assert "s.mem_used_pct" in PAGE  # samples feed the trend
+    assert "<span>Memory</span>" in PAGE  # tooltip row
+    assert "<th>Memory</th>" in PAGE  # table column
+    assert "http://" not in PAGE and "https://" not in PAGE
+
+
 def test_vendored_files_exist_with_licences():
     for name, lic in VENDORED.items():
         f = VENDOR / name

@@ -31,13 +31,14 @@ kept (labelled by ``state`` and ``age_s``) but ``admit`` and ``concurrency_facto
 ``null``. Do not use :func:`heat_governor.client.read` here: it admits on unknown.
 
 History is compact: per box, a ring of ``(wall time, hottest temp, GPU temp, level index,
-concurrency factor)`` in parallel ``array`` columns (33 bytes per sample), one sample per
-new document, bounded to 24 h at the poll interval.
+concurrency factor, memory used %)`` in parallel ``array`` columns (41 bytes per sample),
+one sample per new document, bounded to 24 h at the poll interval.
 """
 
 from __future__ import annotations
 
 import math
+import re
 import threading
 import time
 from array import array
@@ -105,6 +106,41 @@ def _num(v: object) -> float | None:
     return float(v) if _finite(v) else None
 
 
+_MEM_ZONE = re.compile(r"^(ddr|ddrss|dram|emc|mem)(\b|[-_])", re.IGNORECASE)
+_NOT_MEMORY = ("pmm", "pmic")  # a power-management IC beside the DRAM is not the DRAM
+
+
+def _memory(doc: dict) -> dict | None:
+    """The derived memory object from a document's ``sensors`` (``None`` when it has no
+    ``mem:*`` key). ``total_mib`` is derived (the document carries none); ``temp_c`` is the
+    hottest DDR/DRAM/EMC zone, ``None`` where the board exposes no memory zone."""
+    sensors = doc.get("sensors")
+    if not isinstance(sensors, dict):
+        return None
+    used, avail = _num(sensors.get("mem:used_pct")), _num(sensors.get("mem:avail_mib"))
+    swap = _num(sensors.get("mem:swap_used_mib"))
+    if used is None and avail is None and swap is None:
+        return None
+    total = None
+    if used is not None and avail is not None and used < 100:
+        total = round(avail / (1 - used / 100))
+    temps = []
+    for key, val in sensors.items():
+        if not (isinstance(key, str) and key.startswith("zone:")) or not _finite(val):
+            continue
+        ztype = key.split(":", 2)[-1]
+        if _MEM_ZONE.match(ztype) and not any(w in ztype.lower() for w in _NOT_MEMORY):
+            temps.append(float(val))
+    return {
+        "used_pct": used,
+        "avail_mib": None if avail is None else round(avail),
+        "total_mib": total,
+        "swap_used_mib": None if swap is None else round(swap),
+        "pressure_some_avg10": _num(sensors.get("psi:memory_some_avg10")),
+        "temp_c": max(temps) if temps else None,
+    }
+
+
 def extract(doc: dict) -> dict:
     """The thermal fields of a /state document; ``ValueError`` when it is no live decision
     (the same test as :func:`heat_governor.pair.parse`: a known level and a finite ``at``)."""
@@ -116,6 +152,7 @@ def extract(doc: dict) -> dict:
     out["containers"] = out["containers"] if isinstance(out["containers"], list) else []
     if not isinstance(out["limits"], dict):
         out["limits"] = None
+    out["memory"] = _memory(doc)
     return out
 
 
@@ -136,7 +173,7 @@ def classify(
 
 # -- compact history --------------------------------------------------------------
 
-Sample = tuple  # (t, temp_c | None, gpu_temp_c | None, level_index | None, cf | None)
+Sample = tuple  # (t, temp_c, gpu_temp_c, level_index, cf, mem_used_pct); each but t may be None
 _NAN = float("nan")
 
 
@@ -151,7 +188,7 @@ def _opt(v: float) -> float | None:
 class Ring:
     """Fixed-capacity, array-backed ring of compact samples (oldest overwritten)."""
 
-    __slots__ = ("cap", "_t", "_temp", "_gpu", "_cf", "_lvl", "_head")
+    __slots__ = ("cap", "_t", "_temp", "_gpu", "_cf", "_lvl", "_mem", "_head")
 
     def __init__(self, cap: int) -> None:
         self.cap = cap
@@ -160,36 +197,56 @@ class Ring:
         self._gpu = array("d")
         self._cf = array("d")
         self._lvl = array("b")
+        self._mem = array("d")
         self._head = 0  # next slot to overwrite once full
 
     def __len__(self) -> int:
         return len(self._t)
 
     def append(
-        self, t: float, temp: float | None, gpu: float | None, lvl: int | None, cf: float | None
+        self,
+        t: float,
+        temp: float | None,
+        gpu: float | None,
+        lvl: int | None,
+        cf: float | None,
+        mem: float | None = None,
     ) -> None:
-        row = (t, _f(temp), _f(gpu), _f(cf), -1 if lvl is None else lvl)
+        row = (t, _f(temp), _f(gpu), _f(cf), -1 if lvl is None else lvl, _f(mem))
         if len(self._t) < self.cap:
-            for col, v in zip((self._t, self._temp, self._gpu, self._cf, self._lvl), row):
+            for col, v in zip(self._cols(), row):
                 col.append(v)
             return
         h = self._head
-        self._t[h], self._temp[h], self._gpu[h], self._cf[h], self._lvl[h] = row
+        for col, v in zip(self._cols(), row):
+            col[h] = v
         self._head = (h + 1) % self.cap
 
-    def extend(self, t: array, temp: array, gpu: array, lvl: array, cf: array) -> None:
+    def _cols(self) -> tuple:
+        return (self._t, self._temp, self._gpu, self._cf, self._lvl, self._mem)
+
+    def extend(
+        self, t: array, temp: array, gpu: array, lvl: array, cf: array, mem: array | None = None
+    ) -> None:
         """Bulk append parallel columns (NaN = unknown, level -1 = unknown), e.g. to restore
         a saved history. Input longer than the capacity keeps only its newest ``cap`` rows."""
-        cols = (t, temp, gpu, cf, lvl)
+        cols = (t, temp, gpu, cf, lvl, mem if mem is not None else array("d", [_NAN]) * len(t))
         if len(t) >= self.cap:
-            for mine, src in zip((self._t, self._temp, self._gpu, self._cf, self._lvl), cols):
+            for mine, src in zip(self._cols(), cols):
                 del mine[:]
                 mine.extend(src[len(src) - self.cap :])
             self._head = 0
             return
         for i in range(len(t)):
             lv = lvl[i]
-            self.append(t[i], _opt(temp[i]), _opt(gpu[i]), None if lv < 0 else lv, _opt(cf[i]))
+            self.append(
+                t[i],
+                _opt(temp[i]),
+                _opt(gpu[i]),
+                None if lv < 0 else lv,
+                _opt(cf[i]),
+                _opt(cols[5][i]),
+            )
 
     def samples(self, since: float | None = None) -> list[Sample]:
         n, h = len(self._t), self._head if len(self._t) == self.cap else 0
@@ -207,6 +264,7 @@ class Ring:
                     _opt(self._gpu[i]),
                     None if lvl < 0 else lvl,
                     _opt(self._cf[i]),
+                    _opt(self._mem[i]),
                 )
             )
         return out
@@ -224,8 +282,8 @@ def _min(vals: list) -> Any:
 
 def downsample(rows: list[Sample], max_points: int) -> list[Sample]:
     """At most ``max_points`` buckets, conservatively: each keeps its last time, its
-    hottest temperatures and level, and its lowest concurrency factor (so a peak is never
-    averaged away)."""
+    hottest temperatures, level and memory use, and its lowest concurrency factor (so a peak
+    is never averaged away)."""
     n = len(rows)
     if max_points < 1 or n <= max_points:
         return list(rows)
@@ -233,7 +291,9 @@ def downsample(rows: list[Sample], max_points: int) -> list[Sample]:
     for k in range(max_points):
         b = rows[k * n // max_points : (k + 1) * n // max_points]
         cols = list(zip(*b))
-        out.append((cols[0][-1], _max(cols[1]), _max(cols[2]), _max(cols[3]), _min(cols[4])))
+        out.append(
+            (cols[0][-1], _max(cols[1]), _max(cols[2]), _max(cols[3]), _min(cols[4]), _max(cols[5]))
+        )
     return out
 
 
@@ -244,6 +304,7 @@ def _sample_dict(s: Sample) -> dict:
         "gpu_temp_c": s[2],
         "level": None if s[3] is None else LEVELS[s[3]],
         "concurrency_factor": s[4],
+        "mem_used_pct": s[5],
     }
 
 
@@ -334,6 +395,7 @@ class FleetReader:
                     _num(reading["gpu_temp_c"]),
                     LEVELS.index(lvl),
                     _num(reading["concurrency_factor"]),
+                    _num((reading["memory"] or {}).get("used_pct")),
                 )
             box.reading = reading
 

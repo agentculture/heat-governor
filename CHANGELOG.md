@@ -15,6 +15,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `heat-governor mesh overview|status|serve`: `serve` runs the reader, the dashboard and a JSON API on 127.0.0.1:9480; `status` asks it and falls back to a direct read.
 - Dashboard with vendored React 18.3.1, htm 3.1.1 and Lato: fleet map, filters, trends, compare, Polar night light/dark, works offline.
 - `heat-governor mcp`: read-only MCP server over stdio (tools `mesh_status`, `machine_state`, `sense`).
+- Fleet view memory: each machine carries a `memory` object (used %, available, derived total, swap, pressure, DDR temperature only where a memory zone exists); history gains `mem_used_pct`; `mesh status` shows `mem 91% of 122G`; the page has a Memory fact with an (i) hint and a Memory value in the trend tooltip and table.
 
 ### Changed
 

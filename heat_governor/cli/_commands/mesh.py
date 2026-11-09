@@ -185,6 +185,7 @@ def _now() -> float:
 def _row(m: dict) -> dict:
     th = m.get("thermal") or {}
     health = m.get("health") or {}
+    mem = th.get("memory") or {}
     return {
         "name": m.get("name"),
         "transport": m.get("transport"),
@@ -192,6 +193,9 @@ def _row(m: dict) -> dict:
         "state": m.get("state"),
         "age_s": m.get("age_s"),
         "temp_c": th.get("temp_c"),
+        "mem_used_pct": mem.get("used_pct"),
+        "mem_total_mib": mem.get("total_mib"),
+        "mem_temp_c": mem.get("temp_c"),
         "level": th.get("level"),
         "admit": th.get("admit") if m.get("state") == "ok" else None,
         "version": th.get("version"),
@@ -225,6 +229,16 @@ def _show_error(row: dict) -> bool:
     return bool(row.get("failing")) or row.get("state") != "ok"
 
 
+def _mem_text(r: dict) -> str:
+    """``mem 91% of 122G`` (GiB, derived total) and, where a DDR zone exists, ``ddr 46C``."""
+    pct, total = r.get("mem_used_pct"), r.get("mem_total_mib")
+    if pct is None:
+        return f"{'mem -':<16} {'':<7}"
+    text = f"mem {pct:.0f}%" + ("" if total is None else f" of {total / 1024:.0f}G")
+    ddr = "" if r.get("mem_temp_c") is None else f"ddr {r['mem_temp_c']:.0f}C"
+    return f"{text:<16} {ddr:<7}"
+
+
 def render_status(st: dict) -> str:
     rows = st["machines"]
     w = max([len(str(r["name"])) for r in rows] + [4])
@@ -233,7 +247,7 @@ def render_status(st: dict) -> str:
         admit = "-" if r["admit"] is None else ("admit" if r["admit"] else "hold")
         lines.append(
             f"{str(r['name']):<{w}}  {str(r['state']):<11} age {_fmt(r['age_s'], '.1f'):>6}s  "
-            f"{_fmt(r['temp_c'], '.1f'):>5}C  {_fmt(r['level']):<8} {admit:<5} "
+            f"{_fmt(r['temp_c'], '.1f'):>5}C  {_mem_text(r)}  {_fmt(r['level']):<8} {admit:<5} "
             f"v{_fmt(r['version'])}"
             + (f"  ({r['last_error']})" if r["last_error"] and _show_error(r) else "")
         )

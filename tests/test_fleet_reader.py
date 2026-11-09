@@ -20,6 +20,7 @@ from heat_governor.fleet_reader import (
     classify,
     default_transport,
     downsample,
+    extract,
 )
 from heat_governor.transport import LocalTransport, SshTransport, Unreachable
 
@@ -354,6 +355,7 @@ def test_history_records_compact_samples_only_when_at_advances():
         "gpu_temp_c": 76.0,
         "level": "hot",
         "concurrency_factor": 0.0,
+        "mem_used_pct": None,
     }
 
 
@@ -389,10 +391,12 @@ def test_ring_overwrites_oldest():
 
 
 def test_downsample_keeps_peaks():
-    rows = [(float(i), float(i % 7), None, i % 4, 1.0 - (i % 4) / 4) for i in range(1000)]
+    rows = [
+        (float(i), float(i % 7), None, i % 4, 1.0 - (i % 4) / 4, 50.0 + i % 9) for i in range(1000)
+    ]
     out = downsample(rows, 10)
     assert len(out) == 10
-    assert all(r[1] == 6.0 and r[3] == 3 and r[4] == 0.25 for r in out)
+    assert all(r[1] == 6.0 and r[3] == 3 and r[4] == 0.25 and r[5] == 58.0 for r in out)
     assert out[-1][0] == 999.0
     assert downsample(rows[:5], 10) == rows[:5]
 
@@ -419,20 +423,21 @@ def test_week_of_19_machines_stays_under_100mb():
         array("d", [56.0]) * week,
         array("b", [1]) * week,
         array("d", [0.5]) * week,
+        array("d", [91.0]) * week,
     )
     tracemalloc.start()
     try:
         rings = [Ring(cap) for _ in range(19)]
         for r in rings:
             r.extend(*cols)
-            r.append(week * poll_s, 62.0, None, 2, 0.0)  # keeps polling past the cap
+            r.append(week * poll_s, 62.0, None, 2, 0.0, 92.0)  # keeps polling past the cap
         current, _peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
     assert all(len(r) == cap for r in rings)  # 24 h, not a week
     assert current < 100 * 1024 * 1024, current
     newest = rings[0].samples()
-    assert newest[-1] == (week * poll_s, 62.0, None, 2, 0.0)
+    assert newest[-1] == (week * poll_s, 62.0, None, 2, 0.0, 92.0)
     assert newest[0][0] == (week - cap + 1) * poll_s
 
 
@@ -446,12 +451,69 @@ def test_ring_extend_short_input_appends():
         array("d", [nan, 3.0]),
         array("b", [0, -1]),
         array("d", [1.0, nan]),
+        array("d", [nan, 77.0]),
     )
     assert r.samples() == [
-        (0.0, 1.0, None, None, None),
-        (1.0, 2.0, None, 0, 1.0),
-        (2.0, None, 3.0, None, None),
+        (0.0, 1.0, None, None, None, None),
+        (1.0, 2.0, None, 0, 1.0, None),
+        (2.0, None, 3.0, None, None, 77.0),
     ]
+
+
+# -- memory -----------------------------------------------------------------------
+
+
+def mem_sensors(used=91.0, avail=11000, swap=9400, **zones) -> dict:
+    s = {"mem:used_pct": used, "mem:avail_mib": avail, "mem:swap_used_mib": swap}
+    s.update(zones)
+    return s
+
+
+def test_memory_object_derives_total_and_drops_raw_sensors():
+    reader, t, *_ = make()
+    t["a"].items = [doc(1.0, sensors=mem_sensors(**{"psi:memory_some_avg10": 1.5}))]
+    reader.poll_once("a")
+    th = reader.snapshot()["machines"][0]["thermal"]
+    assert "sensors" not in th
+    assert th["memory"] == {
+        "used_pct": 91.0,
+        "avail_mib": 11000,
+        "total_mib": 122222,
+        "swap_used_mib": 9400,
+        "pressure_some_avg10": 1.5,
+        "temp_c": None,
+    }
+
+
+def test_memory_null_without_mem_keys_and_total_null_at_full():
+    assert extract(doc(1.0))["memory"] is None
+    m = extract(doc(1.0, sensors=mem_sensors(used=100.0)))["memory"]
+    assert m["total_mib"] is None and m["used_pct"] == 100.0
+    m = extract(doc(1.0, sensors={"mem:used_pct": 40.0}))["memory"]
+    assert m["avail_mib"] is None and m["total_mib"] is None and m["swap_used_mib"] is None
+
+
+def test_memory_temp_is_max_over_memory_zones_not_pmic():
+    zones = {
+        "zone:8:ddrss-0-thermal": 45.7,
+        "zone:18:ddrss-1-thermal": 44.9,
+        "zone:25:pmm8650au_1_sdram": 48.7,
+        "zone:3:cpu": 70.0,
+    }
+    assert extract(doc(1.0, sensors=mem_sensors(**zones)))["memory"]["temp_c"] == 45.7
+    for z in ("zone:1:DRAM", "zone:2:emc", "zone:3:mem_thermal", "zone:4:ddr"):
+        assert extract(doc(1.0, sensors=mem_sensors(**{z: 50.0})))["memory"]["temp_c"] == 50.0
+    for z in ("zone:1:memristor", "zone:2:pmic_ddr", "zone:3:acpitz", "zone:4:cpu"):
+        assert extract(doc(1.0, sensors=mem_sensors(**{z: 50.0})))["memory"]["temp_c"] is None
+
+
+def test_history_carries_mem_used_pct():
+    reader, t, clock, wall = make()
+    t["a"].items = [doc(1.0, sensors=mem_sensors(used=88.0)), doc(2.0)]
+    for _ in range(2):
+        reader.poll_once("a")
+        wall.t += 10
+    assert [h["mem_used_pct"] for h in reader.history("a")] == [88.0, None]
 
 
 # -- boundaries -------------------------------------------------------------------
