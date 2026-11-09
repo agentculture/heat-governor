@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+_HWMON_GLOB = "hwmon*"
+
 MIN_C, MAX_C = -40.0, 150.0
 GPU_FIELDS = (
     "temperature.gpu",
@@ -216,7 +218,7 @@ class SystemProbe:
         Sensor 1 reads 4-6 C above it). The drive's own warning/critical limits are
         kept as ``..._max_c``/``..._crit_c`` (limits, not readings); placeholder
         limits (above 150 C) are dropped."""
-        for hw in sorted((self.sys / "class" / "hwmon").glob("hwmon*")):
+        for hw in sorted((self.sys / "class" / "hwmon").glob(_HWMON_GLOB)):
             if _read(hw / "name") != "nvme":
                 continue
             try:
@@ -301,7 +303,7 @@ def read_fans(sys_root: Path = Path("/sys")) -> dict[str, float]:
     """PWM duty (0-255) and tach RPM where the board exposes them (Jetsons do;
     the Spark's fans are firmware-controlled and not visible)."""
     out: dict[str, float] = {}
-    for hw in sorted((sys_root / "class" / "hwmon").glob("hwmon*")):
+    for hw in sorted((sys_root / "class" / "hwmon").glob(_HWMON_GLOB)):
         name = _read(hw / "name") or hw.name
         for f in ("pwm1", "fan1_input"):
             raw = _read(hw / f)
@@ -411,7 +413,7 @@ def read_gpu_devfreq(sys_root: Path = Path("/sys")) -> dict[str, object]:
         raw = _read(dev / "cur_freq")
         if raw and raw.isdigit():
             res[f"{dev.name}.mhz"] = int(raw) / 1e6
-    for hw in sorted((sys_root / "class" / "hwmon").glob("hwmon*")):
+    for hw in sorted((sys_root / "class" / "hwmon").glob(_HWMON_GLOB)):
         if _read(hw / "name") == "ina232":
             raw = _read(hw / "power1_input")
             if raw and raw.isdigit():
@@ -429,7 +431,7 @@ def _fan_kernel_owned(sys_root: Path) -> bool:
         return "".join(c for c in text.lower() if c.isalnum())
 
     names = []
-    for hw in sorted((sys_root / "class" / "hwmon").glob("hwmon*")):
+    for hw in sorted((sys_root / "class" / "hwmon").glob(_HWMON_GLOB)):
         if any(_read(hw / f) is not None for f in ("pwm1", "fan1_input")):
             names.append(norm(_read(hw / "name") or ""))
     for cd in sorted((sys_root / "class" / "thermal").glob("cooling_device*")):
