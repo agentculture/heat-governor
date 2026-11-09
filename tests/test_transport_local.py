@@ -81,8 +81,9 @@ def _serve(body: bytes, status: int = 200, delay: float = 0.0):
 def test_bad_responses_are_unreachable(body, status):
     httpd = _serve(body, status)
     try:
+        local = LocalTransport(timeout_s=1.0, port=httpd.server_address[1])
         with pytest.raises(Unreachable):
-            LocalTransport(timeout_s=1.0, port=httpd.server_address[1]).fetch()
+            local.fetch()
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -91,8 +92,9 @@ def test_bad_responses_are_unreachable(body, status):
 def test_oversized_document_is_refused():
     httpd = _serve(b'{"pad":"' + b"x" * (1 << 20) + b'"}')
     try:
+        local = LocalTransport(timeout_s=2.0, port=httpd.server_address[1])
         with pytest.raises(Unreachable, match="too large"):
-            LocalTransport(timeout_s=2.0, port=httpd.server_address[1]).fetch()
+            local.fetch()
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -102,8 +104,9 @@ def test_slow_daemon_times_out():
     httpd = _serve(b"{}", delay=2.0)
     try:
         start = time.monotonic()
+        local = LocalTransport(timeout_s=0.5, port=httpd.server_address[1])
         with pytest.raises(Unreachable):
-            LocalTransport(timeout_s=0.5, port=httpd.server_address[1]).fetch()
+            local.fetch()
         assert time.monotonic() - start < 1.5
     finally:
         httpd.shutdown()
@@ -136,13 +139,15 @@ def test_local_history_reads_this_machines_records(tmp_path, monkeypatch):
 
 
 def test_local_history_refuses_bad_arguments():
+    local = LocalTransport(timeout_s=1.0)
     with pytest.raises(Unreachable):
-        LocalTransport(timeout_s=1.0).history(float("nan"), 1.0, 5)
+        local.history(float("nan"), 1.0, 5)
 
 
 def test_local_history_failure_is_unreachable(monkeypatch):
     import heat_governor.transport as transport
 
     monkeypatch.setattr(transport, "PYTHON", "/nonexistent/python3")
+    local = LocalTransport(timeout_s=1.0)
     with pytest.raises(Unreachable):
-        LocalTransport(timeout_s=1.0).history(1.0, 100.0, 5)
+        local.history(1.0, 100.0, 5)

@@ -118,5 +118,6 @@ def test_sensor_ignores_pmic_zone(tmp_path: Path) -> None:
 def test_limits_below_gpu_npu_passive_trip_and_declared() -> None:
     assert VENTUNOQ.limits.crit_c < 115.0
     assert VENTUNOQ.provenance.startswith("declared")
-    assert "trip" in VENTUNOQ.provenance and "not measured" in VENTUNOQ.provenance
+    assert "trip" in VENTUNOQ.provenance
+    assert "not measured" in VENTUNOQ.provenance
     assert VENTUNOQ.gpu == "devfreq"

@@ -41,7 +41,7 @@ class FakeTransport:
         pass
 
 
-@pytest.fixture()
+@pytest.fixture
 def fleet_file(tmp_path: Path, monkeypatch) -> Path:
     p = tmp_path / "fleet.toml"
     p.write_text(FLEET_TOML)
@@ -93,7 +93,8 @@ def test_initialize_echoes_supported_version():
             "params": {"protocolVersion": "2025-03-26"},
         }
     )
-    assert r["id"] == 7 and r["jsonrpc"] == "2.0"
+    assert r["id"] == 7
+    assert r["jsonrpc"] == "2.0"
     assert r["result"]["protocolVersion"] == "2025-03-26"
     assert r["result"]["capabilities"] == {"tools": {}}
     assert r["result"]["serverInfo"]["name"] == "heat-governor"
@@ -126,7 +127,8 @@ def test_tools_list_names_and_schemas():
 
 def test_unknown_method_is_32601():
     r = one({"jsonrpc": "2.0", "id": 4, "method": "nope"})
-    assert r["error"]["code"] == -32601 and r["id"] == 4
+    assert r["error"]["code"] == -32601
+    assert r["id"] == 4
 
 
 @pytest.mark.parametrize(
@@ -151,8 +153,10 @@ def test_mesh_status_direct(fleet_file):
     assert json.loads(r["content"][0]["text"]) == sc
     assert sc["source"] == "direct"
     rows = {m["name"]: m for m in sc["machines"]}
-    assert rows["cool"]["state"] == "ok" and rows["cool"]["admit"] is True
-    assert rows["dead"]["state"] != "ok" and rows["dead"]["admit"] is None
+    assert rows["cool"]["state"] == "ok"
+    assert rows["cool"]["admit"] is True
+    assert rows["dead"]["state"] != "ok"
+    assert rows["dead"]["admit"] is None
 
 
 def test_mesh_status_matches_cli(fleet_file, capsys):
@@ -168,7 +172,8 @@ def test_mesh_status_prefers_server(monkeypatch):
     snap = {"reader": {"poll_s": 1}, "machines": [{"name": "x", "state": "ok", "age_s": 0.1}]}
     monkeypatch.setattr(mesh, "_fetch_server", lambda url: snap)
     sc = one(call("mesh_status"))["result"]["structuredContent"]
-    assert sc["source"] == "mesh serve" and sc["machines"][0]["name"] == "x"
+    assert sc["source"] == "mesh serve"
+    assert sc["machines"][0]["name"] == "x"
 
 
 def test_mesh_status_without_any_source_is_tool_error(tmp_path, monkeypatch):
@@ -177,7 +182,8 @@ def test_mesh_status_without_any_source_is_tool_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mesh, "_fetch_server", boom)
     r = one(call("mesh_status", {"fleet": str(tmp_path / "missing.toml")}))
-    assert "error" not in r and r["result"]["isError"] is True
+    assert "error" not in r
+    assert r["result"]["isError"] is True
     assert "no fleet file" in r["result"]["content"][0]["text"]
 
 
@@ -185,8 +191,10 @@ def test_machine_state(fleet_file):
     r = one(call("machine_state", {"name": "cool", "fleet": str(fleet_file), "url": NO_SERVER}))
     sc = r["result"]["structuredContent"]
     assert r["result"]["isError"] is False
-    assert sc["name"] == "cool" and sc["state"] == "ok"
-    assert "health" in sc and sc["thermal"]["temp_c"] == 40.0
+    assert sc["name"] == "cool"
+    assert sc["state"] == "ok"
+    assert "health" in sc
+    assert sc["thermal"]["temp_c"] == 40.0
 
 
 def test_machine_state_unknown_name_is_tool_error(fleet_file):
@@ -228,7 +236,8 @@ def test_tool_crash_is_tool_error(monkeypatch):
 
     monkeypatch.setattr(mesh, "read_snapshot", boom)
     r = one(call("mesh_status"))
-    assert r["result"]["isError"] is True and "kaput" in r["result"]["content"][0]["text"]
+    assert r["result"]["isError"] is True
+    assert "kaput" in r["result"]["content"][0]["text"]
 
 
 def test_scripted_session_stdout_is_only_frames(fleet_file):
@@ -254,7 +263,9 @@ def test_serve_survives_internal_failure(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "handle", boom)
     frames, err, rc = session({"jsonrpc": "2.0", "id": 9, "method": "ping"})
-    assert rc == 0 and frames[0]["error"]["code"] == -32603 and frames[0]["id"] == 9
+    assert rc == 0
+    assert frames[0]["error"]["code"] == -32603
+    assert frames[0]["id"] == 9
     assert "bug" in err
 
 
@@ -286,7 +297,8 @@ def test_tty_stdin_hints_and_exits(monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", Tty(""))
     assert main(["mcp"]) == 0
     out = capsys.readouterr()
-    assert out.out == "" and "MCP" in out.err
+    assert out.out == ""
+    assert "MCP" in out.err
 
 
 def test_help_returns(capsys):

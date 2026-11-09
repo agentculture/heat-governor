@@ -110,10 +110,13 @@ def test_buckets_keep_maxima_most_severe_level_min_cf_and_omit_empty(home):
         "concurrency_factor": 0.5,
         "mem_used_pct": 41.0,
     }
-    assert s[1]["temp_c"] == 85.0 and s[1]["level"] == "hot"
-    assert s[1]["concurrency_factor"] == 0.0 and s[1]["mem_used_pct"] == 90.0
+    assert s[1]["temp_c"] == 85.0
+    assert s[1]["level"] == "hot"
+    assert s[1]["concurrency_factor"] == 0.0
+    assert s[1]["mem_used_pct"] == 90.0
     assert s[1]["gpu_temp_c"] == 70.0
-    assert s[2]["level"] == "critical" and s[2]["gpu_temp_c"] is None
+    assert s[2]["level"] == "critical"
+    assert s[2]["gpu_temp_c"] is None
     assert s[2]["mem_used_pct"] is None
     assert out["schema"] == 1
     assert out["files"] == [day_file(T0)]
@@ -131,7 +134,9 @@ def test_only_overlapping_day_files_and_missing_days_are_skipped(home):
 
 def test_no_records_dir_is_an_empty_answer(home):
     out = run(home, T0, T0 + 3600, 300)
-    assert out["samples"] == [] and out["files"] == [] and out["lines_read"] == 0
+    assert out["samples"] == []
+    assert out["files"] == []
+    assert out["lines_read"] == 0
 
 
 def test_long_range_parses_only_every_kth_tick_line(home, monkeypatch):
@@ -224,7 +229,8 @@ def test_parse_output_drops_malformed_samples():
     ).encode()
     s = parse_output(raw)["samples"]
     assert [x["t"] for x in s] == [1.0, 2.0]
-    assert s[1]["level"] is None and s[1]["mem_used_pct"] is None
+    assert s[1]["level"] is None
+    assert s[1]["mem_used_pct"] is None
     assert set(s[0]) == {
         "t",
         "temp_c",
@@ -245,7 +251,8 @@ def test_timeouts_and_long_range_threshold():
 
 def test_script_is_plain_stdlib_and_has_no_single_quotes():
     imports = [ln for ln in HISTORY_SCRIPT.splitlines() if ln.startswith(("import", "from"))]
-    assert imports and all(
+    assert imports
+    assert all(
         set(ln.replace(",", " ").split()[1:]) <= {"json", "os", "sys", "time", "datetime"}
         or ln.startswith("from datetime import")
         for ln in imports
