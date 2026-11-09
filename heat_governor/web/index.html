@@ -314,8 +314,16 @@ function toBox(m) {
     fan_rpm: t && fin(t.fan_rpm) ? t.fan_rpm : null, power_w: t && fin(t.power_w) ? t.power_w : null,
     zones: t && fin(t.zones) ? t.zones : null,
     pair: pair ? (pair.peer_host || pair.peer || "peer") : null, pair_status: pair ? pair.peer_status : null,
+    mem: t && t.memory && typeof t.memory === "object" && fin(t.memory.used_pct) ? t.memory : null,
     hasReading: !!t,
   };
+}
+// "91% · 11.0 GB free of 122 GB" (+ " · DDR 46 °C" only where the board exposes a memory zone)
+function memText(b) {
+  const m = b.mem; if (!m) return "—";
+  const gb = v => fmt(v / 1024, v >= 100 * 1024 ? 0 : 1) + " GB";
+  const free = fin(m.avail_mib) ? " · " + gb(m.avail_mib) + " free" + (fin(m.total_mib) ? " of " + gb(m.total_mib) : "") : "";
+  return fmt(m.used_pct, 0) + "%" + free + (fin(m.temp_c) ? " · DDR " + fmt(m.temp_c, 0) + " °C" : "");
 }
 
 // ---- live data ----
@@ -420,6 +428,7 @@ const HINT = {
   containers: "Docker containers this governor watches. Applying means it really pauses or CPU-caps them when hot; dry-run means it only logs what it would do.",
   gpu: "GPU temperature, then the GPU clock ceiling when the daemon reports one.",
   pair: "The other half of a tensor-parallel pair. Both boxes cap the pair's containers by whichever box is hotter. ok means the partner's state is fresh.",
+  memory: "Memory in use and free on this machine, from its daemon. DDR temperature appears only where the board exposes a memory thermal zone (the VENTUNO Q does; Jetson and DGX Spark boards do not).",
   gpus: "One cell per GPU, coloured against this machine's limits. The hottest GPU drives the machine's level.",
   fan: "Fan speed read from the board's fan controller. The kernel drives it, not the governor.",
   power: "Board power from the board's power monitor.",
@@ -442,6 +451,7 @@ function Facts({ b }) {
     <dt>Admitting<${Info} k="admit" /></dt><dd>${live && b.admit != null ? (b.admit ? "yes" : "holding") + " · ×" + fmt(b.cf, 2) : "unknown"}</dd>
     <dt>Containers<${Info} k="containers" /></dt><dd>${b.hasReading ? `${b.containers.length}${b.applying ? ", applying" : ", dry-run"}` : "—"}</dd>
     <dt>GPU<${Info} k="gpu" /></dt><dd>${gpu}</dd>
+    <dt>Memory<${Info} k="memory" /></dt><dd>${memText(b)}</dd>
     ${b.gpus ? html`<dt>GPUs<${Info} k="gpus" /></dt><dd><${Gpus} b=${b} /></dd>` : html`<dt>Pair<${Info} k="pair" /></dt><dd>${b.pair ? `${b.pair}, ${b.pair_status || "?"}` : "—"}</dd>`}
     ${b.fan_rpm != null && html`<dt>Fan<${Info} k="fan" /></dt><dd>${fmt(b.fan_rpm, 0)} rpm</dd>`}
     ${b.power_w != null && html`<dt>Power<${Info} k="power" /></dt><dd>${fmt(b.power_w, 2)} W</dd>`}
@@ -478,6 +488,7 @@ function Tile({ b, open, onOpen }) {
     <div class="row"><span class="temp">${fmt(b.temp)}<small>°C</small></span><span class="status">${statusText(b)}</span></div>
     <${Scale} temp=${b.temp} limits=${b.limits} small=${true} />
     ${b.gpus && html`<${Gpus} b=${b} />`}
+    <span class="meta">Memory ${memText(b)}</span>
     <span class="meta">${platLabel(b.pkey)}${b.pair ? " · pair " + b.pair : ""} · ${whyText(b)}</span>
   </article>`;
 }
@@ -539,7 +550,7 @@ function toHist(samples, rk, nowS) {
   const gap = Math.max(med * 3, 1000);
   // per-GPU series: only when the samples carry them (the reader does not record them today)
   const ng = rows.reduce((n, s) => Math.max(n, Array.isArray(s.gpus_c) ? s.gpus_c.length : 0), 0);
-  const h = { t: [], temp: [], gpu: [], level: [], cf: [], gpus: ng ? Array.from({ length: ng }, () => []) : null, t0, t1, gap };
+  const h = { t: [], temp: [], gpu: [], level: [], cf: [], mem: [], gpus: ng ? Array.from({ length: ng }, () => []) : null, t0, t1, gap };
   const push = (ms, s) => {
     h.t.push(ms);
     h.temp.push(s && fin(s.temp_c) ? s.temp_c : null);
@@ -547,6 +558,7 @@ function toHist(samples, rk, nowS) {
     const l = s ? LEVELS.indexOf(s.level) : -1;
     h.level.push(l < 0 ? null : l);
     h.cf.push(s && fin(s.concurrency_factor) ? s.concurrency_factor : null);
+    h.mem.push(s && fin(s.mem_used_pct) ? s.mem_used_pct : null);
     if (h.gpus) h.gpus.forEach((g, j) => g.push(s && Array.isArray(s.gpus_c) && fin(s.gpus_c[j]) ? s.gpus_c[j] : null));
   };
   rows.forEach((s, i) => { if (i && s.ms - rows[i - 1].ms > gap) push((s.ms + rows[i - 1].ms) / 2, null); push(s.ms, s); });
@@ -654,6 +666,7 @@ function TrendChart({ b, h, rk }) {
       ${h.temp[ix] == null ? html`<div class="r"><span>no reading</span></div>` : html`
         <div class="r"><span><i style=${{ background: "var(--s1)" }}></i>${b.gpus ? "hottest GPU" : "zone"}</span><b>${fmt(h.temp[ix])} °C</b></div>
         ${h.gpu && html`<div class="r"><span><i style=${{ background: "var(--s2)" }}></i>GPU</span><b>${fmt(h.gpu[ix])} °C</b></div>`}
+        <div class="r"><span>Memory</span><b>${h.mem[ix] == null ? "—" : fmt(h.mem[ix], 0) + "%"}</b></div>
         ${governed && html`<div class="r"><span><i class="sw" style=${{ background: lvColor(h.level[ix]) }}></i>level</span><b>${h.level[ix] == null ? "—" : LEVELS[h.level[ix]]}</b></div>
           <div class="r"><span>admitting</span><b>${h.cf[ix] == null ? "—" : "×" + fmt(h.cf[ix], 2)}</b></div>`}`}
     </div>`}
@@ -701,9 +714,10 @@ function Single({ b, h, rk, table }) {
   return html`<${React.Fragment}>
     <div class="stats">${stats.map(([v, l], i) => html`<div class="stat" key=${i}><b>${v}</b><span>${l}</span></div>`)}</div>
     ${table ? html`<div class="chartcard tablewrap"><table class="dt">
-        <thead><tr><th>Time (UTC)</th><th>${b.gpus ? "Hottest GPU" : "Zone"}</th>${h.gpu && html`<th>GPU</th>`}${governed && html`<th>Level</th><th>Admitting</th>`}</tr></thead>
+        <thead><tr><th>Time (UTC)</th><th>${b.gpus ? "Hottest GPU" : "Zone"}</th>${h.gpu && html`<th>GPU</th>`}<th>Memory</th>${governed && html`<th>Level</th><th>Admitting</th>`}</tr></thead>
         <tbody>${rows.map(({ ms, i }) => html`<tr key=${ms}><td>${rk === "15m" ? hhmmss(ms) : hhmm(ms)}</td><td>${i < 0 || h.temp[i] == null ? "—" : fmt(h.temp[i]) + " °C"}</td>
           ${h.gpu && html`<td>${i < 0 || h.gpu[i] == null ? "—" : fmt(h.gpu[i]) + " °C"}</td>`}
+          <td>${i < 0 || h.mem[i] == null ? "—" : fmt(h.mem[i], 0) + "%"}</td>
           ${governed && html`<td>${i < 0 || h.level[i] == null ? "—" : LEVELS[h.level[i]]}</td><td>${i < 0 || h.cf[i] == null ? "—" : "×" + fmt(h.cf[i], 2)}</td>`}</tr>`)}</tbody>
       </table></div>` : html`<${TrendChart} b=${b} h=${h} rk=${rk} key=${b.name + rk} />`}
     ${s.share && html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>

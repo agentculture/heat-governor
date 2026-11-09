@@ -38,6 +38,12 @@ def doc(temp: float, level: str = "cool") -> dict:
         "admit": level in ("cool", "warm"),
         "version": "9.9.9",
         "concurrency_factor": 1.0,
+        "sensors": {
+            "mem:used_pct": 91.0,
+            "mem:avail_mib": 11000,
+            "mem:swap_used_mib": 0,
+            "zone:8:ddrss-0-thermal": 45.7,
+        },
     }
 
 
@@ -104,6 +110,9 @@ def test_status_direct_json(fleet_file, fakes, capsys):
     assert by["dead"]["state"] == "unreachable" and by["dead"]["admit"] is None
     assert "no route" in by["dead"]["last_error"]
     assert st["reader"]["timeout_s"] == 1
+    assert by["cool"]["mem_used_pct"] == 91.0 and by["cool"]["mem_total_mib"] == 122222
+    assert by["cool"]["mem_temp_c"] == 45.7
+    assert by["dead"]["mem_used_pct"] is None and by["dead"]["mem_temp_c"] is None
 
 
 def test_status_direct_text(fleet_file, fakes, capsys):
@@ -112,6 +121,8 @@ def test_status_direct_text(fleet_file, fakes, capsys):
     lines = out.strip().splitlines()
     assert len(lines) == 4 and lines[0].startswith("dead")
     assert "age" in lines[1] and "88.0C" in lines[1]
+    assert "mem 91% of 119G" in lines[1] and "ddr 46C" in lines[1]
+    assert "mem -" in lines[0] and "ddr" not in lines[0]
     assert lines[-1].startswith("reader: source direct")
 
 
@@ -318,3 +329,23 @@ def test_status_text_hides_a_recovered_error():
     text = render_status(st)
     assert "connection refused" not in text
     assert "timed out" in text
+
+
+def test_status_text_memory_without_ddr_or_total():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    def box(name, memory):
+        th = {"admit": True, "temp_c": 48.0, "level": "cool", "memory": memory}
+        return {"name": name, "state": "ok", "age_s": 1.0, "thermal": th, "health": {}}
+
+    snap = {
+        "reader": {},
+        "machines": [
+            box("a", {"used_pct": 82.0, "total_mib": 62800, "temp_c": None}),
+            box("b", {"used_pct": 40.0, "total_mib": None, "temp_c": None}),
+        ],
+    }
+    text = render_status(build_status(snap, "mesh serve", None))
+    assert "mem 82% of 61G " in text and "mem 40% " in text and "ddr" not in text
+    cols = {line.index("cool") for line in text.splitlines()[:2]}
+    assert len(cols) == 1  # level column stays aligned
