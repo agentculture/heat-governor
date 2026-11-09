@@ -141,12 +141,17 @@ def gpu_text(gpu: dict) -> str:
     return ", ".join(parts)
 
 
-def cmd_sense(args: argparse.Namespace) -> None:
+def sense_reading(args: argparse.Namespace):
+    """One read-only sensor reading: ``(profile, reading, json_doc)``."""
     from heat_governor.sense import Sensor
 
     prof = _profile(args)
     r = Sensor(prof.zones, gpu=prof.gpu).read()
-    doc = {"platform": prof.name, **r.as_dict()}
+    return prof, r, {"platform": prof.name, **r.as_dict()}
+
+
+def cmd_sense(args: argparse.Namespace) -> None:
+    prof, r, doc = sense_reading(args)
     if args.json:
         emit_result(doc, json_mode=True)
         return

@@ -309,7 +309,9 @@ def test_cli_status_shows_the_operator_ceiling_and_its_source(
     cfg = tmp_path / "c.toml"
     cfg.write_text("[daemon]\ngpu_ceiling_mhz = 1500\n")
     _cli(capsys, GC, HOLD, "1200", DATA, str(tmp_path))
-    rc, out, _ = _cli(capsys, GC, "status", "--config", str(cfg), DATA, str(tmp_path), JSON)
+    rc, out, _ = _cli(
+        capsys, GC, "status", "--platform", "spark", "--config", str(cfg), DATA, str(tmp_path), JSON
+    )
     doc = json.loads(out)["operator_ceiling"]
     assert rc == 0
     assert doc["mhz"] == 1200
@@ -538,7 +540,7 @@ def test_cli_lock_apply_records_a_hold(tmp_path: Path, capsys, monkeypatch) -> N
 
     clock = FakeGpuClock(visible=False)  # the DGX Spark: the hardware shows no lock
     monkeypatch.setattr(tuning, "_clock", lambda: clock)
-    rc, _, _ = _cli(capsys, GC, LOCK, "2200", "--apply", DATA, str(tmp_path))
+    rc, _, _ = _cli(capsys, GC, LOCK, "2200", "--platform", "spark", "--apply", DATA, str(tmp_path))
     doc = json.loads(_hold_file(tmp_path).read_text())
     assert rc == 0
     assert clock.calls == [(LOCK, 2200)]
@@ -550,7 +552,7 @@ def test_cli_lock_dry_run_records_nothing(tmp_path: Path, capsys, monkeypatch) -
     from heat_governor.cli._commands import tuning
 
     monkeypatch.setattr(tuning, "_clock", lambda: FakeGpuClock(visible=False))
-    rc, out, _ = _cli(capsys, GC, LOCK, "2200", DATA, str(tmp_path))
+    rc, out, _ = _cli(capsys, GC, LOCK, "2200", "--platform", "spark", DATA, str(tmp_path))
     assert rc == 0
     assert "dry run" in out
     assert not _hold_file(tmp_path).exists()
@@ -562,7 +564,7 @@ def test_cli_lock_that_fails_records_nothing(tmp_path: Path, capsys, monkeypatch
     clock = FakeGpuClock(visible=False)
     monkeypatch.setattr(clock, "lock", lambda mhz: (False, "denied"))
     monkeypatch.setattr(tuning, "_clock", lambda: clock)
-    rc, _, _ = _cli(capsys, GC, LOCK, "2200", "--apply", DATA, str(tmp_path))
+    rc, _, _ = _cli(capsys, GC, LOCK, "2200", "--platform", "spark", "--apply", DATA, str(tmp_path))
     assert rc != 0
     assert not _hold_file(tmp_path).exists()
 
@@ -572,8 +574,8 @@ def test_cli_reset_apply_releases_the_hold(tmp_path: Path, capsys, monkeypatch) 
 
     clock = FakeGpuClock(visible=False)
     monkeypatch.setattr(tuning, "_clock", lambda: clock)
-    _cli(capsys, GC, LOCK, "2200", "--apply", DATA, str(tmp_path))
-    rc, _, _ = _cli(capsys, GC, "reset", "--apply", DATA, str(tmp_path))
+    _cli(capsys, GC, LOCK, "2200", "--platform", "spark", "--apply", DATA, str(tmp_path))
+    rc, _, _ = _cli(capsys, GC, "reset", "--platform", "spark", "--apply", DATA, str(tmp_path))
     assert rc == 0
     assert not _hold_file(tmp_path).exists()
 

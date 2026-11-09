@@ -68,7 +68,8 @@ flowchart LR
 | DGX Spark (GB10) | 88 / 91.5 / 93 C (ACPI zones) | operator ceiling **2200 MHz** (law); 1800 / 1400 above warm | measured (resets at about 94.5-95 C; clock sweep 2026-10-24) |
 | Jetson AGX Thor | 95 / 100 / 104 C | 1300 / 1000 MHz | limits declared; clock sweep 2026-10-24: no default ceiling |
 | Jetson AGX Orin | 85 / 90 / 94 C | **1122 MHz at 85 C, 918 MHz at 88 C** | limits declared; GPU steps measured 2026-10-24 |
-| anything else | lowest critical trip minus 15 C | none | derived |
+| VENTUNO Q (Qualcomm QCS8300) | 94 / 98 / 102 C (30 zones: cpu, cpuss, gpuss, nsp, ddrss) | none (Adreno clock is read, not written) | declared from trip points, unmeasured |
+| anything else (incl. UNO Q) | lowest critical trip minus 15 C | none | derived |
 
 ### The operator's ceiling is law
 
@@ -208,6 +209,69 @@ xychart-beta
 Evidence: [`docs/evidence/2026-10-24-gpu-clock-ceiling-spark.md`](docs/evidence/2026-10-24-gpu-clock-ceiling-spark.md),
 [`docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md`](docs/evidence/2026-10-24-gpu-clock-ceiling-jetsons.md).
 
+## Fleet view
+
+One page for every machine. A reader polls each daemon (they still bind
+`127.0.0.1:9476` and are unchanged; remote ones are reached over SSH), marks each
+machine `ok`, `stale` or `unreachable` on the reader's own clock, and never
+admits work unless the machine is `ok`. Machines are listed in `fleet.toml`,
+a separate file beside `config.toml` (`config.toml` is unchanged):
+
+```toml
+poll_s = 10
+timeout_s = 5
+
+[[machines]]
+name = "this-box"
+transport = "local"
+
+[[machines]]
+name = "box-a"
+host = "box-a.example.ts.net"
+transport = "ssh"
+```
+
+```bash
+heat-governor mesh status             # asks a running mesh serve, else reads every machine once
+heat-governor mesh serve              # reader + dashboard + JSON API on 127.0.0.1:9480
+heat-governor mesh serve --listen 127.0.0.1:9481
+```
+
+The dashboard (fleet map, filters, per-machine trends and compare, Polar night
+light and dark) is served from vendored assets and works offline. From another
+device, open it through a tunnel:
+`ssh -L 9480:127.0.0.1:9480 user@host`, then <http://127.0.0.1:9480/>.
+Trends come from each machine's own record files
+(`<data_dir>/records/YYYYMMDD.jsonl`, the ones the daemon already writes): the
+reader runs one fixed, read-only, niced downsampling script over its existing
+ssh connection (numbers are its only arguments) and reads this machine's files
+locally, caching each answer for a minute (five for ranges over 26 h). The panel
+offers 15 min to 7 days; a 7-day bucket is a sampled maximum, not an exact one,
+to keep the load on busy boxes low. When a machine's records cannot be read, the
+panel falls back to the reader's own compact 24 h in-memory history
+(temperatures, level, concurrency factor and memory use %, lost on restart) and
+says so under the chart.
+
+Each machine also carries a `memory` object taken from the daemon's published
+sensors: `used_pct`, `avail_mib`, `total_mib` (derived from the two, since the
+document has none), `swap_used_mib`, `pressure_some_avg10` (null on daemons
+older than 0.14) and `temp_c`. `temp_c` is the hottest DDR/DRAM/EMC thermal zone and
+appears only where the board exposes one (the VENTUNO Q does; Jetson and DGX
+Spark boards do not, and report null). The page, `mesh status` (`mem 91% of 122G`,
+plus `ddr 46C` where present) and the trend tooltip and table show it.
+
+For agents, `heat-governor mcp` is a read-only MCP server over stdio. Add it to
+a client as a stdio command, for example:
+
+```bash
+claude mcp add heat-governor -- heat-governor mcp
+```
+
+Planned, not built: a bearer-token-protected tailnet listener on each daemon
+and a read-only `GET /history` route on daemons (upgrade release) **(planned)**.
+VENTUNO Q limits are declared from trip points and wait for a measured load
+run **(planned)**.
+
 ## Configure and tune
 
 Everything above is a setting in one TOML file that a running daemon re-reads
@@ -245,6 +309,8 @@ heat-governor gpu-clock helper        # the root helper + sudoers line for GPU c
 | `unit` | Print a systemd user unit. |
 | `config overview\|path\|show\|init\|check` | The config file a running daemon re-reads. |
 | `gpu-clock overview\|status\|helper\|lock\|reset\|hold\|release` | The GPU clock ceiling (root helper); `hold`/`release` declare the operator's ceiling (law). |
+| `mesh overview\|status\|serve` | The fleet view: every machine's state, or the dashboard and JSON API on `127.0.0.1:9480`. |
+| `mcp` | Read-only MCP server over stdio (tools `mesh_status`, `machine_state`, `sense`). |
 | `whoami`, `learn`, `explain <path>`, `overview`, `doctor`, `cli overview` | Agent verbs. |
 
 Every command supports `--json`. Results go to stdout and errors/diagnostics

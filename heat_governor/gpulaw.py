@@ -55,8 +55,13 @@ class GpuGovernor:
         *,
         apply: bool,
         enabled: bool,
+        unsupported: str | None = None,
     ) -> None:
         self.clock = clock
+        # why this platform has no GPU clock control (gpuclock.unsupported_reason), else
+        # None: every clock the governor builds later (a live reload turning gpu_clock or an
+        # operator ceiling on) carries it, so the root helper is never probed or spawned
+        self.unsupported = unsupported
         self.ledger = ledger
         self.operator = operator
         self.log = log
@@ -75,7 +80,7 @@ class GpuGovernor:
 
     def probe(self) -> str:
         if self.clock is None:
-            self.clock = GpuClock()
+            self.clock = GpuClock(unsupported=self.unsupported)
         self.clock.probe()
         self.probed = True
         self.baseline = self._read()

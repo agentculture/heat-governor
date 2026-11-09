@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-11-08
+
+### Added
+
+- VENTUNO Q (Qualcomm QCS8300) support: detection from the device tree (arduino,monza / qcom,qcs8300), built-in `ventunoq` profile (30 zones, warm 94 / hot 98 / critical 102 C, declared from trip points, unmeasured). UNO Q falls back to generic.
+- `sense`: `devfreq` GPU mode (Adreno clock in MHz), board power from an ina232 hwmon (`board_power_w`); `capabilities` reports a fan driven by a kernel cooling device as kernel-owned.
+- Fleet view: `fleet.toml` (strictly validated, beside `config.toml`), SSH/local transport with ControlMaster and bounded timeouts, and a concurrent fleet reader (ok/stale/unreachable on the reader clock, admit null unless ok, 24 h history).
+- `heat-governor mesh overview|status|serve`: `serve` runs the reader, the dashboard and a JSON API on 127.0.0.1:9480; `status` asks it and falls back to a direct read.
+- Dashboard with vendored React 18.3.1, htm 3.1.1 and Lato: fleet map, filters, trends, compare, Polar night light/dark, works offline.
+- `heat-governor mcp`: read-only MCP server over stdio (tools `mesh_status`, `machine_state`, `sense`).
+- Fleet view memory: each machine carries a `memory` object (used %, available, derived total, swap, pressure, DDR temperature only where a memory zone exists); history gains `mem_used_pct`; `mesh status` shows `mem 91% of 122G`; the page has a Memory fact with an (i) hint and a Memory value in the trend tooltip and table.
+- Fleet view trend history from each machine's own record files: a fixed, read-only, niced downsampling script (`heat_governor/history.py`) runs over the reader's existing ssh connection (locally for the reader's machine), cached 60 s (300 s over 26 h); `/api/history` gains a `7d` range and a `source` field (`records`, or `buffer` when the reader falls back to its in-memory history); the trend panel has a 7d pill with date labels and a one-line note when showing the buffer.
+
+### Changed
+
+- `gpu-clock` refuses ventunoq/devfreq profiles (exit 1 with a hint) in the CLI and the daemon; `lock`, `reset`, `hold` and `release` gained `--platform`. `hold` also refuses there, and the root helper is never spawned on such a board, including after a live config reload and when crash recovery finds a persisted `gpu_locked` entry (it is cleared, with a log line).
+- Fleet reader hardening: SSH output capped (1 MiB state, 8 MiB history; the child is killed past it); concurrent history misses share one read and `/api/history` answers `503` past 4 in flight; a restart never runs two pollers for one box; `mesh status` never closes an SSH connection under a running read; unexpected server errors are logged with a traceback.
+- The dashboard's Fan (fastest `fanN_input`, rpm) and Zones (readable thermal zones) facts are now filled.
+- Docs and harness prompt files describe the fleet view. Planned, not built: a bearer-token tailnet listener and daemon `GET /history` route; persisted reader history; measured VENTUNO Q limits.
+
 ## [0.15.0] - 2026-11-08
 
 ### Changed

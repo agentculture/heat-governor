@@ -30,6 +30,8 @@ declared from their trip points, unmeasured), and a generic fallback.
 - `heat-governor unit` -- a systemd user unit to install it.
 - `heat-governor config ...` -- the file a running daemon re-reads.
 - `heat-governor gpu-clock ...` -- the GPU clock ceiling (root helper).
+- `heat-governor mcp` -- a read-only MCP server over stdio (fleet and sense tools).
+- `heat-governor mesh ...` -- the fleet view (`overview`, `status`, `serve`).
 
 ## Agent verbs
 
@@ -127,6 +129,56 @@ itself (distinct from the global `overview`, which describes the agent).
     heat-governor cli overview --json
 """
 
+_MESH = """\
+# heat-governor mesh
+
+The fleet view: every machine's thermal state in one place. Read-only toward
+the machines (each is read through its own `state` over ssh or locally).
+Machines come from `fleet.toml` beside `config.toml` (format:
+`docs/fleet.example.toml`).
+
+- `mesh overview` -- describe this noun.
+- `mesh status [--fleet PATH] [--url URL]` -- name, state (ok / stale /
+  unreachable), age in seconds, temperature, level, admit, version and last
+  error per machine, hottest first. It asks a running `mesh serve`
+  (`/api/fleet`, 2 s) and otherwise reads every machine once, concurrently
+  (about timeout_s + 1 s at most). `source` says which. Exit 0 when the read
+  worked (an unreachable box is data); 2 when nothing could be read; 1 for a
+  bad or missing fleet file.
+- `mesh serve [--fleet PATH] [--listen HOST:PORT]` -- the page and JSON API
+  on 127.0.0.1:9480; only an explicit `--listen` changes the address. The
+  server has no authentication: anyone who can reach a non-loopback address
+  can read the fleet and start history reads (at most 4 at once; more get
+  `503`), so bind one only on a network you trust.
+
+## Usage
+
+    heat-governor mesh status
+    heat-governor mesh status --json
+    heat-governor mesh serve --listen 127.0.0.1:9480
+"""
+
+
+_MCP = """\
+# heat-governor mcp
+
+A read-only MCP (Model Context Protocol) server over stdio: newline-delimited
+JSON-RPC 2.0 on stdin/stdout, so an agent can query the fleet. Stdout carries
+only protocol frames; diagnostics go to stderr; EOF on stdin exits 0.
+`--json` is accepted but has no effect on the protocol.
+
+Tools (none can pause, cap, apply or edit anything):
+
+- `mesh_status {fleet?, url?}` -- what `mesh status --json` returns.
+- `machine_state {name, fleet?, url?}` -- one machine's full snapshot entry.
+- `sense {}` -- this machine's own sensor reading (`sense --json`).
+
+The fleet tools ask a running `mesh serve` first and fall back to a direct
+read, exactly like `mesh status`. A tool failure is a result with
+`isError: true`, not a JSON-RPC error.
+
+    heat-governor mcp [--json]
+"""
 
 _SENSE = """\
 # heat-governor sense
@@ -342,6 +394,11 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("doctor",): _DOCTOR,
     ("cli",): _CLI,
     ("cli", "overview"): _CLI,
+    ("mesh",): _MESH,
+    ("mesh", "overview"): _MESH,
+    ("mesh", "status"): _MESH,
+    ("mesh", "serve"): _MESH,
+    ("mcp",): _MCP,
     ("sense",): _SENSE,
     ("capabilities",): _CAPABILITIES,
     ("run",): _RUN,

@@ -29,10 +29,51 @@ ORIN_ZONES = [
     ("soc2-thermal", 54812, [("passive", 99000), ("critical", 104500)]),
     ("tj-thermal", 60000, [("active", 75000), ("critical", 104500)]),
 ]
+# Arduino VENTUNO Q (arduino,monza): a representative subset of its 48 zones. Trip types and
+# values read from the live VENTUNO Q sysfs, 2026-11-08. Only the two PMIC zones carry a critical
+# trip (125 C); cpuss-0-0 also has an active 38 C trip. Idle temps are typical; the PMIC sdram
+# zone is the hottest, as on the real box.
+_CPU = [("passive", 135000), ("passive", 126000), ("passive", 130000)]
+_ACC = [("passive", 135000), ("passive", 115000), ("passive", 130000)]
+_TWO = [("passive", 135000), ("passive", 130000)]
+_CPUSS = [("passive", 135000), ("passive", 130000), ("active", 38000)]
+_PMIC = [("passive", 105000), ("critical", 125000)]
+VENTUNOQ_ZONES = [
+    ("aoss-0-thermal", 43000, _TWO),
+    ("cpu-0-0-0-thermal", 44100, _CPU),
+    ("cpu-1-0-0-thermal", 43800, _CPU),
+    ("cpuss-0-0-thermal", 43500, _CPUSS),
+    ("cpuss-1-0-thermal", 43400, _TWO),
+    ("ddrss-0-thermal", 45000, _TWO),
+    ("gpuss-0-thermal", 44200, _ACC),
+    ("gpuss-1-thermal", 44600, _ACC),
+    ("nsp-0-0-0-thermal", 43200, _ACC),
+    ("nsp-0-1-0-thermal", 43900, _ACC),
+    ("pcie-0-thermal", 42000, _TWO),
+    ("pmm8620au-0-therm", 46000, _PMIC),
+    ("pmm8650au-1-therm", 48000, _PMIC),
+]
+
+GPU_DEVFREQ = "3d00000.gpu"
+GPU_FREQS = (479000000, 599000000, 780000000, 877000000)
 
 
-def make_sys(root: Path, zones, *, model: str | None = None, fan: tuple | None = None) -> Path:
-    """Build ``root/sys`` (and ``root/proc/device-tree/model``); return the sys root."""
+def make_sys(
+    root: Path,
+    zones,
+    *,
+    model: str | None = None,
+    fan: tuple | None = None,
+    compatible: list[str] | None = None,
+    devfreq: bool | None = None,
+    ina232: int | None = None,
+) -> Path:
+    """Build ``root/sys`` (and ``root/proc/device-tree/{model,compatible}``); return the sys root.
+
+    ``compatible`` is the device-tree compatible list (NUL-separated on disk). ``devfreq=True``
+    adds the VENTUNO Q GPU node ``class/devfreq/3d00000.gpu``. ``ina232`` (microwatts) adds an
+    hwmon named ``ina232`` with ``power1_input``. All default to None: nothing extra is written.
+    """
     sysr = root / "sys"
     for i, (ztype, temp, trips) in enumerate(zones):
         z = sysr / "class" / "thermal" / f"thermal_zone{i}"
@@ -48,10 +89,24 @@ def make_sys(root: Path, zones, *, model: str | None = None, fan: tuple | None =
         hw.mkdir(parents=True)
         (hw / "name").write_text("pwmfan\n")
         (hw / "pwm1").write_text(f"{fan[0]}\n")
-    if model:
+    if ina232 is not None:
+        hw = sysr / "class" / "hwmon" / "hwmon1"
+        hw.mkdir(parents=True)
+        (hw / "name").write_text("ina232\n")
+        (hw / "power1_input").write_text(f"{ina232}\n")
+    if devfreq:
+        gpu = sysr / "class" / "devfreq" / GPU_DEVFREQ
+        gpu.mkdir(parents=True)
+        (gpu / "cur_freq").write_text(f"{GPU_FREQS[0]}\n")
+        (gpu / "max_freq").write_text(f"{GPU_FREQS[-1]}\n")
+        (gpu / "available_frequencies").write_text(" ".join(map(str, GPU_FREQS)) + " \n")
+    if model or compatible:
         dt = root / "proc" / "device-tree"
-        dt.mkdir(parents=True)
-        (dt / "model").write_text(model + "\x00")
+        dt.mkdir(parents=True, exist_ok=True)
+        if model:
+            (dt / "model").write_text(model + "\x00")
+        if compatible:
+            (dt / "compatible").write_bytes(b"".join(c.encode() + b"\x00" for c in compatible))
     return sysr
 
 

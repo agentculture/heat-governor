@@ -52,6 +52,7 @@ from heat_governor.config import (
 from heat_governor.config import load as load_config
 from heat_governor.docker import Container, Docker, DockerError
 from heat_governor.gpuclock import GpuClock
+from heat_governor.gpuclock import unsupported_reason as gpuclock_unsupported
 from heat_governor.gpulaw import GpuGovernor, Plan
 from heat_governor.operator_ceiling import OperatorCeiling, hold_path
 from heat_governor.pair import PairDecision, PeerLink, PeerStatus
@@ -156,6 +157,7 @@ class Daemon:
             self._log,
             apply=opts.apply,
             enabled=opts.gpu_clock,
+            unsupported=gpuclock_unsupported(profile),
         )
         self._gpu_plan = Plan(False, None, None, False)
         self._reload_at = 0.0
@@ -190,7 +192,8 @@ class Daemon:
     def _default_gpuclock(self, opts: Options) -> GpuClock | None:
         """A GPU clock driver when clock control or an operator ceiling needs one."""
         if opts.gpu_clock or self.operator.mhz is not None:
-            return GpuClock()
+            # VENTUNO Q / devfreq boards: never probe or spawn the root helper (spec c5)
+            return GpuClock(unsupported=gpuclock_unsupported(self.profile))
         return None
 
     # -- logging: to the log sink and into the record
@@ -470,6 +473,7 @@ class Daemon:
         self.ctrl.set_profile(profile)
         self.sensor.watched = profile.zones
         self.sensor.gpu = profile.gpu
+        self._set_gpu_unsupported(gpuclock_unsupported(profile))
         if self.cycler:
             self.cycler.period_s = profile.duty_period_s
         d = cfg.daemon
@@ -644,6 +648,14 @@ class Daemon:
         if c.id in self.pair_ids and self._pair is not None:
             return self._pair.cpus
         return d.cpus
+
+    def _set_gpu_unsupported(self, reason: str | None) -> None:
+        """A reload that resolves to a platform with no GPU clock control: the governor,
+        and any clock it already built, never touch the root helper from now on."""
+        self.gpu.unsupported = reason
+        if reason and self.gpu.clock is not None:
+            self.gpu.clock.unsupported = reason
+            self.gpu.clock.available, self.gpu.clock.reason = False, reason
 
     @property
     def gpuclock(self) -> GpuClock | None:
@@ -888,7 +900,7 @@ class Daemon:
         restored = self.ledger.recover(
             self.docker,
             self._log,
-            gpu=self.gpuclock or GpuClock(),
+            gpu=self.gpuclock or GpuClock(unsupported=gpuclock_unsupported(self.profile)),
             units=units,
             gpu_operator_mhz=self.operator.mhz,
         )

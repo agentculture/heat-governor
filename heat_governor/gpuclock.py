@@ -34,6 +34,19 @@ MIN_MHZ, MAX_MHZ = 100, 5000
 Run = Callable[[list[str]], "tuple[int, str]"]
 
 
+def unsupported_reason(profile) -> str | None:
+    """Why this platform has no supported GPU clock control, else ``None``.
+
+    Refuses exactly the VENTUNO Q (profile ``ventunoq``) and any profile whose GPU
+    mode is ``devfreq``; generic and every other profile keep their behaviour."""
+    if getattr(profile, "name", None) == "ventunoq" or getattr(profile, "gpu", None) == "devfreq":
+        return (
+            f"unsupported platform: {profile.name} has no supported GPU clock control "
+            "(the root helper only drives nvidia-smi and Jetson devfreq)"
+        )
+    return None
+
+
 def _run(argv: list[str]) -> tuple[int, str]:  # pragma: no cover - thin shell
     try:
         p = subprocess.run(argv, capture_output=True, text=True, timeout=8, check=False)
@@ -49,8 +62,12 @@ class GpuClock:
     available: bool = False
     reason: str = "not probed"
     ceiling_mhz: int | None = None  # what we last set; None = no cap from us
+    unsupported: str | None = None  # set from unsupported_reason(): never touch the helper
 
     def probe(self) -> bool:
+        if self.unsupported:
+            self.available, self.reason = False, self.unsupported
+            return False
         if not Path(self.helper).exists():
             self.available, self.reason = False, f"helper not installed at {self.helper}"
             return False
@@ -68,6 +85,8 @@ class GpuClock:
         return True
 
     def lock(self, mhz: int) -> tuple[bool, str]:
+        if self.unsupported:  # never spawn the helper on an unsupported board
+            return False, self.unsupported
         mhz = int(mhz)
         if not MIN_MHZ <= mhz <= MAX_MHZ:
             return False, f"refusing {mhz} MHz (allowed {MIN_MHZ}-{MAX_MHZ})"
@@ -77,6 +96,8 @@ class GpuClock:
         return rc == 0, out
 
     def reset(self) -> tuple[bool, str]:
+        if self.unsupported:
+            return False, self.unsupported
         rc, out = self.run(["sudo", "-n", self.helper, "reset"])
         if rc == 0:
             self.ceiling_mhz = None
@@ -89,6 +110,8 @@ class GpuClock:
         current and maximum SM clocks (``2405, 3003``): ``nvidia-smi`` exposes no
         ``-lgc`` lock there (checked live 2026-10-24), so this is ``None`` and a
         hand ceiling is invisible -- it must be declared to be law."""
+        if self.unsupported:
+            return None
         rc, out = self.run(["sudo", "-n", self.helper, "status"])
         return parse_ceiling(out) if rc == 0 else None
 

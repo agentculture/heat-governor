@@ -1,0 +1,1039 @@
+<!-- Locked design reference for the heat-governor fleet dashboard (heat-governor mesh serve).
+     Source: https://claude.ai/artifact/JMe4tUb7V64zQhii6bmsS4, version 1794166791-7eb1, locked 2026-11-08.
+     Readings are a 2026-11-08 snapshot plus invented example fleets and generated history; not live data. -->
+<title>Heat Governor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700;900&display=swap">
+<style>
+/* Layout: title, theme row, the fleet diagram on top, then a filter bar and one row (or tile) per machine.
+   Four skins x two modes. data-skin picks the palette, data-mode (light|dark) is resolved in script from
+   the host's data-theme or prefers-color-scheme, or forced by the in-page toggle. Lato throughout. */
+:root { color-scheme: light;
+  --s1:#e06a2a; --s2:#5a6bb5;
+  --bg:#f5f0e6; --surface:#fbf8f1; --surface-2:#f7f2e9; --raise:#ece5d7;
+  --ink:#38362f; --ink-soft:#6c675d; --ink-faint:#9f998c;
+  --line:rgba(56,54,47,.08); --line-strong:rgba(56,54,47,.14);
+  --cool:#3a8fb8; --warm:#c27a24; --hot:#d23f25; --accent:#e06a2a; --accent-tint:rgba(224,106,42,.08);
+  --heat:linear-gradient(90deg,#a9d6ec,#5b8fb0 30%,#8b6f80 52%,#d8643f 72%,#e06a2a 86%,#f0a050);
+  --dim:rgba(251,248,241,.86); --header:rgba(245,240,230,.86); --glow:none;
+  --radius:16px; --ease:cubic-bezier(.22,1,.36,1);
+  --font-body:"Lato",-apple-system,"Segoe UI",system-ui,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace }
+html[data-skin="polar"][data-mode="dark"] { color-scheme:dark;
+  --s1:#e06a2a; --s2:#7282e0;
+  --bg:#0e1117; --surface:#151922; --surface-2:#1b202b; --raise:#252b39;
+  --ink:#e9ebf0; --ink-soft:#9ba2b0; --ink-faint:#646b79;
+  --line:rgba(255,255,255,.07); --line-strong:rgba(255,255,255,.13);
+  --cool:#8ecbe8; --warm:#f2a65a; --hot:#ff5a3c; --accent:#ff8a3d; --accent-tint:rgba(255,138,61,.10);
+  --heat:linear-gradient(90deg,#8ecbe8,#5b8fb0 30%,#7a5a6e 52%,#d8643f 72%,#ff8a3d 86%,#ffc27a);
+  --dim:rgba(21,25,34,.86); --header:rgba(14,17,23,.82);
+  --glow:radial-gradient(70% 100% at 50% 100%, rgba(255,138,61,.07), transparent 70%) }
+html[data-skin="geo"] { color-scheme:light;
+  --s1:#d4592a; --s2:#4f5fb0;
+  --bg:#eef1f3; --surface:#ffffff; --surface-2:#f5f7f8; --raise:#e2e7ea;
+  --ink:#1d272d; --ink-soft:#526068; --ink-faint:#8b979e;
+  --line:rgba(29,39,45,.08); --line-strong:rgba(29,39,45,.15);
+  --cool:#2f86ab; --warm:#c47a1f; --hot:#c23b22; --accent:#d4592a; --accent-tint:rgba(212,89,42,.08);
+  --heat:linear-gradient(90deg,#bfe3ef,#6fb3cf 24%,#8d9ba2 48%,#e0a35a 70%,#d4592a 86%,#a8321c);
+  --dim:rgba(255,255,255,.84); --header:rgba(238,241,243,.85); --glow:none }
+html[data-skin="geo"][data-mode="dark"] { color-scheme:dark;
+  --s1:#e46a30; --s2:#6f80dc;
+  --bg:#121618; --surface:#1a1f22; --surface-2:#20262a; --raise:#2b3236;
+  --ink:#e6ecee; --ink-soft:#9aa6ac; --ink-faint:#66737a;
+  --line:rgba(255,255,255,.07); --line-strong:rgba(255,255,255,.13);
+  --cool:#7cc3de; --warm:#e3a24f; --hot:#ff6a45; --accent:#ff7a3d; --accent-tint:rgba(255,122,61,.10);
+  --heat:linear-gradient(90deg,#bfe3ef,#6fb3cf 24%,#5d6b72 48%,#e0a35a 70%,#ff7a3d 86%,#ffb37a);
+  --dim:rgba(26,31,34,.86); --header:rgba(18,22,24,.82);
+  --glow:radial-gradient(70% 100% at 50% 100%, rgba(255,122,61,.06), transparent 70%) }
+html[data-skin="kiln"] { color-scheme:light;
+  --s1:#b4552e; --s2:#5f5aa8;
+  --bg:#f4eee5; --surface:#fffaf3; --surface-2:#f9f2e8; --raise:#ebe0d1;
+  --ink:#2e2520; --ink-soft:#6a5c51; --ink-faint:#a29486;
+  --line:rgba(46,37,32,.08); --line-strong:rgba(46,37,32,.15);
+  --cool:#5f8a83; --warm:#b97a2e; --hot:#9e3324; --accent:#b4552e; --accent-tint:rgba(180,85,46,.08);
+  --heat:linear-gradient(90deg,#a9c6bf,#d9cdb9 30%,#e6bb80 55%,#cf8047 74%,#b4552e 88%,#8a2c20);
+  --dim:rgba(255,250,243,.84); --header:rgba(244,238,229,.86); --glow:none }
+html[data-skin="kiln"][data-mode="dark"] { color-scheme:dark;
+  --s1:#d06a36; --s2:#8a7fd6;
+  --bg:#18130f; --surface:#211a15; --surface-2:#2a211b; --raise:#362b23;
+  --ink:#f1e7da; --ink-soft:#b3a393; --ink-faint:#7c6d60;
+  --line:rgba(255,240,225,.07); --line-strong:rgba(255,240,225,.13);
+  --cool:#8fbab2; --warm:#e0a35a; --hot:#e9604a; --accent:#d9733f; --accent-tint:rgba(217,115,63,.11);
+  --heat:linear-gradient(90deg,#a9c6bf,#8a8073 30%,#e6bb80 55%,#cf8047 74%,#d9733f 88%,#f0a36a);
+  --dim:rgba(33,26,21,.86); --header:rgba(24,19,15,.84);
+  --glow:radial-gradient(70% 100% at 50% 100%, rgba(217,115,63,.07), transparent 70%) }
+html[data-skin="aurora"] { color-scheme:light;
+  --s1:#6d5ce6; --s2:#0e7fb0;
+  --bg:#f2f4fa; --surface:#ffffff; --surface-2:#f6f7fc; --raise:#e5e8f4;
+  --ink:#1a1f33; --ink-soft:#565d78; --ink-faint:#8e94ab;
+  --line:rgba(26,31,51,.08); --line-strong:rgba(26,31,51,.15);
+  --cool:#12a37a; --warm:#c27a24; --hot:#d63b4c; --accent:#6d5ce6; --accent-tint:rgba(109,92,230,.08);
+  --heat:linear-gradient(90deg,#34c79a,#2fa9bf 24%,#6d5ce6 48%,#a94fc0 66%,#e8732a 86%,#f0a050);
+  --dim:rgba(255,255,255,.85); --header:rgba(242,244,250,.85); --glow:none }
+html[data-skin="aurora"][data-mode="dark"] { color-scheme:dark;
+  --s1:#8b6cf0; --s2:#1f9dcc;
+  --bg:#0a0e19; --surface:#111727; --surface-2:#161e33; --raise:#202b45;
+  --ink:#e8ecf5; --ink-soft:#97a2bc; --ink-faint:#5d6884;
+  --line:rgba(255,255,255,.07); --line-strong:rgba(255,255,255,.13);
+  --cool:#6ee7b7; --warm:#f2a65a; --hot:#ff5f6d; --accent:#8b7cf6; --accent-tint:rgba(139,124,246,.12);
+  --heat:linear-gradient(90deg,#6ee7b7,#5ec8d8 24%,#8b7cf6 48%,#c26bd6 66%,#ff8a3d 86%,#ffb86b);
+  --dim:rgba(17,23,39,.86); --header:rgba(10,14,25,.82);
+  --glow:radial-gradient(90% 50% at 50% 0%, rgba(110,231,183,.06), transparent 70%), radial-gradient(60% 40% at 80% 0%, rgba(139,124,246,.07), transparent 70%) }
+
+* { box-sizing:border-box }
+html { background:var(--bg); transition:background .4s var(--ease) }
+body { margin:0; min-height:100%; color:var(--ink); background:var(--bg); font-family:var(--font-body); font-size:1rem; line-height:1.6; -webkit-font-smoothing:antialiased; transition:background .4s var(--ease), color .4s var(--ease) }
+body::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:-1; background:var(--glow) }
+:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:6px }
+code, .mono { font-family:var(--font-mono); font-size:.84em }
+code { color:var(--ink-soft); overflow-wrap:anywhere }
+.rune { font-family:"Segoe UI Historic","Noto Sans Runic","Junicode",serif; font-weight:400 }
+button { font:inherit }
+
+.app-header { position:sticky; top:env(safe-area-inset-top,0px); z-index:5; display:flex; align-items:center; justify-content:space-between; gap:12px 16px; flex-wrap:wrap;
+  padding-block:12px; padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:var(--header); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:1px solid var(--line) }
+body::before { content:""; position:fixed; inset:0 0 auto; height:env(safe-area-inset-top,0px); z-index:10; background:var(--bg) }
+@media (min-width:720px){ .app-header{ padding-left:max(40px,env(safe-area-inset-left,0px)); padding-right:max(40px,env(safe-area-inset-right,0px)) } }
+.brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; color:var(--ink-soft) }
+.brand .mark { color:var(--accent); font-size:17px; width:18px; text-align:center }
+.pills { display:flex; gap:2px; padding:3px; border-radius:999px; background:var(--surface); border:1px solid var(--line); overflow-x:auto; max-width:100% }
+.pills button { appearance:none; border:0; background:transparent; color:var(--ink-soft); font-size:14px; padding:6px 15px; border-radius:999px; cursor:pointer; white-space:nowrap; transition:color .25s var(--ease), background .25s var(--ease) }
+.pills button:hover { color:var(--ink) }
+.pills button[aria-pressed="true"], .pills button[aria-current="page"] { background:var(--raise); color:var(--ink); font-weight:700 }
+.pills.sm button { font-size:13px; padding:5px 12px }
+.pills .n { font-variant-numeric:tabular-nums; color:var(--ink-faint); margin-left:5px; font-weight:400 }
+
+main { padding-block:32px 80px; padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px)); max-width:74rem; margin:0 auto }
+@media (min-width:720px){ main{ padding-left:max(40px,env(safe-area-inset-left,0px)); padding-right:max(40px,env(safe-area-inset-right,0px)) } }
+.titlebar { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:22px }
+h1 { font-weight:900; font-size:clamp(2rem,4.6vw,2.8rem); line-height:1.05; letter-spacing:-.02em; margin:.25rem 0 0 }
+h2 { font-weight:700; font-size:1.1rem; margin:2.6rem 0 1rem }
+.lede { font-size:1.05rem; color:var(--ink-soft); max-width:44rem; margin:-.4rem 0 1.6rem; font-weight:300 }
+.eyebrow { font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint) }
+
+/* theme row */
+.skins { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:0 0 18px }
+@media (max-width:760px){ .skins{ grid-template-columns:repeat(2,minmax(0,1fr)) } }
+.skin { appearance:none; text-align:left; cursor:pointer; padding:12px 14px 10px; border-radius:14px; border:1px solid var(--line);
+  background:var(--sk-bg); color:var(--sk-ink); display:grid; gap:7px; transition:transform .25s var(--ease), border-color .25s, box-shadow .25s }
+.skin:hover { transform:translateY(-2px) }
+.skin[aria-pressed="true"] { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-tint) }
+.skin .nm { font-weight:700; font-size:.9rem }
+.skin .ramp { height:5px; border-radius:999px; background:var(--sk-heat) }
+.skin .ends { display:flex; justify-content:space-between; font-size:.66rem; opacity:.65 }
+
+.card { min-width:0; padding:1.4rem 1.6rem; border-radius:var(--radius); background:var(--surface); border:1px solid var(--line); transition:background .4s var(--ease) }
+.flow { overflow-x:auto }
+.flow svg { display:block; min-width:640px; width:100% }
+
+/* summary + filters */
+.summary { display:flex; gap:8px; flex-wrap:wrap; margin:22px 0 12px }
+.chip { --m:var(--ink-faint); appearance:none; display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border-radius:12px; cursor:pointer;
+  background:var(--surface); border:1px solid var(--line); color:var(--ink-soft); font-size:.86rem; transition:border-color .2s, background .2s }
+.chip b { font-size:1.15rem; font-weight:900; color:var(--ink); font-variant-numeric:tabular-nums }
+.chip::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--m) }
+.chip.cool { --m:var(--cool) } .chip.warm { --m:var(--warm) } .chip.hot { --m:var(--hot) } .chip.critical { --m:var(--hot) }
+.chip.critical::before { box-shadow:0 0 0 3px color-mix(in srgb,var(--hot) 25%,transparent) }
+.chip.unreachable::before { background:transparent; border:1.5px dashed var(--ink-faint) }
+.chip[aria-pressed="true"] { border-color:var(--m); background:color-mix(in srgb,var(--m) 9%,var(--surface)) }
+.chip:disabled { opacity:.45; cursor:default }
+.filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px }
+.search { flex:1 1 12rem; min-width:0; max-width:18rem; padding:7px 14px; border-radius:999px; border:1px solid var(--line); background:var(--surface); color:var(--ink); font:inherit; font-size:14px }
+.search::placeholder { color:var(--ink-faint) }
+.count { font-size:.82rem; color:var(--ink-faint); margin-left:auto }
+.clear { appearance:none; border:0; background:none; color:var(--accent); cursor:pointer; font-size:.82rem; padding:4px 6px }
+
+/* machine rows */
+.lanes { display:grid; gap:10px }
+.lane { --m:var(--ink-faint);
+  display:grid; grid-template-columns:210px minmax(0,1fr) 230px; gap:26px; align-items:center;
+  padding:18px 24px; border-radius:var(--radius); background:var(--surface); border:1px solid var(--line);
+  transition:border-color .3s var(--ease), background .4s var(--ease) }
+.lane:hover { border-color:var(--line-strong); background:var(--surface-2) }
+.cool { --m:var(--cool) } .warm { --m:var(--warm) } .hot, .critical { --m:var(--hot) }
+.lane.critical { border-color:color-mix(in srgb,var(--hot) 45%,transparent) }
+.lane.unreachable { border-style:dashed; background:transparent }
+.lane.unreachable .temp, .lane.unreachable .scale { opacity:.45 }
+@media (max-width:900px){ .lane{ grid-template-columns:1fr; gap:14px; padding:18px } }
+.who { display:grid; gap:1px; min-width:0 }
+.who .top { display:flex; align-items:center; gap:10px; flex-wrap:wrap }
+.who .mark { font-size:17px; color:var(--m); width:22px; text-align:center }
+.who .name { font-weight:700; font-size:1.12rem }
+.who .sub { font-size:.78rem; color:var(--ink-soft); padding-left:32px }
+.who .sub.faint { color:var(--ink-faint) }
+.tag { font-size:.62rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); border:1px solid var(--line-strong); border-radius:999px; padding:1px 7px }
+.status { display:inline-flex; align-items:center; gap:7px; font-size:.8rem; color:var(--m); font-weight:700 }
+.status::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--m); box-shadow:0 0 0 4px color-mix(in srgb,var(--m) 16%,transparent) }
+.unreachable .status::before { background:transparent; border:1.5px dashed var(--ink-faint); box-shadow:none }
+.meter { min-width:0 }
+.readout { display:flex; gap:14px; align-items:baseline; flex-wrap:wrap }
+.temp { font-variant-numeric:tabular-nums; font-weight:300; font-size:2.1rem; line-height:1; letter-spacing:-.02em }
+.temp small { font-size:.85rem; color:var(--ink-faint); margin-left:3px }
+.why { font-size:.8rem; color:var(--ink-faint) }
+.scale { position:relative; height:6px; border-radius:999px; background:var(--heat); margin:13px 0 6px }
+.scale .dim { position:absolute; top:0; bottom:0; right:0; background:var(--dim); border-radius:0 999px 999px 0 }
+.scale .head { position:absolute; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%; background:var(--surface); border:3px solid var(--m) }
+.scale .band { position:absolute; top:-4px; bottom:-4px; border-inline:1px solid var(--ink-faint); background:color-mix(in srgb,var(--ink) 7%,transparent); border-radius:3px }
+.scale.off { background:none; border:1px dashed var(--line-strong); height:6px }
+.lane.unsupported, .tile.unsupported { border-style:dashed; background:transparent }
+.unsupported .status::before { background:transparent; border:1.5px dashed var(--ink-faint); box-shadow:none }
+.chip.unsupported::before { background:transparent; border:1.5px dashed var(--ink-faint) }
+.gpus { display:inline-flex; gap:3px; vertical-align:middle }
+.gpus i { width:12px; height:12px; border-radius:3px }
+.tile .gpus i { width:100%; height:8px } .tile .gpus { display:grid; grid-template-columns:repeat(8,1fr) }
+.ticks { position:relative; height:16px; font-size:.68rem; color:var(--ink-faint); font-variant-numeric:tabular-nums }
+.ticks span { position:absolute; white-space:nowrap }
+.facts { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:0; min-width:0; font-size:.82rem }
+.facts dt { color:var(--ink-faint) } .facts dd { margin:0; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; color:var(--ink-soft) }
+
+/* machine tiles */
+.tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,13.5rem),1fr)); gap:10px }
+.tile { --m:var(--ink-faint); padding:16px 16px 12px; border-radius:14px; background:var(--surface); border:1px solid var(--line); display:grid; gap:6px; min-width:0 }
+.tile.critical { border-color:color-mix(in srgb,var(--hot) 45%,transparent) }
+.tile.unreachable { border-style:dashed; background:transparent }
+.tile .row { display:flex; justify-content:space-between; align-items:center; gap:8px }
+.tile .nm { font-weight:700; display:flex; gap:8px; align-items:center; min-width:0 }
+.tile .nm .mark { color:var(--m) }
+.tile .temp { font-size:1.7rem }
+.tile .scale { margin:6px 0 2px; height:4px }
+.tile .scale .head { width:10px; height:10px; margin:-5px 0 0 -5px; border-width:2px }
+.tile .meta { font-size:.72rem; color:var(--ink-faint); overflow-wrap:anywhere }
+.empty { padding:40px; text-align:center; color:var(--ink-faint); border:1px dashed var(--line-strong); border-radius:var(--radius) }
+
+/* survey + decisions */
+.surfaces { display:grid; gap:10px }
+.surface { display:grid; grid-template-columns:44px minmax(0,1fr); gap:14px; padding:18px 20px; border-radius:14px; background:var(--surface); border:1px solid var(--line) }
+.sid { font-size:.8rem; color:var(--ink-faint); padding-top:2px }
+.surface h3 { margin:0 0 4px; font-size:.98rem; font-weight:700; overflow-wrap:anywhere }
+.surface p { margin:0; font-size:.9rem; color:var(--ink-soft) }
+.claim { margin-top:12px; padding:12px 14px; border-radius:10px; background:var(--surface-2); font-size:.88rem; color:var(--ink-soft) }
+.claim .k { display:inline-block; font-size:.7rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--k); margin-right:8px }
+.k-requirement { --k:var(--accent) } .k-boundary { --k:var(--cool) } .k-non_goal { --k:var(--ink-faint) }
+.qs { display:grid; gap:14px }
+.q { display:grid; gap:12px }
+.q .qid { font-size:.72rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint) }
+.q h3 { margin:0; font-size:1.05rem; line-height:1.5; font-weight:700 }
+.opts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr)); gap:10px }
+.opt { border:1px solid var(--line); border-radius:12px; padding:14px 16px; font-size:.88rem; color:var(--ink-soft) }
+.opt b { display:block; margin-bottom:3px; color:var(--ink) }
+.opt.rec { border-color:color-mix(in srgb,var(--accent) 45%,transparent); background:var(--accent-tint) }
+.opt .tg { font-size:.66rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--accent) }
+.resolved { font-size:.88rem; padding:12px 16px; border-radius:12px; background:var(--surface-2); color:var(--ink-soft) }
+.resolved b { color:var(--cool) }
+.park { padding:14px 18px; border-radius:12px; border:1px dashed var(--line-strong); font-size:.9rem; color:var(--ink-soft) }
+.alert { padding:16px 20px; border-radius:14px; background:color-mix(in srgb,var(--hot) 9%,transparent); border:1px solid color-mix(in srgb,var(--hot) 28%,transparent); font-size:.92rem; color:var(--ink-soft); margin-bottom:20px }
+.alert b { color:var(--ink) }
+
+/* info hints */
+.info { position:relative; display:inline-flex; vertical-align:1px; margin-left:5px; cursor:help; border-radius:50% }
+.info .i { display:inline-grid; place-items:center; width:14px; height:14px; border-radius:50%; border:1px solid var(--line-strong); color:var(--ink-faint); font-size:9px; font-weight:700; font-style:normal; line-height:1 }
+.info:hover .i, .info:focus-visible .i { color:var(--ink); border-color:var(--ink-faint) }
+.info .tipx { position:absolute; left:-6px; bottom:calc(100% + 8px); width:min(250px,70vw); padding:9px 11px; border-radius:10px; z-index:30;
+  background:var(--surface-2); border:1px solid var(--line-strong); box-shadow:0 8px 24px rgba(0,0,0,.18); color:var(--ink-soft); font-size:.76rem; font-weight:400; line-height:1.45; text-transform:none; letter-spacing:0;
+  opacity:0; visibility:hidden; transform:translateY(3px); transition:opacity .18s var(--ease), transform .18s var(--ease), visibility .18s }
+.info:hover .tipx, .info:focus .tipx { opacity:1; visibility:visible; transform:none }
+
+/* selectable machines */
+.lane, .tile { cursor:pointer }
+.lane:focus-visible, .tile:focus-visible { outline:2px solid var(--accent); outline-offset:2px }
+.lane[data-open="true"], .tile[data-open="true"] { border-color:var(--accent) }
+
+/* detail drawer */
+.scrim { position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:20; animation:fade .25s var(--ease) }
+.drawer { position:fixed; top:0; right:0; bottom:0; z-index:21; width:min(800px,100vw); background:var(--bg); border-left:1px solid var(--line);
+  box-shadow:-20px 0 60px rgba(0,0,0,.25); overflow-y:auto; overscroll-behavior:contain; animation:slide .35s var(--ease);
+  padding-top:max(20px,env(safe-area-inset-top,0px)); padding-bottom:max(32px,env(safe-area-inset-bottom,0px));
+  padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px)) }
+@media (min-width:720px){ .drawer{ padding-left:28px; padding-right:max(28px,env(safe-area-inset-right,0px)) } }
+@keyframes slide { from { transform:translateX(28px); opacity:0 } }
+@keyframes fade { from { opacity:0 } }
+.dh { display:flex; align-items:flex-start; justify-content:space-between; gap:12px }
+.dh h2 { margin:.2rem 0 0; font-size:1.7rem; font-weight:900; display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+.dh h2 .mark { color:var(--m); font-weight:400 }
+.dh .sub { color:var(--ink-soft); font-size:.85rem }
+.dnow { display:flex; gap:14px; align-items:baseline; flex-wrap:wrap; margin:12px 0 16px }
+.xbtn { appearance:none; flex:none; border:1px solid var(--line); background:var(--surface); color:var(--ink); width:38px; height:38px; border-radius:50%; cursor:pointer; font-size:20px; line-height:1 }
+.xbtn:hover { border-color:var(--line-strong) }
+.drow { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin:0 0 12px }
+.stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-bottom:12px }
+@media (max-width:600px){ .stats{ grid-template-columns:repeat(2,minmax(0,1fr)) } }
+.stat { padding:12px 14px; border-radius:12px; background:var(--surface); border:1px solid var(--line); min-width:0 }
+.stat b { display:block; font-size:1.4rem; font-weight:300; font-variant-numeric:tabular-nums; letter-spacing:-.01em; color:var(--ink) }
+.stat span { font-size:.72rem; color:var(--ink-faint) }
+.chartcard { position:relative; padding:14px 14px 10px; border-radius:14px; background:var(--surface); border:1px solid var(--line); margin-bottom:12px; min-width:0 }
+.chartcard h3 { margin:0 0 8px; font-size:.86rem; font-weight:700 }
+.chartcard svg.trend { display:block; width:100%; height:auto; touch-action:pan-y; outline:none }
+.chartcard svg.trend:focus-visible { outline:2px solid var(--accent); outline-offset:4px; border-radius:6px }
+.chartcard svg text { font-family:var(--font-body); font-size:11px; fill:var(--ink-faint); font-variant-numeric:tabular-nums }
+.chartcard svg text.end { font-size:11.5px; font-weight:700; fill:var(--ink-soft) }
+.legend2 { display:flex; gap:16px; flex-wrap:wrap; font-size:.76rem; color:var(--ink-soft); margin:0 0 6px }
+.legend2 i { display:inline-block; width:14px; height:2px; border-radius:2px; margin-right:6px; vertical-align:middle }
+.legend2 i.sw { width:10px; height:10px; border-radius:3px; vertical-align:-1px }
+.tip { position:absolute; top:44px; pointer-events:none; min-width:160px; padding:9px 11px; border-radius:10px; background:var(--surface-2); border:1px solid var(--line-strong);
+  box-shadow:0 8px 24px rgba(0,0,0,.18); font-size:.78rem; color:var(--ink-soft); z-index:2 }
+.tip .tt { color:var(--ink-faint); margin-bottom:4px; font-size:.72rem }
+.tip .r { display:flex; align-items:center; gap:12px; justify-content:space-between; white-space:nowrap }
+.tip .r b { color:var(--ink); font-variant-numeric:tabular-nums }
+.tip .r i { width:12px; height:2px; display:inline-block; margin-right:6px; vertical-align:middle; border-radius:2px }
+.tip .r i.sw { width:8px; height:8px; border-radius:2px }
+.seg2 { display:flex; height:20px; gap:2px }
+.seg2 span { display:block; min-width:3px; border-radius:3px }
+.sharelab { display:flex; gap:16px; flex-wrap:wrap; font-size:.76rem; color:var(--ink-soft); margin-top:8px }
+.sharelab i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px; vertical-align:-1px }
+.sharelab b { color:var(--ink); font-variant-numeric:tabular-nums; margin-right:3px }
+.minis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px 14px }
+@media (max-width:600px){ .minis{ grid-template-columns:repeat(2,minmax(0,1fr)) } }
+.mini { font-size:.72rem; color:var(--ink-faint); min-width:0 } .mini svg { display:block; width:100%; height:36px } .mini b { color:var(--ink) }
+.tablewrap { overflow-x:auto }
+table.dt { width:100%; border-collapse:collapse; font-size:.8rem; font-variant-numeric:tabular-nums }
+.dt th, .dt td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap }
+.dt th:first-child, .dt td:first-child { text-align:left }
+.dt th { color:var(--ink-faint); font-weight:700 } .dt td { color:var(--ink-soft) }
+.linkbtn { appearance:none; border:0; background:none; color:var(--accent); cursor:pointer; font-size:.82rem; padding:4px 2px }
+.nodata { padding:44px 20px; text-align:center; color:var(--ink-faint); border:1px dashed var(--line-strong); border-radius:14px }
+:root { --lv-cool:var(--cool); --lv-warm:var(--warm); --lv-hot:color-mix(in srgb,var(--hot) 55%,var(--warm)); --lv-critical:var(--hot) }
+
+:root { --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4; --c6:#6250d6 }
+html[data-mode="dark"] { --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#9085e9 }
+.scrim { pointer-events:none; background:rgba(0,0,0,.12) }
+@media (max-width:900px){ .scrim { pointer-events:auto; background:rgba(0,0,0,.3) } }
+.drow-l { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+.hint { font-size:.74rem; color:var(--ink-faint); margin:-4px 0 12px }
+@media (max-width:900px){ .hint { display:none } }
+.picker { position:relative }
+.addbtn { appearance:none; border:1px dashed var(--line-strong); background:transparent; color:var(--ink-soft); border-radius:999px; padding:5px 13px; font-size:13px; cursor:pointer; transition:border-color .2s, color .2s }
+.addbtn:hover:not(:disabled) { border-color:var(--accent); color:var(--ink) }
+.addbtn:disabled { opacity:.55; cursor:default }
+.pop { position:absolute; top:calc(100% + 6px); left:0; z-index:5; width:min(300px,80vw); padding:8px; border-radius:14px; background:var(--surface); border:1px solid var(--line-strong); box-shadow:0 14px 40px rgba(0,0,0,.2) }
+.pop .search { max-width:none; width:100%; margin-bottom:6px }
+.opts { max-height:280px; overflow-y:auto; display:grid; gap:2px }
+.opt2 { --m:var(--ink-faint); appearance:none; display:grid; grid-template-columns:12px minmax(0,1fr) auto; gap:8px; align-items:center; width:100%; text-align:left; border:0; background:transparent; color:var(--ink); padding:7px 8px; border-radius:8px; cursor:pointer; font-size:.86rem }
+.opt2:hover:not(:disabled) { background:var(--surface-2) }
+.opt2:disabled { opacity:.45; cursor:default }
+.opt2 .meta { font-size:.74rem; color:var(--ink-faint); white-space:nowrap }
+.chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px }
+.mchip { display:inline-flex; align-items:center; gap:2px; padding:3px 4px 3px 10px; border-radius:999px; background:var(--surface); border:1px solid var(--line); font-size:.84rem; font-weight:700 }
+.mchip button, .rm { appearance:none; border:0; background:transparent; color:var(--ink-faint); width:22px; height:22px; border-radius:50%; cursor:pointer; font-size:15px; line-height:1 }
+.mchip button:hover, .rm:hover { background:var(--raise); color:var(--ink) }
+i.key { display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:7px; vertical-align:middle }
+.dt.cmp td:first-child { font-weight:700; color:var(--ink) }
+.dt.cmp .status { font-size:.74rem; margin-right:6px }
+.lvrows { display:grid; gap:8px }
+.lvrow { display:grid; grid-template-columns:120px minmax(0,1fr) 110px; gap:12px; align-items:center; font-size:.82rem }
+.lvrow .nm { font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.lvrow .pct { color:var(--ink-faint); font-size:.76rem; text-align:right; font-variant-numeric:tabular-nums }
+@media (max-width:600px){ .lvrow { grid-template-columns:90px minmax(0,1fr) } .lvrow .pct { display:none } }
+
+/* heat aura: grows with level; only critical moves */
+.lane.warm, .tile.warm { box-shadow:0 0 26px -14px var(--warm) }
+.lane.hot, .tile.hot { border-color:color-mix(in srgb,var(--hot) 30%,transparent); box-shadow:0 0 34px -12px var(--hot) }
+.lane.critical, .tile.critical { box-shadow:0 0 0 3px color-mix(in srgb,var(--hot) 12%,transparent), 0 0 44px -10px var(--hot); animation:aura 2.4s ease-in-out infinite }
+@keyframes aura {
+  0%, 100% { box-shadow:0 0 0 0 color-mix(in srgb,var(--hot) 0%,transparent), 0 0 30px -12px var(--hot) }
+  50% { box-shadow:0 0 0 4px color-mix(in srgb,var(--hot) 14%,transparent), 0 0 48px -8px var(--hot) } }
+@media (prefers-reduced-motion: reduce){ *{ animation:none!important; transition:none!important } }
+</style>
+
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
+<script>
+const DATA = {"snapshot": "2026-11-08 18:28 UTC", "frame": "fleet-view-ventuno-q-fit", "boxes": [{"name": "cultureos", "board": "Arduino VENTUNO Q (QCS8300)", "platform": "generic", "temp": 47.83, "zone": "25:pmm8650au_1_sdram", "fans": {"emc2305.pwm1": 128.0, "emc2305.fan1_input": 3348.0}, "families": {"aoss": 44.2, "cpu": 44.4, "nsp": 43.8, "ddrss": 43.8, "cpuss": 44.8, "pmm8620au_0_sail_xo": 47.459, "pmm8620au_0_ufs0": 43.255, "pmm8620au_0_xo": 46.769, "pmm8650au_1_sdram": 47.83, "pmm8620au-0-therm": 43.577, "pmm8650au-1-therm": 44.216, "pmm8620au_0_mbg_tz": 43.543, "gpuss": 43.7, "audio": 43.3, "pmm8650au_1_mbg_tz": 44.216, "camss": 43.7, "pcie": 44.8, "video": 44.0}, "nzones": 48}, {"name": "spark", "board": "NVIDIA DGX Spark (GB10)", "platform": "spark", "version": "0.14.1", "level": "warm", "admit": true, "cf": 0.5, "temp": 85.4, "rate": -1.7, "zone": "0:acpitz", "reason": "falling", "limits": {"warm_c": 88.0, "hot_c": 91.5, "crit_c": 93.0}, "gpu_temp": 78.0, "gpu_clock": "off", "applying": true, "containers": ["glm53-spark", "model-gear-vllm-primary", "model-gear-vllm-worker", "model-gear-vllm-multimodal", "model-gear-stt", "model-gear-bluetts"], "pair": "spark-e2f0", "pair_status": "ok"}, {"name": "spark2", "board": "NVIDIA DGX Spark (GB10)", "platform": "spark", "version": "0.14.1", "level": "cool", "admit": true, "cf": 1.0, "temp": 77.4, "rate": 0.5, "zone": "0:acpitz", "reason": "steady", "limits": {"warm_c": 88.0, "hot_c": 91.5, "crit_c": 93.0}, "gpu_temp": 66.0, "gpu_clock": "off", "applying": true, "containers": ["glm53-spark", "model-gear-vllm-primary", "model-gear-decider-strands-general", "model-gear-vllm-hand", "model-gear-vllm-embed", "model-gear-vllm-rerank"], "pair": "spark-f8a9", "pair_status": "ok"}, {"name": "thor", "board": "Jetson AGX Thor", "platform": "thor", "version": "0.13.0", "level": "cool", "admit": true, "cf": 1.0, "temp": 48.16, "rate": 0.015, "zone": "0:tj-thermal", "reason": "steady", "limits": {"warm_c": 95.0, "hot_c": 100.0, "crit_c": 104.0}, "gpu_temp": null, "gpu_clock": "ok (helper status: 1575)", "applying": true, "containers": ["super-worker", "model-gear-vllm-worker", "model-gear-vllm-multimodal", "model-gear-vllm-embed", "model-gear-vllm-rerank"], "pair": null, "pair_status": null}, {"name": "orin", "board": "Jetson AGX Orin", "platform": "orin", "version": "0.13.0", "level": "cool", "admit": true, "cf": 1.0, "temp": 54.44, "rate": 0.187, "zone": "0:cpu-thermal", "reason": "steady", "limits": {"warm_c": 85.0, "hot_c": 90.0, "crit_c": 94.0}, "gpu_temp": null, "gpu_clock": "ok (helper status: 1300)", "applying": true, "containers": ["model-gear-decider-general", "model-gear-vllm-embed", "model-gear-vllm-rerank", "embed-gemma2-embed"], "pair": null, "pair_status": null}], "claims": [{"id": "c2", "kind": "requirement", "text": "platforms.detect() recognises the VENTUNO Q from proc/device-tree/compatible (arduino,monza / qcom,qcs8300) and resolves a built-in 'ventunoq' profile; today detect() reads only device-tree/model ('Qualcomm Technologies, Inc. Monaco Monza addons', platforms.py:158-181) so this box falls to 'generic'"}, {"id": "c3", "kind": "requirement", "text": "a built-in 'ventunoq' profile watches cpu-*, cpuss-*, gpuss-*, nsp-* (NPU) and ddrss-* zones only, with declared (unmeasured) limits derived from the live passive trips (CPU 126 C, GPU/NPU 115 C); today generic watches all 48 zones, picks pmm8650au_1_sdram as hottest and sets warm/hot/crit 102/106/110 from the PMIC 125 C critical trip, so it would essentially never act"}, {"id": "c4", "kind": "requirement", "text": "sense reads the Adreno GPU via devfreq 3d00000.gpu (steps 479/599/780/877 MHz, no 'load' file) and board power from hwmon ina232 power1_input (12.96 W idle); capabilities stops calling the emc2305 fan 'firmware/nvfancontrol owned' (sense.py:470) because here it is kernel cooling_device7 (emc2305_fan, state 5/10)"}, {"id": "c5", "kind": "boundary", "text": "heat-governor does not drive the GPU clock on the VENTUNO Q in this work: gpuclock gains an explicit unsupported-platform guard, because the shell helper's is_jetson() (gpuclock.py:109) would fall through to nvidia-smi -lgc, which does not exist here"}, {"id": "c6", "kind": "requirement", "text": "tests fake a VENTUNO Q tree: tests/fakes.py make_sys gains compatible=, devfreq and ina232 hwmon support plus a VENTUNOQ_ZONES fixture, under tmp_path, never the real /sys"}, {"id": "c7", "kind": "requirement", "text": "heat-governor is installed on cultureos (uv tool + user unit + config like the other four) so the VENTUNO Q is the fifth governed, observable box; today 'which heat-governor' is empty and the unit does not exist"}, {"id": "c8", "kind": "requirement", "text": "a fleet reader on cultureos polls all five boxes server-side and tracks per-box ok/stale/unreachable on the reader's own clock, reusing pair.PeerLink's staleness logic; it never uses client.read's admit-on-unknown default, which is wrong for a monitor"}, {"id": "c9", "kind": "boundary", "text": "the fleet view is read-only and outside every daemon's control path: state schema 1 is unchanged (no renamed/removed fields, top-level level/admit/concurrency_factor/cpus keep their meaning, pair shown separately) and a dead box never delays any daemon tick"}, {"id": "c10", "kind": "requirement", "text": "the dashboard is served same-origin by heat-governor on cultureos (page + aggregated JSON from one process), so no daemon needs CORS headers; StateServer sends only Content-Type/Content-Length (state.py:72-77)"}, {"id": "c11", "kind": "requirement", "text": "the dashboard is one prebuilt static HTML file shipped as package data (hatch ships non-py files under heat_governor/), using React from a pinned CDN with no node build step, styled with the AgentCulture tokens copied cite-don't-import from culture-rules web/src/culture-design/tokens.css and the Lato font"}, {"id": "c12", "kind": "non_goal", "text": "no third-party Python runtime dependencies and no node/npm toolchain in this repo: pyproject keeps dependencies = [], the MCP server is hand-rolled JSON-RPC over stdio, the HTTP server is stdlib ThreadingHTTPServer"}, {"id": "c13", "kind": "requirement", "text": "a 'mesh' noun (overview, status [--json], serve) and a top-level 'mcp' verb are added through register(sub) in _build_parser with parser_class=type(p), ENTRIES in explain/catalog.py, the learn _TEXT/_as_json_payload lists and overview _VERBS, so teken cli doctor --strict and test_every_catalog_path_resolves stay green"}, {"id": "c14", "kind": "requirement", "text": "'heat-governor mcp' speaks MCP over stdio with read-only tools (mesh status, one box's state, sense) and owns stdout for JSON-RPC framing: all logging goes to stderr via emit_diagnostic; it still accepts --json and 'mcp --help' returns"}, {"id": "c15", "kind": "non_goal", "text": "the MCP server and dashboard never pause, cap, apply or change config on any box: no write tools, no --apply passthrough"}, {"id": "c16", "kind": "boundary", "text": "remote hostnames (spark/spark2/thor/orin and their tailnet names) live in a fleet host list, not hardcoded in package code, and no committed JSON carries a non-localhost url/host key"}], "scope": [{"id": "s1", "surface": "heat_governor/platforms.py detect()", "finding": "detect() reads only proc/device-tree/model (platforms.py:158-181); here it is 'Qualcomm Technologies, Inc. Monaco Monza addons' while compatible is 'arduino,monza qcom,monaco-monza qcom,qcs8300', so the box resolves to 'generic'", "seeds": ["c2"]}, {"id": "s2", "surface": "live sysfs trips + uv run heat-governor sense/capabilities --json", "finding": "48 zones; cpu-* trips passive 126/130/135, gpuss-*/nsp-* 115/130/135, PMIC pmm86*-therm passive 105 critical 125; generic profile limits 102/106/110 and empty watched list", "seeds": ["c3"]}, {"id": "s3", "surface": "heat_governor/sense.py read_gpu_jetson/read_fans/capabilities", "finding": "read_gpu_jetson globs class/devfreq/*gpu* but needs devices/platform/*gpu*/load (absent); no ina232 reader exists; read_fans reads only pwm1/fan1_input; fan text at sense.py:470 is a Jetson/Spark assumption", "seeds": ["c4"]}, {"id": "s4", "surface": "heat_governor/gpuclock.py", "finding": "probe() only checks helper + sudo (gpuclock.py:53-68); no platform guard; devfreq max_freq on 3d00000.gpu is writable but kernel already throttles via cooling_device12", "seeds": ["c5"]}, {"id": "s5", "surface": "tests/fakes.py + tests/test_sense_platforms.py", "finding": "make_sys(root, zones, model=, fan=) (fakes.py:34-55) writes only device-tree/model and a pwmfan hwmon; test_detect_jetson parametrises Thor/Orin model strings (lines 62-73)", "seeds": ["c6"]}, {"id": "s6", "surface": "cultureos install state (which/systemctl --user/uv tool list)", "finding": "heat-governor absent on cultureos; the four mesh boxes all use uv tool install + ~/.config/systemd/user/heat-governor.service running 'run --config %h/.config/heat-governor/config.toml' with [daemon] apply=true", "seeds": ["c7"]}, {"id": "s7", "surface": "heat_governor/pair.py + client.py", "finding": "PeerLink.status gives ok|stale|unreachable with skew-free staleness capped at MAX_PEER_STALE_S=600; PeerLink/PairRule are single-peer and bound to [pair]; client.read returns admit=True with reason no-state on failure (client.py:92-95)", "seeds": ["c8"]}, {"id": "s8", "surface": "docs/contracts/state.md + docs/integration.md", "finding": "schema bumps on incompatible change; unknown fields ignored; top-level decision stays the box's own (pair section); integration.md: keeps governing with no network; state server read-only, unauthenticated, bind only on a private link", "seeds": ["c9"]}, {"id": "s9", "surface": "heat_governor/state.py StateServer", "finding": "routes GET /state, /, /healthz only; no CORS, no OPTIONS, no history route; ThreadingHTTPServer in a daemon thread", "seeds": ["c10"]}, {"id": "s10", "surface": "culture-rules/web (style source)", "finding": "Vite+React18+TS, plain CSS custom properties; tokens.css pinned to agentculture/org b4d939ba, dawn light / hour-before-dawn dark via prefers-color-scheme; fonts are Fraunces (display) + Albert Sans (body), Lato not used; lane-row statistics board and pill tabs are the dashboard pattern", "seeds": ["c11"]}, {"id": "s11", "surface": "pyproject.toml + CLAUDE.md no-deps rule", "finding": "dependencies = [], hatchling wheel packages=[heat_governor], requires-python >=3.12; CI has no node except markdownlint", "seeds": ["c12"]}, {"id": "s12", "surface": "heat_governor/cli (+ explain/catalog.py, learn.py, overview.py)", "finding": "_build_parser at cli/__init__.py:64-99; noun pattern _commands/cli.py:30-43; catalog map catalog.py:336-367; learn/overview verb lists are hand-maintained, not parser-derived", "seeds": ["c13"]}, {"id": "s13", "surface": "CLI output contract + rubric (_output.py, governing.py run loop)", "finding": "results stdout / diagnostics stderr (_output.py:1-6); long-running verbs already exist (run, wait) with --json; whether teken's rubric invokes verbs beyond --help is unverified", "seeds": ["c14"]}, {"id": "s14", "surface": "MCP surface (absent today)", "finding": "zero hits for mcp/dashboard/cors in code or docs; no .mcp.json; a .mcp.json with a non-localhost url/host key would trip scan-secrets (_scan_endpoints, scan-secrets.py:216-230), a stdio command entry would not", "seeds": ["c15"]}, {"id": "s15", "surface": "scripts/scan-secrets.py", "finding": "endpoint check only parses valid JSON files and flags url/host/endpoint/base_url keys with http(s) to non-localhost; .py/.md/.toml are not endpoint-scanned", "seeds": ["c16"]}, {"id": "s16", "surface": "mesh deployment (ssh spark/spark2/thor/orin, read-only)", "finding": "all four run heat-governor with [daemon] apply=true and listen=127.0.0.1:9476; sparks also bind 10.77.77.1/.2 for [pair]; curl from cultureos to :9476 returns no connection on all four; names resolve to tailscale 100.x IPs; spark/spark2 are 0.14.1, thor/orin 0.13.0; spark sampled level=critical 89.1 C", "seeds": []}], "questions": [{"id": "q1", "title": "How does cultureos reach the four remote state servers? Today each binds 127.0.0.1:9476 only (the sparks also bind their private 10.77.77.x pair link).", "options": [{"rec": true, "t": "Read over ssh", "d": "The fleet reader runs ssh <box> curl 127.0.0.1:9476/state with a persistent connection. No change to any governing box, and it works today."}, {"t": "Add a tailnet listener", "d": "Each box also listens on its tailscale IP. Reads are faster, but it means a config change and restart on 4 live daemons, and the endpoint is unauthenticated (tailnet-only)."}]}, {"id": "q2", "title": "Lato everywhere, or Lato body with the org Fraunces headings?", "resolved": "Lato everywhere, because you asked for Lato. The culture colors, radius, shadows and shell stay."}, {"id": "q3", "title": "On cultureos, should the new daemon apply (pause or CPU-cap the lobes containers) or start in dry-run?", "options": [{"rec": true, "t": "Dry-run first", "d": "It publishes state and records runs, but touches nothing until the declared VENTUNO Q limits are checked under load."}, {"t": "Apply now", "d": "Same as the other four boxes. The limits are declared from trip points and haven't been measured."}]}, {"id": "q4", "title": "Upgrade thor and orin (0.13.0) and the sparks (0.14.1) to the new release as part of this work?", "options": [{"rec": true, "t": "Tolerate skew, upgrade after merge", "d": "The reader handles schema-1 docs with or without pair. Upgrades happen box by box with your go-ahead once the release is on PyPI."}, {"t": "Upgrade in this work", "d": "The whole mesh moves to one version, but it means restarting four applying daemons as part of the change."}]}, {"id": "q5", "title": "A claude.ai artifact cannot reach the tailnet live. What should the artifact be?", "options": [{"rec": true, "t": "Report + snapshot preview", "d": "This page is the report and preview. The live site runs on cultureos via heat-governor mesh serve, and this artifact gets refreshed from new snapshots."}, {"t": "Publish the live site", "d": "Expose mesh serve through the existing cloudflared tunnel behind Cloudflare Access, the same way rules.culture.dev is published."}]}], "parks": ["VENTUNO Q limits are declared from trip points, not measured; a load run (CPU+GPU+NPU) is needed to tune warm/hot/crit and duty, like the Spark measurements in docs/HANDOFF-2026-10-23.md", "UNO Q (arduino,imola) profile: no UNO Q is available to read sysfs from; don't assume the VENTUNO Q numbers; detect it and fall back to generic until measured", "Dashboard history: no history route exists on any daemon (records are local JSONL in ~/.local/state/heat-governor/records); v1 charts only what the reader buffers while running, unless a /history route is added later"]};
+const html = htm.bind(React.createElement);
+const { useState, useEffect, useMemo } = React;
+const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+
+const TABS = [["machines","Machines"],["survey","Survey"],["decisions","Decisions"]];
+const SKINS = {
+  polar:  { name:"Polar night", ends:["Niflheim","Muspelheim"], runes:true,
+            light:{ bg:"#f5f0e6", ink:"#38362f", heat:"linear-gradient(90deg,#a9d6ec,#5b8fb0 30%,#8b6f80 52%,#d8643f 72%,#e06a2a 86%,#f0a050)" },
+            dark:{ bg:"#0e1117", ink:"#e9ebf0", heat:"linear-gradient(90deg,#8ecbe8,#5b8fb0 30%,#7a5a6e 52%,#d8643f 72%,#ff8a3d 86%,#ffc27a)" } },
+  geo:    { name:"Geothermal", ends:["Glacier","Magma"], runes:true,
+            light:{ bg:"#eef1f3", ink:"#1d272d", heat:"linear-gradient(90deg,#bfe3ef,#6fb3cf 24%,#8d9ba2 48%,#e0a35a 70%,#d4592a 86%,#a8321c)" },
+            dark:{ bg:"#121618", ink:"#e6ecee", heat:"linear-gradient(90deg,#bfe3ef,#6fb3cf 24%,#5d6b72 48%,#e0a35a 70%,#ff7a3d 86%,#ffb37a)" } },
+  kiln:   { name:"Kiln", ends:["Celadon","Copper red"], runes:false,
+            light:{ bg:"#f4eee5", ink:"#2e2520", heat:"linear-gradient(90deg,#a9c6bf,#d9cdb9 30%,#e6bb80 55%,#cf8047 74%,#b4552e 88%,#8a2c20)" },
+            dark:{ bg:"#18130f", ink:"#f1e7da", heat:"linear-gradient(90deg,#a9c6bf,#8a8073 30%,#e6bb80 55%,#cf8047 74%,#d9733f 88%,#f0a36a)" } },
+  aurora: { name:"Aurora", ends:["Aurora","Ember"], runes:false,
+            light:{ bg:"#f2f4fa", ink:"#1a1f33", heat:"linear-gradient(90deg,#34c79a,#2fa9bf 24%,#6d5ce6 48%,#a94fc0 66%,#e8732a 86%,#f0a050)" },
+            dark:{ bg:"#0a0e19", ink:"#e8ecf5", heat:"linear-gradient(90deg,#6ee7b7,#5ec8d8 24%,#8b7cf6 48%,#c26bd6 66%,#ff8a3d 86%,#ffb86b)" } },
+};
+const PLATFORM_LABEL = { ventunoq:"VENTUNO Q", spark:"Spark", thor:"Thor", orin:"Orin", nano:"Orin Nano", windows:"Windows", gpusrv:"8-GPU server", gb300:"GB300" };
+const BOARD = { spark:"NVIDIA DGX Spark (GB10)", thor:"Jetson AGX Thor", orin:"Jetson AGX Orin" };
+const LIMITS = { spark:{ warm_c:88, hot_c:91.5, crit_c:93 }, thor:{ warm_c:95, hot_c:100, crit_c:104 }, orin:{ warm_c:85, hot_c:90, crit_c:94 } };
+// Elder Futhark initial of the machine's name: c→ᚲ, s→ᛋ, th→ᚦ, o→ᛟ, n→ᚾ, m→ᛗ, h→ᚺ, g→ᚷ
+const rune = n => n.startsWith("th") ? "ᚦ" : ({ c:"ᚲ", s:"ᛋ", o:"ᛟ", n:"ᚾ", m:"ᛗ", h:"ᚺ", g:"ᚷ" })[n[0]] || "ᚠ";
+const fmt = (n, d=1) => n == null ? "—" : Number(n).toFixed(d);
+const SEVERITY = { critical:6, hot:5, warm:4, unreachable:3, unsupported:2, unkept:1, cool:0 };
+
+// ---- fleets ----
+const real = DATA.boxes.map(b => ({ ...b, pkey: b.name === "cultureos" ? "ventunoq" : b.platform, state: b.level || "unkept" }));
+const ex = (name, pkey, temp, state, extra = {}) => ({
+  name, pkey, platform:pkey, board:BOARD[pkey], version:"0.16.0", demo:true, temp, state, level: state === "unreachable" ? null : state,
+  limits:LIMITS[pkey], reason: extra.reason || "steady", rate: extra.rate ?? 0.02, admit: state !== "critical", applying:true,
+  cf: ({ cool:1, warm:.5, hot:.25, critical:0 })[state] ?? 1, gpu_temp: pkey === "spark" ? Math.round(temp - 8) : null,
+  gpu_clock: pkey === "spark" ? "off" : (pkey === "thor" ? "ok (helper status: 1575)" : "ok (helper status: 1300)"),
+  containers: new Array(extra.n || 4).fill(0), pair: extra.pair || null, pair_status: extra.pair ? "ok" : null, zone: "", age: extra.age });
+const EXAMPLE = [
+  ...real.map(b => ({ ...b, version: b.version ? "0.16.0" : b.version })),
+  ex("spark3", "spark", 72.1, "cool", { pair:"spark4", n:5 }),
+  ex("spark4", "spark", 88.6, "warm", { pair:"spark3", reason:"rising", rate:.42, n:5 }),
+  ex("spark5", "spark", 91.9, "hot", { pair:"spark6", reason:"rising", rate:.31, n:6 }),
+  ex("spark6", "spark", 79.0, "cool", { pair:"spark5", reason:"falling", rate:-.22, n:6 }),
+  ex("spark7", "spark", 93.4, "critical", { pair:"spark8", reason:"rising", rate:.18, n:5 }),
+  ex("spark8", "spark", 81.2, "unreachable", { pair:"spark7", n:5, age:42 }),
+  ex("thor2", "thor", 61.3, "cool"),
+  ex("thor3", "thor", 96.2, "warm", { reason:"rising", rate:.12 }),
+  ex("thor4", "thor", 52.0, "cool"),
+  ex("orin2", "orin", 86.4, "warm", { n:3 }),
+];
+// A mixed home fleet. Invented readings; `sub` says what heat-governor can do on each today.
+const MIXED = [
+  ...EXAMPLE,
+  { ...ex("nano", "nano", 67.3, "cool", { n:2 }), board:"Jetson Orin Nano Super", limits:{ warm_c:80, hot_c:85, crit_c:90 },
+    gpu_clock:"ok (helper status: 1020)", sub:"jetson path works · needs its own profile" },
+  { ...ex("homelab", "gpusrv", 84.2, "warm", { n:8, reason:"rising", rate:.21 }), board:"Home server, 8× RTX GPUs", limits:{ warm_c:83, hot_c:87, crit_c:90 },
+    gpus:[71, 74, 79, 84.2, 77, 69, 73, 80], gpu_clock:"off", gpu_temp:84.2, sub:"generic + nvidia-smi · reads every GPU" },
+  { ...ex("gb300", "gb300", 76.5, "cool", { n:3 }), board:"DGX Station GB300", limits:{ warm_c:88, hot_c:91, crit_c:94 },
+    gpu_temp:70, gpu_clock:"off", sub:"nvidia-smi · no GB300 profile yet" },
+  { name:"minipc", pkey:"windows", platform:"windows", board:"Windows 11 mini PC", demo:true, state:"unsupported", temp:null, limits:null,
+    containers:[], sub:"no Linux sysfs · needs a Windows sensor reader" },
+];
+const FLEETS = { today: real, example: EXAMPLE, mixed: MIXED };
+
+// ---- theme mode ----
+function useMode(pref) {
+  const sys = () => { const t = document.documentElement.getAttribute("data-theme"); if (t === "dark" || t === "light") return t;
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; };
+  const [sysMode, setSys] = useState(sys);
+  useEffect(() => {
+    const mq = matchMedia("(prefers-color-scheme: dark)"); const on = () => setSys(sys());
+    mq.addEventListener("change", on);
+    const mo = new MutationObserver(on); mo.observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
+    return () => { mq.removeEventListener("change", on); mo.disconnect(); };
+  }, []);
+  return pref === "system" ? sysMode : pref;
+}
+
+function Scale({ temp, limits, ends, lo = 30, hi, small }) {
+  hi = hi || Math.max(110, (limits && limits.crit_c + 6) || 110);
+  const pct = v => Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100));
+  // one band from warm to crit with a single label, so close limits never collide
+  const a = limits ? pct(limits.warm_c) : null, z = limits ? pct(limits.crit_c) : null;
+  const mid = limits ? (a + z) / 2 : 0;
+  const anchor = mid > 85 ? { right: (100 - z) + "%" } : mid < 15 ? { left: a + "%" } : { left: mid + "%", transform: "translateX(-50%)" };
+  if (temp == null) return html`<div><div class="scale off" role="img" aria-label="no reading"></div>${!small && html`<div class="ticks"><span style=${{ left: 0 }}>no reading</span></div>`}</div>`;
+  return html`<div>
+    <div class="scale" role="img" aria-label=${`${fmt(temp)} °C${limits ? `, governs between ${limits.warm_c} and ${limits.crit_c} °C` : ""}`}>
+      <div class="dim" style=${{ left: pct(temp) + "%" }}></div>
+      ${limits && html`<div class="band" style=${{ left: a + "%", width: (z - a) + "%" }}></div>`}
+      <div class="head" style=${{ left: pct(temp) + "%" }}></div>
+    </div>
+    ${!small && limits && html`<div class="ticks"><span style=${anchor}>${limits.warm_c}–${limits.crit_c}°</span></div>`}
+  </div>`;
+}
+
+const Mark = ({ b, skin }) => skin.runes ? html`<span class="mark rune" aria-hidden="true">${rune(b.name)}</span>` : html`<span class="mark" aria-hidden="true">●</span>`;
+const statusText = b => b.state === "unreachable" ? `unreachable · ${b.age}s` : b.state === "unsupported" ? "not supported" : b.state;
+const whyText = b => b.state === "unkept" ? "acts only above 102 °C today" : b.state === "unreachable" ? "last reading shown" :
+  b.state === "unsupported" ? "heat-governor is Linux-only today" :
+  `${b.reason}${b.rate != null ? " · " + (b.rate > 0 ? "+" : "") + fmt(b.rate, 2) + " °C/s" : ""}`;
+// per-GPU strip for multi-GPU boxes: one cell per GPU, coloured against the box's limits
+function Gpus({ b }) {
+  if (!b.gpus) return null;
+  const c = t => t >= b.limits.crit_c ? "var(--hot)" : t >= b.limits.warm_c ? "var(--warm)" : "var(--cool)";
+  return html`<span class="gpus" role="img" aria-label=${"GPU temperatures: " + b.gpus.map(t => fmt(t, 0)).join(", ") + " °C"}>
+    ${b.gpus.map((t, i) => html`<i key=${i} title=${`GPU ${i}: ${fmt(t, 0)} °C`} style=${{ background: c(t), opacity: .35 + .65 * Math.min(1, Math.max(0, (t - 55) / 35)) }}></i>`)}</span>`;
+}
+
+
+// small (i) hint: hover or focus shows a plain-language explanation; never opens the machine
+const HINT = {
+  admit: "Whether clients may start new work here. ×1.00 is full speed, ×0.50 means run half as many jobs, holding means start nothing new until it cools.",
+  containers: "Docker containers this governor watches. Applying means it really pauses or CPU-caps them when hot; dry-run means it only logs what it would do.",
+  gpu: "GPU temperature, then the GPU clock ceiling. Off means the clock isn't capped; locked 1575 MHz means a ceiling is set through the root helper.",
+  pair: "The other half of a tensor-parallel pair. Both boxes cap the pair's containers by whichever box is hotter. ok means the partner's state is fresh.",
+  gpus: "One cell per GPU, coloured against this machine's limits. The hottest GPU drives the machine's level.",
+  fan: "Fan speed read from the board's fan controller (emc2305). The kernel drives it, not the governor.",
+  power: "Board power from the ina232 monitor. heat-governor doesn't read it yet.",
+  zones: "Thermal zones being watched. The generic profile watches every zone; a VENTUNO Q profile would watch only CPU, GPU, NPU and memory.",
+  sensors: "heat-governor reads Linux /sys thermal zones, so it can't see this machine's sensors yet.",
+  band: "The shaded range runs from warm, where the governor starts slowing new work, to critical, where it stops admitting work and pauses batch jobs.",
+};
+function Info({ k }) {
+  return html`<span class="info" tabIndex="0" aria-label=${HINT[k]} onClick=${e => e.stopPropagation()} onKeyDown=${e => e.stopPropagation()}>
+    <i class="i" aria-hidden="true">i</i><span class="tipx" role="tooltip">${HINT[k]}</span></span>`;
+}
+
+function Lane({ b, skin, open, onOpen }) {
+  const governed = b.state !== "unkept" && b.state !== "unsupported";
+  return html`<article class=${"lane " + b.state} role="button" tabIndex="0" aria-haspopup="dialog" aria-label=${(open ? "Remove " : "Show trends for ") + b.name} aria-pressed=${open} data-open=${open}
+    onClick=${() => onOpen(b.name)} onKeyDown=${e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(b.name); } }}>
+    <div class="who">
+      <div class="top"><${Mark} b=${b} skin=${skin} /><span class="name">${b.name}</span>${b.demo && html`<span class="tag">example</span>`}</div>
+      <span class="sub">${b.board}</span>
+      <span class="sub faint">${b.sub || (governed ? `${b.platform} · v${b.version}` : "no daemon yet")}</span>
+    </div>
+    <div class="meter">
+      <div class="readout">
+        <span class="temp">${fmt(b.temp)}<small>°C</small></span>
+        <span class="status">${statusText(b)}</span>
+        <span class="why">${whyText(b)}</span>
+      </div>
+      <${Scale} temp=${b.temp} limits=${b.limits} ends=${skin.ends} />
+    </div>
+    <dl class="facts">
+      ${governed ? html`
+        <dt>Admitting<${Info} k="admit" /></dt><dd>${b.state === "unreachable" ? "unknown" : (b.admit ? "yes" : "holding") + " · ×" + fmt(b.cf, 2)}</dd>
+        <dt>Containers<${Info} k="containers" /></dt><dd>${b.containers.length}${b.applying ? ", applying" : ", dry-run"}</dd>
+        <dt>GPU<${Info} k="gpu" /></dt><dd>${b.gpu_temp != null ? fmt(b.gpu_temp, 0) + " °C · " : ""}${(b.gpu_clock || "").replace("ok (helper status: ", "locked ").replace(")", " MHz")}</dd>
+        ${b.gpus ? html`<dt>GPUs<${Info} k="gpus" /></dt><dd><${Gpus} b=${b} /></dd>` : html`<dt>Pair<${Info} k="pair" /></dt><dd>${b.pair ? `${b.pair}, ${b.pair_status}` : "—"}</dd>`}` :
+      b.state === "unsupported" ? html`
+        <dt>Sensors<${Info} k="sensors" /></dt><dd>none readable</dd>
+        <dt>Containers</dt><dd>not governed</dd>` : html`
+        <dt>Fan<${Info} k="fan" /></dt><dd>${fmt(b.fans["emc2305.fan1_input"], 0)} rpm</dd>
+        <dt>Power<${Info} k="power" /></dt><dd>12.96 W, not read</dd>
+        <dt>GPU<${Info} k="gpu" /></dt><dd>Adreno, not read</dd>
+        <dt>Zones<${Info} k="zones" /></dt><dd>all ${b.nzones}</dd>`}
+    </dl>
+  </article>`;
+}
+
+function Tile({ b, skin, open, onOpen }) {
+  return html`<article class=${"tile " + b.state} role="button" tabIndex="0" aria-haspopup="dialog" aria-label=${(open ? "Remove " : "Show trends for ") + b.name} aria-pressed=${open} data-open=${open}
+    onClick=${() => onOpen(b.name)} onKeyDown=${e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(b.name); } }}>
+    <div class="row"><span class="nm"><${Mark} b=${b} skin=${skin} />${b.name}</span>${b.demo && html`<span class="tag">example</span>`}</div>
+    <div class="row"><span class="temp">${fmt(b.temp)}<small>°C</small></span><span class="status">${statusText(b)}</span></div>
+    <${Scale} temp=${b.temp} limits=${b.limits} ends=${skin.ends} small=${true} />
+    ${b.gpus && html`<${Gpus} b=${b} />`}
+    <span class="meta">${PLATFORM_LABEL[b.pkey]}${b.pair ? " · pair " + b.pair : ""} · ${whyText(b)}</span>
+  </article>`;
+}
+
+// Fleet map: one node per platform group around the cultureos hub; each node is coloured by its
+// worst member and names the states that need attention.
+function Flow({ fleet }) {
+  const colour = s => ({ cool:"var(--cool)", warm:"var(--warm)", hot:"var(--hot)", critical:"var(--hot)" })[s] || "var(--ink-faint)";
+  const keys = [...new Set(fleet.map(b => b.pkey))].filter(p => p !== "ventunoq");
+  const groups = keys.map(p => {
+    const ms = fleet.filter(b => b.pkey === p);
+    const worst = ms.reduce((w, b) => SEVERITY[b.state] > SEVERITY[w] ? b.state : w, "cool");
+    const c = ms.reduce((o, b) => (o[b.state] = (o[b.state] || 0) + 1, o), {});
+    const issues = ["critical", "hot", "warm", "unreachable", "unsupported"].filter(s => c[s]).map(s => ms.length === 1 ? (s === "unsupported" ? "not supported" : s) : `${c[s]} ${s}`);
+    const pairs = Math.floor(ms.filter(b => b.pair).length / 2);
+    const gpus = ms.reduce((n, b) => n + (b.gpus ? b.gpus.length : 0), 0);
+    // at most two items per line, so the summary always fits inside its box
+    const sub = issues.length ? Array.from({ length: Math.ceil(issues.length / 2) }, (_, k) => issues.slice(k * 2, k * 2 + 2).join(" · "))
+      : [[pairs ? `${pairs} pair${pairs > 1 ? "s" : ""}` : "", gpus ? `${gpus} GPUs` : "", "all cool"].filter(Boolean).join(" · ")];
+    return { p, n: ms.length, worst, sub };
+  });
+  const hub = fleet.find(b => b.pkey === "ventunoq");
+  // groups alternate left and right of the hub; the map grows taller as groups are added
+  const lines = Math.max(1, ...groups.map(g => g.sub.length));
+  const rows = Math.max(2, Math.ceil(groups.length / 2)), gw = 220, gh = 48 + lines * 16, rowGap = 22;
+  const W = 900, H = rows * gh + (rows - 1) * rowGap + 40, hx = W / 2, hy = H / 2;
+  const spots = groups.map((g, i) => [i % 2 ? W - 30 - gw : 30, 20 + Math.floor(i / 2) * (gh + rowGap)]);
+  const label = g => g.n > 1 ? `${PLATFORM_LABEL[g.p]} × ${g.n}` : PLATFORM_LABEL[g.p];
+  const colourOf = s => s === "unsupported" ? "transparent" : colour(s);
+  return html`<div class="flow"><svg viewBox=${`0 0 ${W} ${H}`} role="img" aria-label=${"Fleet: " + groups.map(g => `${g.n} ${PLATFORM_LABEL[g.p]}`).join(", ") + ", read by cultureos"}>
+    ${groups.map((g, i) => { const [x, y] = spots[i]; const cx = x < hx ? x + gw : x, cy = y + gh / 2; return html`<g key=${g.p} opacity=${g.worst === "unsupported" ? .6 : 1}>
+      <path d=${`M${cx} ${cy} C ${(cx + hx) / 2} ${cy}, ${(cx + hx) / 2} ${hy}, ${x < hx ? hx - 110 : hx + 110} ${hy}`} fill="none" stroke="var(--line-strong)" stroke-width="1.5" stroke-dasharray=${g.worst === "unsupported" ? "4 5" : "none"}/>
+      <rect x=${x} y=${y} width=${gw} height=${gh} rx="14" fill="var(--surface-2)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray=${g.worst === "unsupported" ? "4 4" : "none"}/>
+      <circle cx=${x + 22} cy=${y + 24} r="5" fill=${colourOf(g.worst)} stroke=${g.worst === "unsupported" ? "var(--ink-faint)" : "none"} stroke-dasharray="2 2"/>
+      <text x=${x + 36} y=${y + 29} font-weight="700" font-size="15" fill="var(--ink)">${label(g)}</text>
+      ${g.sub.map((ln, k) => html`<text key=${k} x=${x + 36} y=${y + 49 + k * 16} font-size="12" fill="var(--ink-soft)">${ln}</text>`)}</g>`; })}
+    <rect x=${hx - 110} y=${hy - 34} width="220" height="68" rx="16" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.5"/>
+    <text x=${hx} y=${hy - 4} text-anchor="middle" font-weight="900" font-size="16" fill="var(--ink)">cultureos</text>
+    <text x=${hx} y=${hy + 16} text-anchor="middle" font-size="12" fill="var(--ink-soft)">VENTUNO Q · ${hub ? (hub.state === "unkept" ? "not governed yet" : hub.state) : "reader"}</text>
+  </svg></div>`;
+}
+
+// ---- machine trends ----
+// No daemon serves history yet, so each machine's history is generated from a seed of its name,
+// shaped to end exactly at its current reading and state. Labelled as an example in the panel.
+const RANGES = { "15m": { dt: 3, label: "15 min" }, "1h": { dt: 12, label: "1 hour" }, "6h": { dt: 72, label: "6 hours" }, "24h": { dt: 288, label: "24 hours" } };
+const NPTS = 300;
+const T_END = Date.parse("2026-11-08T18:28:33Z");
+const LEVELS = ["cool", "warm", "hot", "critical"];
+const CF = [1, .5, .25, 0];
+function rng(seed) { let s = 2166136261; for (const c of seed) s = Math.imul(s ^ c.charCodeAt(0), 16777619) >>> 0; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
+function history(b, rk) {
+  if (b.temp == null) return null;
+  const r = rng(b.name + rk), dt = RANGES[rk].dt, L = b.limits, N = NPTS;
+  const amp = ({ cool: 3.5, warm: 6, hot: 8, critical: 10, unreachable: 6, unkept: 2 })[b.state] || 3;
+  const bursts = Array.from({ length: 2 + Math.floor(r() * 3) }, () => ({ c: r() * N, w: 4 + r() * 22, a: amp * (.5 + r() * .8) }));
+  if (["warm", "hot", "critical"].includes(b.state)) bursts.push({ c: N - 1 - r() * 6, w: 6 + r() * 8, a: amp });
+  const base0 = b.temp - amp * .9, sd = Math.min(1.6, .35 + dt / 80);
+  let ou = 0; const raw = [];
+  for (let i = 0; i < N; i++) {
+    ou = ou * .85 + (r() - .5) * 2 * sd;
+    let w = 0; for (const k of bursts) w += k.a * Math.exp(-((i - k.c) ** 2) / (2 * k.w * k.w));
+    raw.push(base0 + w + ou);
+  }
+  const shift = b.temp - raw[N - 1];
+  const temp = raw.map((v, i) => +(v + shift * i / (N - 1)).toFixed(1)); temp[N - 1] = b.temp;
+  const gpus = b.gpus ? b.gpus.map((g, k) => temp.map(v => +(g - (b.temp - v) * (.7 + .1 * (k % 3)) + (r() - .5) * 1.4).toFixed(1))) : null;
+  if (gpus) gpus.forEach((s, k) => { s[N - 1] = b.gpus[k]; });
+  const gOff = !b.gpus && b.gpu_temp != null ? b.temp - b.gpu_temp : null;
+  const gpu = gOff == null ? null : temp.map((v, i) => +(v - gOff + (r() - .5) * 1.2 - (i ? (v - temp[i - 1]) * .6 : 0)).toFixed(1));
+  if (gpu) gpu[N - 1] = b.gpu_temp;
+  let lv = 0; const level = [], cf = [];
+  for (const v of temp) {
+    if (!L) { level.push(null); cf.push(null); continue; }
+    const th = [L.warm_c, L.hot_c, L.crit_c]; let up = 0; th.forEach((x, j) => { if (v >= x) up = j + 1; });
+    if (up > lv) lv = up; else while (lv > 0 && v < th[lv - 1] - 1) lv--;
+    level.push(lv); cf.push(CF[lv]);
+  }
+  const want = ({ cool: 0, warm: 1, hot: 2, critical: 3 })[b.state];
+  if (want != null) { level[N - 1] = want; cf[N - 1] = CF[want]; }
+  if (b.state === "unreachable") {
+    const gap = Math.max(1, Math.ceil((b.age || 40) / dt));
+    for (let i = N - gap; i < N; i++) { temp[i] = null; level[i] = null; cf[i] = null; if (gpu) gpu[i] = null; if (gpus) gpus.forEach(s => { s[i] = null; }); }
+  }
+  const t = temp.map((_, i) => T_END - (N - 1 - i) * dt * 1000);
+  return { t, temp, gpu, gpus, level, cf, dt };
+}
+const hhmm = ms => { const d = new Date(ms); return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0"); };
+const hhmmss = ms => hhmm(ms) + ":" + String(new Date(ms).getUTCSeconds()).padStart(2, "0");
+const pathOf = (xs, ys) => { let d = "", pen = false; xs.forEach((x, i) => { const y = ys[i]; if (y == null) { pen = false; return; } d += (pen ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1); pen = true; }); return d; };
+const lvColor = l => l == null ? "transparent" : `var(--lv-${LEVELS[l]})`;
+
+function TrendChart({ b, h, rk }) {
+  const [idx, setIdx] = useState(null);
+  const N = h.temp.length, governed = !!b.limits;
+  const W = 720, L = 40, R = 650, T = 12, B = 196;
+  const stripY = 214, aTop = 244, aBot = 296, H = governed ? 326 : 226, axisY = governed ? aBot + 18 : B + 18;
+  const vals = [...h.temp, ...(h.gpu || [])].filter(v => v != null);
+  let lo = Math.floor((Math.min(...vals) - 3) / 5) * 5, hi = Math.ceil((Math.max(...vals, governed ? b.limits.crit_c + 1 : -Infinity) + 2) / 5) * 5;
+  const step = hi - lo > 40 ? 10 : 5;
+  const x = i => L + (R - L) * i / (N - 1), y = v => B - (B - T) * (v - lo) / (hi - lo), ya = v => aBot - (aBot - aTop) * v;
+  const xs = h.temp.map((_, i) => x(i));
+  const yt = []; for (let v = lo; v <= hi; v += step) yt.push(v);
+  const xt = [0, .25, .5, .75, 1].map(f => Math.round(f * (N - 1)));
+  // level runs for the strip
+  const runs = []; h.level.forEach((l, i) => { const last = runs[runs.length - 1]; if (last && last.l === l) last.j = i; else runs.push({ l, i, j: i }); });
+  const area = governed ? pathOf(xs, h.cf.map(v => v == null ? null : ya(v))) : "";
+  const lastI = (() => { for (let i = N - 1; i >= 0; i--) if (h.temp[i] != null) return i; return N - 1; })();
+  // end labels, nudged apart when the two lines finish close together
+  const ends = [{ k: "t", v: h.temp[lastI], c: "var(--s1)", lab: (b.gpus ? "GPU max " : "") + fmt(h.temp[lastI]) + "°" }];
+  if (h.gpu && h.gpu[lastI] != null) ends.push({ k: "g", v: h.gpu[lastI], c: "var(--s2)", lab: "GPU " + fmt(h.gpu[lastI]) + "°" });
+  ends.forEach(e => { e.y = y(e.v); });
+  if (ends.length === 2 && Math.abs(ends[0].y - ends[1].y) < 14) { const m = (ends[0].y + ends[1].y) / 2, up = ends[0].y < ends[1].y ? 0 : 1; ends[up].y = m - 7; ends[1 - up].y = m + 7; }
+  const pick = clientX => { const svg = pickRef.current; if (!svg) return; const rc = svg.getBoundingClientRect(); const px = (clientX - rc.left) * W / rc.width; setIdx(Math.max(0, Math.min(N - 1, Math.round((px - L) / (R - L) * (N - 1))))); };
+  const pickRef = React.useRef(null);
+  const onKey = e => {
+    const n = e.shiftKey ? 10 : 1;
+    if (e.key === "ArrowLeft") { e.preventDefault(); setIdx(i => Math.max(0, (i ?? N - 1) - n)); }
+    if (e.key === "ArrowRight") { e.preventDefault(); setIdx(i => Math.min(N - 1, (i ?? N - 1) + n)); }
+    if (e.key === "Escape" && idx != null) { e.stopPropagation(); setIdx(null); }
+  };
+  const tipLeft = idx == null ? 0 : x(idx) / W * 100;
+  return html`<div class="chartcard">
+    <div class="legend2">
+      <span><i style=${{ background: "var(--s1)" }}></i>${b.gpus ? "hottest GPU" : "hottest zone"}</span>
+      ${h.gpu && html`<span><i style=${{ background: "var(--s2)" }}></i>GPU</span>`}
+      ${governed && html`<span><i class="sw" style=${{ background: "color-mix(in srgb,var(--ink) 9%,transparent)", border: "1px solid var(--ink-faint)" }}></i>${b.limits.warm_c}–${b.limits.crit_c}°<${Info} k="band" /></span>`}
+    </div>
+    <svg class="trend" ref=${pickRef} viewBox=${`0 0 ${W} ${H}`} tabIndex="0" role="img"
+      aria-label=${`${b.name} temperature over the last ${RANGES[rk].label}: from ${fmt(h.temp[0])} to ${fmt(h.temp[lastI])} °C. Use left and right arrows to read values.`}
+      onPointerMove=${e => pick(e.clientX)} onPointerDown=${e => pick(e.clientX)} onPointerLeave=${() => setIdx(null)}
+      onFocus=${() => setIdx(i => i ?? lastI)} onBlur=${() => setIdx(null)} onKeyDown=${onKey}>
+      ${yt.map(v => html`<g key=${"y" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="var(--line)" stroke-width="1"/>
+        <text x=${L - 8} y=${y(v) + 4} text-anchor="end">${v}°</text></g>`)}
+      ${governed && html`<rect x=${L} width=${R - L} y=${y(Math.min(hi, b.limits.crit_c))} height=${Math.max(0, y(Math.max(lo, b.limits.warm_c)) - y(Math.min(hi, b.limits.crit_c)))}
+        fill="color-mix(in srgb,var(--ink) 6%,transparent)"/>
+        <line x1=${L} x2=${R} y1=${y(b.limits.crit_c)} y2=${y(b.limits.crit_c)} stroke="var(--ink-faint)" stroke-width="1"/>`}
+      ${h.gpu && html`<path d=${pathOf(xs, h.gpu.map(v => v == null ? null : y(v)))} fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`}
+      <path d=${pathOf(xs, h.temp.map(v => v == null ? null : y(v)))} fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${b.state === "unreachable" && html`<text x=${R} y=${T + 10} text-anchor="end">no data for ${b.age}s</text>`}
+      ${ends.map(e => html`<g key=${e.k}><circle cx=${x(lastI)} cy=${y(e.v)} r="4" fill=${e.c} stroke="var(--surface)" stroke-width="2"/>
+        <line x1=${x(lastI) + 6} x2=${R + 10} y1=${e.y} y2=${e.y} stroke="var(--line-strong)" stroke-width="1"/>
+        <text class="end" x=${R + 14} y=${e.y + 4}>${e.lab}</text></g>`)}
+      ${governed && html`<g>
+        <text x=${L - 8} y=${stripY + 9} text-anchor="end">level</text>
+        ${runs.map((rn, k) => html`<rect key=${"r" + k} x=${x(rn.i)} y=${stripY} width=${Math.max(1, x(rn.j) - x(rn.i) + (R - L) / (N - 1))} height="10" rx="2" fill=${lvColor(rn.l)}/>`)}
+        <line x1=${L} x2=${R} y1=${aBot} y2=${aBot} stroke="var(--line)" stroke-width="1"/>
+        <line x1=${L} x2=${R} y1=${aTop} y2=${aTop} stroke="var(--line)" stroke-width="1"/>
+        <text x=${L - 8} y=${aTop + 4} text-anchor="end">×1</text>
+        <text x=${L - 8} y=${aBot + 4} text-anchor="end">×0</text>
+        <text x=${R + 14} y=${(aTop + aBot) / 2 + 4}>admitting</text>
+        <path d=${area + `L${x(N - 1)},${aBot}L${L},${aBot}Z`} fill="color-mix(in srgb,var(--ink) 10%,transparent)" stroke="none"/>
+        <path d=${area} fill="none" stroke="var(--ink-soft)" stroke-width="1.5"/></g>`}
+      ${xt.map(i => html`<text key=${"x" + i} x=${x(i)} y=${axisY} text-anchor=${i === 0 ? "start" : i === N - 1 ? "end" : "middle"}>${hhmm(h.t[i])}</text>`)}
+      ${idx != null && html`<g pointer-events="none">
+        <line x1=${x(idx)} x2=${x(idx)} y1=${T} y2=${governed ? aBot : B} stroke="var(--ink-faint)" stroke-width="1"/>
+        ${h.gpu && h.gpu[idx] != null && html`<circle cx=${x(idx)} cy=${y(h.gpu[idx])} r="4.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"/>`}
+        ${h.temp[idx] != null && html`<circle cx=${x(idx)} cy=${y(h.temp[idx])} r="4.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>`}
+      </g>`}
+      <rect x=${L} y="0" width=${R - L} height=${H} fill="transparent"/>
+    </svg>
+    ${idx != null && html`<div class="tip" style=${tipLeft > 55 ? { right: (100 - tipLeft + 2) + "%" } : { left: (tipLeft + 2) + "%" }}>
+      <div class="tt">${rk === "15m" ? hhmmss(h.t[idx]) : hhmm(h.t[idx])} UTC</div>
+      ${h.temp[idx] == null ? html`<div class="r"><span>no reading</span></div>` : html`
+        <div class="r"><span><i style=${{ background: "var(--s1)" }}></i>${b.gpus ? "hottest GPU" : "zone"}</span><b>${fmt(h.temp[idx])} °C</b></div>
+        ${h.gpu && html`<div class="r"><span><i style=${{ background: "var(--s2)" }}></i>GPU</span><b>${fmt(h.gpu[idx])} °C</b></div>`}
+        ${governed && html`<div class="r"><span><i class="sw" style=${{ background: lvColor(h.level[idx]) }}></i>level</span><b>${LEVELS[h.level[idx]]}</b></div>
+          <div class="r"><span>admitting</span><b>×${fmt(h.cf[idx], 2)}</b></div>`}`}
+    </div>`}
+  </div>`;
+}
+
+function Minis({ b, h }) {
+  const N = h.temp.length, all = h.gpus.flat().filter(v => v != null), lo = Math.min(...all) - 1, hi = Math.max(...all, b.limits.crit_c) + 1;
+  const x = i => 2 + 116 * i / (N - 1), y = v => 32 - 28 * (v - lo) / (hi - lo);
+  return html`<div class="chartcard"><h3>Each GPU</h3><div class="minis">
+    ${h.gpus.map((s, k) => html`<div class="mini" key=${k}>GPU ${k} · <b>${fmt(b.gpus[k], 0)}°</b>
+      <svg viewBox="0 0 120 36" preserveAspectRatio="none" role="img" aria-label=${`GPU ${k}, now ${fmt(b.gpus[k], 0)} °C`}>
+        <line x1="2" x2="118" y1=${y(b.limits.warm_c)} y2=${y(b.limits.warm_c)} stroke="var(--line-strong)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+        <path d=${pathOf(s.map((_, i) => x(i)), s.map(v => v == null ? null : y(v)))} fill="none" stroke="var(--s2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+      </svg></div>`)}
+  </div></div>`;
+}
+
+// ---- panel: one machine, or up to six compared ----
+const MAXC = 6;
+const slotColor = k => `var(--c${k + 1})`;
+function summarize(b, h) {
+  const v = h.temp.filter(x => x != null);
+  const pk = h.temp.reduce((m, x, i) => x != null && (m < 0 || x > h.temp[m]) ? i : m, -1);
+  const mean = v.reduce((a, c) => a + c, 0) / v.length;
+  let share = null, held = null;
+  if (b.limits) {
+    const lv = h.level.filter(x => x != null), cnt = [0, 0, 0, 0]; lv.forEach(l => cnt[l]++);
+    share = cnt.map(c => c / lv.length); held = h.cf.filter(x => x != null && x < 1).length / lv.length;
+  }
+  return { pk, peak: h.temp[pk], mean, swing: Math.max(...v) - Math.min(...v), share, held };
+}
+
+function Single({ b, h, rk, table }) {
+  const s = summarize(b, h), governed = !!b.limits;
+  const stats = governed
+    ? [[fmt(s.peak) + "°", "peak at " + hhmm(h.t[s.pk])], [fmt(s.mean) + "°", "average"], [Math.round((1 - s.share[0]) * 100) + "%", "time above warm"], [Math.round(s.held * 100) + "%", "time admitting less"]]
+    : [[fmt(s.peak) + "°", "peak at " + hhmm(h.t[s.pk])], [fmt(s.mean) + "°", "average"], [fmt(s.swing) + "°", "swing"], ["—", "not governed"]];
+  const rows = Array.from({ length: 12 }, (_, k) => Math.round(k * (h.temp.length - 1) / 11)).reverse();
+  return html`<${React.Fragment}>
+    <div class="stats">${stats.map(([v, l], i) => html`<div class="stat" key=${i}><b>${v}</b><span>${l}</span></div>`)}</div>
+    ${table ? html`<div class="chartcard tablewrap"><table class="dt">
+        <thead><tr><th>Time (UTC)</th><th>${b.gpus ? "Hottest GPU" : "Zone"}</th>${h.gpu && html`<th>GPU</th>`}${governed && html`<th>Level</th><th>Admitting</th>`}</tr></thead>
+        <tbody>${rows.map(i => html`<tr key=${i}><td>${rk === "15m" ? hhmmss(h.t[i]) : hhmm(h.t[i])}</td><td>${h.temp[i] == null ? "—" : fmt(h.temp[i]) + " °C"}</td>
+          ${h.gpu && html`<td>${h.gpu[i] == null ? "—" : fmt(h.gpu[i]) + " °C"}</td>`}
+          ${governed && html`<td>${h.level[i] == null ? "—" : LEVELS[h.level[i]]}</td><td>${h.cf[i] == null ? "—" : "×" + fmt(h.cf[i], 2)}</td>`}</tr>`)}</tbody>
+      </table></div>` : html`<${TrendChart} b=${b} h=${h} rk=${rk} key=${b.name + rk} />`}
+    ${s.share && html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>
+      <div class="seg2" role="img" aria-label=${LEVELS.map((l, i) => `${l} ${Math.round(s.share[i] * 100)}%`).join(", ")}>
+        ${s.share.map((x, i) => x > 0 && html`<span key=${i} style=${{ flex: x, background: lvColor(i) }} title=${`${LEVELS[i]} ${Math.round(x * 100)}%`}></span>`)}
+      </div>
+      <div class="sharelab">${s.share.map((x, i) => html`<span key=${i}><i style=${{ background: lvColor(i) }}></i><b>${Math.round(x * 100)}%</b>${LEVELS[i]}</span>`)}</div>
+    </div>`}
+    ${h.gpus && html`<${Minis} b=${b} h=${h} />`}
+  </${React.Fragment}>`;
+}
+
+function CompareChart({ list, rk }) {
+  const [idx, setIdx] = useState(null);
+  const ref = React.useRef(null);
+  const N = NPTS, W = 720, L = 40, R = 610, T = 12, B = 206;
+  const stripTop = B + 34, rowH = 17, H = stripTop + list.length * rowH + 6;
+  const vals = list.flatMap(x => x.h.temp).filter(v => v != null);
+  const same = list.every(x => x.b.limits && list[0].b.limits && x.b.limits.warm_c === list[0].b.limits.warm_c && x.b.limits.crit_c === list[0].b.limits.crit_c);
+  const lim = same ? list[0].b.limits : null;
+  const lo = Math.floor((Math.min(...vals) - 3) / 5) * 5, hi = Math.ceil((Math.max(...vals, lim ? lim.crit_c + 1 : -Infinity) + 2) / 5) * 5;
+  const step = hi - lo > 40 ? 10 : 5;
+  const x = i => L + (R - L) * i / (N - 1), y = v => B - (B - T) * (v - lo) / (hi - lo);
+  const xs = Array.from({ length: N }, (_, i) => x(i));
+  const yt = []; for (let v = lo; v <= hi; v += step) yt.push(v);
+  const xt = [0, .25, .5, .75, 1].map(f => Math.round(f * (N - 1)));
+  const lastOf = h => { for (let i = N - 1; i >= 0; i--) if (h.temp[i] != null) return i; return N - 1; };
+  // end labels: sorted by height, pushed apart to at least 15px, kept inside the plot
+  const ends = list.map(o => { const li = lastOf(o.h); return { ...o, li, vy: y(o.h.temp[li]), ly: y(o.h.temp[li]) }; }).sort((a, b) => a.ly - b.ly);
+  for (let i = 1; i < ends.length; i++) ends[i].ly = Math.max(ends[i].ly, ends[i - 1].ly + 15);
+  const over = ends.length ? ends[ends.length - 1].ly - (B - 2) : 0;
+  if (over > 0) ends.forEach(e => { e.ly -= over; });
+  for (let i = ends.length - 2; i >= 0; i--) ends[i].ly = Math.min(ends[i].ly, ends[i + 1].ly - 15);
+  const pick = cx => { const svg = ref.current; if (!svg) return; const rc = svg.getBoundingClientRect(); const px = (cx - rc.left) * W / rc.width; setIdx(Math.max(0, Math.min(N - 1, Math.round((px - L) / (R - L) * (N - 1))))); };
+  const onKey = e => { const n = e.shiftKey ? 10 : 1;
+    if (e.key === "ArrowLeft") { e.preventDefault(); setIdx(i => Math.max(0, (i ?? N - 1) - n)); }
+    if (e.key === "ArrowRight") { e.preventDefault(); setIdx(i => Math.min(N - 1, (i ?? N - 1) + n)); }
+    if (e.key === "Escape" && idx != null) { e.stopPropagation(); setIdx(null); } };
+  const tipLeft = idx == null ? 0 : x(idx) / W * 100;
+  const t0 = list[0].h.t;
+  return html`<div class="chartcard">
+    <div class="legend2">
+      ${list.map(o => html`<span key=${o.b.name}><i style=${{ background: o.c }}></i>${o.b.name}</span>`)}
+      ${lim && html`<span><i class="sw" style=${{ background: "color-mix(in srgb,var(--ink) 9%,transparent)", border: "1px solid var(--ink-faint)" }}></i>${lim.warm_c}–${lim.crit_c}°<${Info} k="band" /></span>`}
+    </div>
+    <svg class="trend" ref=${ref} viewBox=${`0 0 ${W} ${H}`} tabIndex="0" role="img"
+      aria-label=${`Hottest temperature of ${list.map(o => o.b.name).join(", ")} over the last ${RANGES[rk].label}. Use left and right arrows to read values.`}
+      onPointerMove=${e => pick(e.clientX)} onPointerDown=${e => pick(e.clientX)} onPointerLeave=${() => setIdx(null)}
+      onFocus=${() => setIdx(i => i ?? N - 1)} onBlur=${() => setIdx(null)} onKeyDown=${onKey}>
+      ${yt.map(v => html`<g key=${"y" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="var(--line)" stroke-width="1"/>
+        <text x=${L - 8} y=${y(v) + 4} text-anchor="end">${v}°</text></g>`)}
+      ${lim && html`<rect x=${L} width=${R - L} y=${y(Math.min(hi, lim.crit_c))} height=${Math.max(0, y(Math.max(lo, lim.warm_c)) - y(Math.min(hi, lim.crit_c)))} fill="color-mix(in srgb,var(--ink) 6%,transparent)"/>`}
+      ${list.map(o => html`<path key=${o.b.name} d=${pathOf(xs, o.h.temp.map(v => v == null ? null : y(v)))} fill="none" stroke=${o.c} stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`)}
+      ${ends.map(e => html`<g key=${"e" + e.b.name}>
+        <circle cx=${x(e.li)} cy=${e.vy} r="4" fill=${e.c} stroke="var(--surface)" stroke-width="2"/>
+        <path d=${`M${x(e.li) + 6},${e.vy} L${R + 8},${e.vy} L${R + 14},${e.ly}`} fill="none" stroke="var(--line-strong)" stroke-width="1"/>
+        <text class="end" x=${R + 18} y=${e.ly + 4}>${e.b.name} ${fmt(e.h.temp[e.li])}°</text></g>`)}
+      ${xt.map(i => html`<text key=${"x" + i} x=${x(i)} y=${B + 18} text-anchor=${i === 0 ? "start" : i === N - 1 ? "end" : "middle"}>${hhmm(t0[i])}</text>`)}
+      ${list.map((o, r) => { const yy = stripTop + r * rowH; const runs = [];
+        o.h.level.forEach((l, i) => { const last = runs[runs.length - 1]; if (last && last.l === l) last.j = i; else runs.push({ l, i, j: i }); });
+        return html`<g key=${"s" + o.b.name}>
+          <line x1=${R + 8} x2=${R + 14} y1=${yy + 5} y2=${yy + 5} stroke=${o.c} stroke-width="2"/>
+          <text x=${R + 18} y=${yy + 9}>${o.b.name}</text>
+          ${o.b.limits ? runs.map((rn, k) => html`<rect key=${k} x=${x(rn.i)} y=${yy} width=${Math.max(1, x(rn.j) - x(rn.i) + (R - L) / (N - 1))} height="10" rx="2" fill=${lvColor(rn.l)}/>`)
+            : html`<rect x=${L} y=${yy} width=${R - L} height="10" rx="2" fill="none" stroke="var(--line-strong)" stroke-dasharray="3 3"/>`}
+        </g>`; })}
+      <text x=${L - 8} y=${stripTop + 9} text-anchor="end">level</text>
+      ${idx != null && html`<g pointer-events="none">
+        <line x1=${x(idx)} x2=${x(idx)} y1=${T} y2=${stripTop + list.length * rowH} stroke="var(--ink-faint)" stroke-width="1"/>
+        ${list.map(o => o.h.temp[idx] != null && html`<circle key=${"h" + o.b.name} cx=${x(idx)} cy=${y(o.h.temp[idx])} r="4.5" fill=${o.c} stroke="var(--surface)" stroke-width="2"/>`)}
+      </g>`}
+    </svg>
+    ${idx != null && html`<div class="tip" style=${tipLeft > 55 ? { right: (100 - tipLeft + 2) + "%" } : { left: (tipLeft + 2) + "%" }}>
+      <div class="tt">${rk === "15m" ? hhmmss(t0[idx]) : hhmm(t0[idx])} UTC</div>
+      ${[...list].sort((a, b) => (b.h.temp[idx] ?? -1) - (a.h.temp[idx] ?? -1)).map(o => html`<div class="r" key=${o.b.name}>
+        <span><i style=${{ background: o.c }}></i>${o.b.name}</span>
+        <b>${o.h.temp[idx] == null ? "—" : fmt(o.h.temp[idx]) + " °C"}${o.h.level[idx] != null ? " · " + LEVELS[o.h.level[idx]] : ""}</b></div>`)}
+    </div>`}
+  </div>`;
+}
+
+function Compare({ items, slots, rk, table, onRemove }) {
+  const list = items.map(b => ({ b, h: history(b, rk), c: slotColor(slots[b.name] ?? 0) })).filter(o => o.h);
+  const rows = Array.from({ length: 12 }, (_, k) => Math.round(k * (NPTS - 1) / 11)).reverse();
+  if (!list.length) return html`<div class="nodata">None of these machines has readings.</div>`;
+  return html`<${React.Fragment}>
+    <div class="chartcard tablewrap"><table class="dt cmp">
+      <thead><tr><th>Machine</th><th>Now</th><th>Peak</th><th>Average</th><th>Above warm</th><th></th></tr></thead>
+      <tbody>${list.map(o => { const s = summarize(o.b, o.h); return html`<tr key=${o.b.name}>
+        <td><i class="key" style=${{ background: o.c }}></i>${o.b.name}</td>
+        <td><span class=${"status " + o.b.state}>${statusText(o.b)}</span> ${fmt(o.b.temp)}°</td>
+        <td>${fmt(s.peak)}°</td><td>${fmt(s.mean)}°</td>
+        <td>${s.share ? Math.round((1 - s.share[0]) * 100) + "%" : "—"}</td>
+        <td><button class="rm" onClick=${() => onRemove(o.b.name)} aria-label=${"Remove " + o.b.name}>×</button></td></tr>`; })}</tbody>
+    </table></div>
+    ${table ? html`<div class="chartcard tablewrap"><table class="dt">
+        <thead><tr><th>Time (UTC)</th>${list.map(o => html`<th key=${o.b.name}>${o.b.name}</th>`)}</tr></thead>
+        <tbody>${rows.map(i => html`<tr key=${i}><td>${rk === "15m" ? hhmmss(list[0].h.t[i]) : hhmm(list[0].h.t[i])}</td>
+          ${list.map(o => html`<td key=${o.b.name}>${o.h.temp[i] == null ? "—" : fmt(o.h.temp[i]) + " °C"}</td>`)}</tr>`)}</tbody>
+      </table></div>` : html`<${CompareChart} list=${list} rk=${rk} key=${rk + list.map(o => o.b.name).join()} />`}
+    ${list.some(o => o.b.limits) && html`<div class="chartcard"><h3>Time by level · last ${RANGES[rk].label}</h3>
+      <div class="lvrows">${list.filter(o => o.b.limits).map(o => { const s = summarize(o.b, o.h); return html`<div class="lvrow" key=${o.b.name}>
+        <span class="nm"><i class="key" style=${{ background: o.c }}></i>${o.b.name}</span>
+        <div class="seg2" role="img" aria-label=${o.b.name + ": " + LEVELS.map((l, i) => `${l} ${Math.round(s.share[i] * 100)}%`).join(", ")}>
+          ${s.share.map((x, i) => x > 0 && html`<span key=${i} style=${{ flex: x, background: lvColor(i) }} title=${`${LEVELS[i]} ${Math.round(x * 100)}%`}></span>`)}</div>
+        <span class="pct">${Math.round((1 - s.share[0]) * 100)}% above warm</span></div>`; })}</div>
+      <div class="sharelab">${LEVELS.map((l, i) => html`<span key=${l}><i style=${{ background: lvColor(i) }}></i>${l}</span>`)}</div>
+    </div>`}
+  </${React.Fragment}>`;
+}
+
+function AddPicker({ fleet, items, onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const wrap = React.useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const off = e => { if (wrap.current && !wrap.current.contains(e.target)) setOpen(false); };
+    addEventListener("pointerdown", off); return () => removeEventListener("pointerdown", off);
+  }, [open]);
+  const full = items.length >= MAXC, names = new Set(items.map(b => b.name));
+  const opts = fleet.filter(b => !q || b.name.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (SEVERITY[b.state] - SEVERITY[a.state]) || ((b.temp ?? -1) - (a.temp ?? -1)));
+  return html`<div class="picker" ref=${wrap}>
+    <button class="addbtn" aria-expanded=${open} aria-haspopup="listbox" disabled=${full} onClick=${() => setOpen(o => !o)}>
+      ${full ? `${MAXC} machines max` : "+ Add machine"}</button>
+    ${open && html`<div class="pop" onKeyDown=${e => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }}>
+      <input id="add-machine-search" class="search" type="search" placeholder="Find a machine" value=${q} onInput=${e => setQ(e.target.value)} autoFocus aria-label="Find a machine to add" />
+      <div class="opts" role="listbox" aria-label="Machines">
+        ${opts.map(b => { const off = names.has(b.name) || b.temp == null;
+          return html`<button key=${b.name} role="option" aria-selected=${names.has(b.name)} class=${"opt2 " + b.state} disabled=${off}
+            onClick=${() => { onAdd(b.name); setQ(""); if (items.length + 1 >= MAXC) setOpen(false); }}>
+            <span class="status"></span><span class="nm">${b.name}</span>
+            <span class="meta">${b.temp == null ? "no readings" : names.has(b.name) ? "added" : fmt(b.temp) + "° · " + PLATFORM_LABEL[b.pkey]}</span></button>`; })}
+      </div></div>`}
+  </div>`;
+}
+
+function Detail({ items, slots, skin, fleet, onClose, onAdd, onRemove }) {
+  const [rk, setRk] = useState("1h");
+  const [table, setTable] = useState(false);
+  const closeRef = React.useRef(null);
+  useEffect(() => {
+    const prev = document.activeElement; closeRef.current && closeRef.current.focus();
+    const on = e => { if (e.key === "Escape") onClose(); };
+    addEventListener("keydown", on);
+    return () => { removeEventListener("keydown", on); prev && prev.focus && prev.focus(); };
+  }, []);
+  const one = items.length === 1, b = items[0];
+  const h = one ? history(b, rk) : null;
+  return html`<${React.Fragment}>
+    <div class="scrim"></div>
+    <aside class=${"drawer " + (one ? b.state : "")} role="dialog" aria-label=${one ? b.name + " trends" : "Comparing " + items.length + " machines"}>
+      <div class="dh">
+        <div style=${{ minWidth: 0 }}>
+          <span class="eyebrow">Example history · daemons don't serve history yet</span>
+          ${one ? html`<h2><${Mark} b=${b} skin=${skin} />${b.name}${b.demo && html`<span class="tag">example</span>`}</h2>
+            <div class="sub">${b.board} · ${b.sub || (b.state === "unkept" ? "no daemon yet" : `${PLATFORM_LABEL[b.pkey]} · v${b.version}`)}</div>`
+          : html`<h2>Comparing ${items.length} machines</h2>
+            <div class="chips">${items.map(m => html`<span class="mchip" key=${m.name}><i class="key" style=${{ background: slotColor(slots[m.name] ?? 0) }}></i>${m.name}
+              <button onClick=${() => onRemove(m.name)} aria-label=${"Remove " + m.name}>×</button></span>`)}</div>`}
+        </div>
+        <button class="xbtn" ref=${closeRef} onClick=${onClose} aria-label="Close">×</button>
+      </div>
+      ${one && html`<div class="dnow">
+        <span class="temp">${fmt(b.temp)}<small>°C</small></span>
+        <span class="status">${statusText(b)}</span>
+        <span class="why">${whyText(b)}</span>
+      </div>`}
+      <div class="drow">
+        <div class="drow-l">
+          ${(!one || h) && html`<div class="pills sm" role="group" aria-label="Time range">
+            ${Object.entries(RANGES).map(([k]) => html`<button key=${k} aria-pressed=${rk === k} onClick=${() => setRk(k)}>${k}</button>`)}
+          </div>`}
+          <${AddPicker} fleet=${fleet} items=${items} onAdd=${onAdd} />
+        </div>
+        ${(!one || h) && html`<button class="linkbtn" onClick=${() => setTable(t => !t)} aria-pressed=${table}>${table ? "Show chart" : "Show table"}</button>`}
+      </div>
+      <p class="hint">You can also click machines in the list to add or remove them.</p>
+      ${one ? (h ? html`<${Single} b=${b} h=${h} rk=${rk} table=${table} />` : html`<div class="nodata">No readings. ${HINT.sensors}</div>`)
+            : html`<${Compare} items=${items} slots=${slots} rk=${rk} table=${table} onRemove=${onRemove} />`}
+    </aside>
+  </${React.Fragment}>`;
+}
+
+function Machines({ skin, setSkin, mode, fleetKey, setFleet }) {
+  const s = SKINS[skin];
+  const fleet = FLEETS[fleetKey];
+  const [plat, setPlat] = useState("all");
+  const [states, setStates] = useState([]);
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("hot");
+  const [view, setView] = useState(() => store.get("hg-view", "rows"));
+  const [picked, setPicked] = useState([]);
+  const [slots, setSlots] = useState({});
+  useEffect(() => { setPlat("all"); setStates([]); setQ(""); setPicked([]); setSlots({}); }, [fleetKey]);
+  // colour follows the machine: each gets the lowest free slot when added and keeps it
+  const add = name => { setPicked(p => p.includes(name) || p.length >= MAXC ? p : [...p, name]);
+    setSlots(s => { if (picked.includes(name)) return s; const used = new Set(picked.map(n => s[n])); let k = 0; while (used.has(k)) k++; return { ...s, [name]: k }; }); };
+  const remove = name => setPicked(p => p.filter(n => n !== name));
+  const onOpen = name => { if (!picked.length) { setPicked([name]); setSlots({ [name]: 0 }); } else if (picked.includes(name)) remove(name); else add(name); };
+  const items = picked.map(n => fleet.find(b => b.name === n)).filter(Boolean);
+  const counts = useMemo(() => fleet.reduce((c, b) => (c[b.state] = (c[b.state] || 0) + 1, c), {}), [fleet]);
+  const platCounts = useMemo(() => fleet.reduce((c, b) => (c[b.pkey] = (c[b.pkey] || 0) + 1, c), {}), [fleet]);
+  const shown = fleet
+    .filter(b => plat === "all" || b.pkey === plat)
+    .filter(b => !states.length || states.includes(b.state))
+    .filter(b => !q || b.name.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => sort === "hot" ? (SEVERITY[b.state] - SEVERITY[a.state]) || ((b.temp ?? -1) - (a.temp ?? -1)) : a.name.localeCompare(b.name, undefined, { numeric:true }));
+  const platKeys = ["all", ...new Set(fleet.map(b => b.pkey))];
+  const toggle = st => setStates(xs => xs.includes(st) ? xs.filter(x => x !== st) : [...xs, st]);
+  const filtered = plat !== "all" || states.length || q;
+  return html`<section>
+    <div class="titlebar">
+      <div><span class="eyebrow">${fleetKey === "today" ? "Snapshot · " + DATA.snapshot : "Example fleet · invented readings"}</span><h1>Heat Governor</h1></div>
+      <div class="pills" role="group" aria-label="Fleet">
+        <button aria-pressed=${fleetKey === "today"} onClick=${() => setFleet("today")}>Today<span class="n">${real.length}</span></button>
+        <button aria-pressed=${fleetKey === "example"} onClick=${() => setFleet("example")}>Scaled<span class="n">${EXAMPLE.length}</span></button>
+        <button aria-pressed=${fleetKey === "mixed"} onClick=${() => setFleet("mixed")}>Mixed<span class="n">${MIXED.length}</span></button>
+      </div>
+    </div>
+    <div class="skins" role="group" aria-label="Theme">
+      ${Object.entries(SKINS).map(([k, sk]) => html`<button key=${k} class="skin" aria-pressed=${skin === k} onClick=${() => setSkin(k)}
+          style=${{ "--sk-bg": sk[mode].bg, "--sk-ink": sk[mode].ink, "--sk-heat": sk[mode].heat }}>
+        <span class="nm">${sk.name}</span><span class="ramp"></span>
+        <span class="ends"><span>${sk.ends[0]}</span><span>${sk.ends[1]}</span></span></button>`)}
+    </div>
+    <div class="card"><${Flow} fleet=${fleet} /></div>
+
+    <div class="summary" role="group" aria-label="Filter by state">
+      ${["critical", "hot", "warm", "cool", "unreachable", "unsupported", "unkept"].filter(st => counts[st]).map(st => html`
+        <button key=${st} class=${"chip " + st} aria-pressed=${states.includes(st)} onClick=${() => toggle(st)}><b>${counts[st]}</b>${st === "unsupported" ? "not supported" : st}</button>`)}
+    </div>
+    <div class="filters">
+      <div class="pills sm" role="group" aria-label="Platform">
+        ${platKeys.map(p => html`
+          <button key=${p} aria-pressed=${plat === p} onClick=${() => setPlat(p)}>${p === "all" ? "All" : PLATFORM_LABEL[p]}<span class="n">${p === "all" ? fleet.length : platCounts[p]}</span></button>`)}
+      </div>
+      <input id="machine-search" class="search" type="search" placeholder="Find a machine" value=${q} onInput=${e => setQ(e.target.value)} aria-label="Find a machine" />
+      <div class="pills sm" role="group" aria-label="Sort">
+        <button aria-pressed=${sort === "hot"} onClick=${() => setSort("hot")}>Hottest first</button>
+        <button aria-pressed=${sort === "name"} onClick=${() => setSort("name")}>Name</button>
+      </div>
+      <div class="pills sm" role="group" aria-label="View">
+        <button aria-pressed=${view === "rows"} onClick=${() => { setView("rows"); store.set("hg-view", "rows"); }}>Rows</button>
+        <button aria-pressed=${view === "grid"} onClick=${() => { setView("grid"); store.set("hg-view", "grid"); }}>Grid</button>
+      </div>
+      <span class="count">${shown.length} of ${fleet.length}${filtered ? html` <button class="clear" onClick=${() => { setPlat("all"); setStates([]); setQ(""); }}>Clear</button>` : ""}</span>
+    </div>
+    ${!shown.length ? html`<div class="empty">No machine matches these filters.</div>` :
+      view === "rows" ? html`<div class="lanes">${shown.map(b => html`<${Lane} b=${b} skin=${s} key=${b.name} open=${picked.includes(b.name)} onOpen=${onOpen} />`)}</div>`
+                      : html`<div class="tiles">${shown.map(b => html`<${Tile} b=${b} skin=${s} key=${b.name} open=${picked.includes(b.name)} onOpen=${onOpen} />`)}</div>`}
+    ${items.length > 0 && html`<${Detail} items=${items} slots=${slots} skin=${s} fleet=${fleet} onClose=${() => { setPicked([]); setSlots({}); }} onAdd=${add} onRemove=${remove} />`}
+  </section>`;
+}
+
+function Survey() {
+  const [f, setF] = useState("all");
+  const claims = Object.fromEntries(DATA.claims.map(c => [c.id, c]));
+  const kinds = { all: "All", requirement: "In scope", boundary: "Boundaries", non_goal: "Non-goals" };
+  const rows = DATA.scope.filter(s => f === "all" || s.seeds.some(id => claims[id] && claims[id].kind === f));
+  return html`<section>
+    <span class="eyebrow">devague frame · ${DATA.frame}</span>
+    <h1>Survey</h1>
+    <p class="lede" style=${{ marginTop: ".6rem" }}>${DATA.scope.length} surfaces explored read-only. Every claim is proposed until you confirm it.</p>
+    <div class="pills sm" role="group" aria-label="Filter by claim kind" style=${{ display: "inline-flex", marginBottom: 18 }}>
+      ${Object.entries(kinds).map(([k, l]) => html`<button key=${k} aria-pressed=${f === k} onClick=${() => setF(k)}>${l}</button>`)}
+    </div>
+    <div class="surfaces">${rows.map(s => html`<div class="surface" key=${s.id}>
+      <span class="sid">${s.id}</span>
+      <div style=${{ minWidth: 0 }}><h3>${s.surface}</h3><p>${s.finding}</p>
+        ${s.seeds.map(id => claims[id] && html`<div key=${id} class=${"claim k-" + claims[id].kind}><span class="k">${claims[id].kind.replace("_", "-")}</span>${claims[id].text}</div>`)}
+      </div></div>`)}</div>
+  </section>`;
+}
+
+function Decisions() {
+  return html`<section>
+    <span class="eyebrow">Open before /think converges</span>
+    <h1 style=${{ marginBottom: "1.2rem" }}>Decisions</h1>
+    <div class="alert"><b>spark flared during the survey:</b> critical at 89.1 °C, then warm at 85.4 °C and falling. Its own governor handled it.</div>
+    <div class="qs">${DATA.questions.map(q => html`<div class="card q" key=${q.id}>
+      <span class="qid">${q.id}</span><h3>${q.title}</h3>
+      ${q.resolved ? html`<div class="resolved"><b>Settled.</b> ${q.resolved}</div>` : html`<div class="opts">
+        ${q.options.map((o, i) => html`<div key=${i} class=${"opt" + (o.rec ? " rec" : "")}>${o.rec && html`<span class="tg">Recommended</span>`}<b>${o.t}</b>${o.d}</div>`)}</div>`}
+    </div>`)}</div>
+    <h2>Parked, not blocking</h2>
+    <div class="qs">${DATA.parks.map((p, i) => html`<div class="park" key=${i}>${p}</div>`)}</div>
+  </section>`;
+}
+
+function App() {
+  const readTab = () => { const h = (location.hash || "").slice(1); return TABS.some(t => t[0] === h) ? h : "machines"; };
+  const [tab, setTab] = useState(readTab);
+  const [skin, setSkinS] = useState(() => { const v = store.get("hg-skin", "polar"); return SKINS[v] ? v : "polar"; });
+  const [pref, setPrefS] = useState(() => store.get("hg-mode", "system"));
+  const [fleetKey, setFleet] = useState("today");
+  const mode = useMode(pref);
+  const setSkin = k => { setSkinS(k); store.set("hg-skin", k); };
+  const setPref = k => { setPrefS(k); store.set("hg-mode", k); };
+  useEffect(() => { const r = document.documentElement; r.dataset.skin = skin; r.dataset.mode = mode; }, [skin, mode]);
+  useEffect(() => { const on = () => setTab(readTab()); addEventListener("hashchange", on); return () => removeEventListener("hashchange", on); }, []);
+  const go = t => { setTab(t); try { history.replaceState(null, "", "#" + t); } catch (e) { location.hash = t; } };
+  return html`<${React.Fragment}>
+    <header class="app-header">
+      <div class="brand">${SKINS[skin].runes ? html`<span class="mark rune" aria-hidden="true">ᚲ</span>` : html`<span class="mark" aria-hidden="true">●</span>`}heat-governor</div>
+      <nav class="pills" aria-label="Sections">${TABS.map(([k, l]) => html`<button key=${k} aria-current=${tab === k ? "page" : undefined} onClick=${() => go(k)}>${l}</button>`)}</nav>
+      <div class="pills sm" role="group" aria-label="Appearance">
+        ${[["system", "Auto"], ["light", "Light"], ["dark", "Dark"]].map(([k, l]) => html`<button key=${k} aria-pressed=${pref === k} onClick=${() => setPref(k)}>${l}</button>`)}
+      </div>
+    </header>
+    <main>${tab === "machines" ? html`<${Machines} skin=${skin} setSkin=${setSkin} mode=${mode} fleetKey=${fleetKey} setFleet=${setFleet} />`
+      : tab === "survey" ? html`<${Survey} />` : html`<${Decisions} />`}</main>
+  </${React.Fragment}>`;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
+</script>

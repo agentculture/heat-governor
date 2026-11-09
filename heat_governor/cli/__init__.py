@@ -67,6 +67,8 @@ def _build_parser() -> argparse.ArgumentParser:
     from heat_governor.cli._commands import explain as _explain_cmd
     from heat_governor.cli._commands import governing as _governing
     from heat_governor.cli._commands import learn as _learn_cmd
+    from heat_governor.cli._commands import mcp as _mcp
+    from heat_governor.cli._commands import mesh as _mesh
     from heat_governor.cli._commands import overview as _overview_cmd
     from heat_governor.cli._commands import tuning as _tuning
     from heat_governor.cli._commands import whoami as _whoami_cmd
@@ -92,6 +94,8 @@ def _build_parser() -> argparse.ArgumentParser:
     _cli_group.register(sub)
     _governing.register(sub)
     _tuning.register(sub)
+    _mesh.register(sub)
+    _mcp.register(sub)
     # Register your own noun groups here:
     #   from heat_governor.cli._commands import my_noun as _my_noun_group
     #   _my_noun_group.register(sub)

@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+_HWMON_GLOB = "hwmon*"
+
 MIN_C, MAX_C = -40.0, 150.0
 GPU_FIELDS = (
     "temperature.gpu",
@@ -216,7 +218,7 @@ class SystemProbe:
         Sensor 1 reads 4-6 C above it). The drive's own warning/critical limits are
         kept as ``..._max_c``/``..._crit_c`` (limits, not readings); placeholder
         limits (above 150 C) are dropped."""
-        for hw in sorted((self.sys / "class" / "hwmon").glob("hwmon*")):
+        for hw in sorted((self.sys / "class" / "hwmon").glob(_HWMON_GLOB)):
             if _read(hw / "name") != "nvme":
                 continue
             try:
@@ -301,7 +303,7 @@ def read_fans(sys_root: Path = Path("/sys")) -> dict[str, float]:
     """PWM duty (0-255) and tach RPM where the board exposes them (Jetsons do;
     the Spark's fans are firmware-controlled and not visible)."""
     out: dict[str, float] = {}
-    for hw in sorted((sys_root / "class" / "hwmon").glob("hwmon*")):
+    for hw in sorted((sys_root / "class" / "hwmon").glob(_HWMON_GLOB)):
         name = _read(hw / "name") or hw.name
         for f in ("pwm1", "fan1_input"):
             raw = _read(hw / f)
@@ -337,6 +339,7 @@ GPU_LABELS = {
     "gr_mhz": ("graphics clock", " MHz"),
     "mem_mhz": ("memory clock", " MHz"),
     "mem_util_pct": ("memory bandwidth busy", "%"),  # utilization.memory, not occupancy
+    "board_power_w": ("board power", " W"),  # ina232 hwmon: whole board, not the GPU alone
 }
 
 
@@ -401,6 +404,43 @@ def read_gpu_jetson(sys_root: Path = Path("/sys")) -> dict[str, object]:
     return res
 
 
+def read_gpu_devfreq(sys_root: Path = Path("/sys")) -> dict[str, object]:
+    """Adreno GPU clock (devfreq, Hz -> MHz) and, when an ``ina232`` hwmon exists, board power
+    (``power1_input``, microwatts -> watts). This GPU exposes no load file, so there is no
+    utilisation: the clock is all that is reported."""
+    res: dict[str, object] = {}
+    for dev in sorted((sys_root / "class" / "devfreq").glob("*gpu*")):
+        raw = _read(dev / "cur_freq")
+        if raw and raw.isdigit():
+            res[f"{dev.name}.mhz"] = int(raw) / 1e6
+    for hw in sorted((sys_root / "class" / "hwmon").glob(_HWMON_GLOB)):
+        if _read(hw / "name") == "ina232":
+            raw = _read(hw / "power1_input")
+            if raw and raw.isdigit():
+                res["board_power_w"] = int(raw) / 1e6
+            break
+    return res
+
+
+def _fan_kernel_owned(sys_root: Path) -> bool:
+    """True when a thermal cooling device is the fan: its type contains the fan hwmon's driver
+    name (``emc2305`` -> ``emc2305_fan``), ignoring punctuation. A bare "fan" type is not enough:
+    Spark's ACPI ``Fan`` devices are not the sensed fan."""
+
+    def norm(text: str) -> str:
+        return "".join(c for c in text.lower() if c.isalnum())
+
+    names = []
+    for hw in sorted((sys_root / "class" / "hwmon").glob(_HWMON_GLOB)):
+        if any(_read(hw / f) is not None for f in ("pwm1", "fan1_input")):
+            names.append(norm(_read(hw / "name") or ""))
+    for cd in sorted((sys_root / "class" / "thermal").glob("cooling_device*")):
+        ctype = norm(_read(cd / "type") or "")
+        if ctype and any(n and n in ctype for n in names):
+            return True
+    return False
+
+
 class Sensor:
     def __init__(
         self,
@@ -428,6 +468,8 @@ class Sensor:
             self._gpu_cache = read_gpu_nvidia_smi()
         elif self.gpu == "jetson":
             self._gpu_cache = read_gpu_jetson(self.sys_root)
+        elif self.gpu == "devfreq":
+            self._gpu_cache = read_gpu_devfreq(self.sys_root)
         return self._gpu_cache
 
     def read(self) -> Reading:
@@ -440,6 +482,14 @@ class Sensor:
             gpu=self._gpu(now),
             system=self.system.read(),
         )
+
+
+def _fan_ownership(sys_root: Path, fans: dict[str, float], jetson: bool) -> str:
+    if not fans:
+        return "absent"
+    if not jetson and _fan_kernel_owned(sys_root):  # Jetson: nvfancontrol drives the fan
+        return "present, kernel-owned (thermal cooling device)"
+    return "present, firmware/nvfancontrol owned"
 
 
 def capabilities(sys_root: Path = Path("/sys"), root: Path = Path("/")) -> dict[str, object]:
@@ -467,7 +517,7 @@ def capabilities(sys_root: Path = Path("/sys"), root: Path = Path("/")) -> dict[
             "admission_signal": True,
             # Present but NOT driven by heat-governor (root-only or parked):
             "nvpmodel": "present, not driven" if shutil.which("nvpmodel") else "absent",
-            "fan_pwm": "present, firmware/nvfancontrol owned" if fans else "absent",
+            "fan_pwm": _fan_ownership(sys_root, fans, jetson),
             "gpu_clock_lock": "not driven (parked by operator)",
         },
         "jetson": jetson,

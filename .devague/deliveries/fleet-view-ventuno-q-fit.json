@@ -1,0 +1,58 @@
+{
+  "plan_slug": "fleet-view-ventuno-q-fit",
+  "schema_version": 2,
+  "created": "2026-11-09T04:31:42Z",
+  "updated": "2026-11-09T05:13:38Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "add per-machine memory state to the fleet view: the reader carries mem used %, available, derived total and swap (already published by every daemon's /state sensors, 0.13.0 included) plus memory temperature where a DDR/DRAM/EMC/SDRAM thermal zone exists (VENTUNO Q ddrss-*; not exposed on Jetson or GB10), stores memory % in the compact history, and the page, mesh status and the trend tooltip/table show a Memory fact with an (i) hint",
+      "task_ref": "t7",
+      "reason": "user request on 2026-11-09 after the run; probe showed memory already in every daemon's state document, memory temperature only on the VENTUNO Q",
+      "affects": [
+        "t9",
+        "t10",
+        "t12",
+        "c8",
+        "c28"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "trend history comes from each machine's own heat-governor record files (records/YYYYMMDD.jsonl, 18 days on the remote boxes): the reader runs a second fixed, read-only, niced downsampling command over the existing SSH connection (numeric arguments only) and cultureos reads its own files locally; results cached briefly; the reader's in-memory buffer becomes the fallback; the trend panel gains a 7d range. No daemon changes.",
+      "task_ref": "t7",
+      "reason": "user on 2026-11-09: history must persist per machine; the reader-only buffer (q6) is wiped on every mesh serve restart while every daemon already records 1 Hz history to disk; decider 0.51 ssh_backfill / 0.47 plus persist, remote load acceptable P=0.78; user approved with a 7-day range",
+      "affects": [
+        "t6",
+        "t8",
+        "t9",
+        "c8",
+        "c28"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 2
+    },
+    {
+      "id": "d3",
+      "what": "show each machine's GPU clock, GPU power, GPU utilisation and board power: the reader carries gpu_mhz, gpu_power_w, gpu_util_pct and power_w derived from the /state sensors (cultureos devfreq clock + ina232 board power; Spark sm clock, power, util; Jetson gpc clock); the page's GPU fact shows temp \u00b7 clock \u00b7 power \u00b7 util and the clock ceiling only when one is set; the Power fact shows board power",
+      "task_ref": "t7",
+      "reason": "user request 2026-11-09: cultureos GPU clock and power were read by its daemon but dropped by the reader (run-state follow-up 4); the page's GPU fact showed the ceiling helper status instead of the clock",
+      "affects": [
+        "t9"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 3
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}

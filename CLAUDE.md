@@ -29,12 +29,18 @@ files, and a CI/deploy pipeline. It is a sibling to
 | Admission signal: state file, `GET /state`, client `read`/`wait`/`Gate` (`state.py`, `client.py`) | Implemented |
 | Tensor-parallel pair (`[pair]`): read the peer daemon's state, cap the pair's containers by the hotter box, never pause them (`pair.py`) | Implemented, unit-tested with fakes and a localhost server; not run on the two Sparks |
 | Records, reboot report, trace replay (`recorder.py`; `report`, `replay`) | Implemented |
+| VENTUNO Q profile: `ventunoq` (30 zones, 94 / 98 / 102 C), `devfreq` GPU mode, `board_power_w`, kernel-owned fan (`platforms.py`, `sense.py`); `gpu-clock` refuses it | Implemented; limits declared from trip points, unmeasured |
+| Fleet reader: `fleet.toml` (`fleet.py`), SSH/local transport (`transport.py`), concurrent poll with ok/stale/unreachable and 24 h history (`fleet_reader.py`) | Implemented, unit-tested; remote daemons unchanged (loopback, reached over SSH) |
+| `mesh overview\|status\|serve`, dashboard on `127.0.0.1:9480` (`mesh_server.py`, `web/`, vendored React/htm/Lato) | Implemented |
+| `mcp`: read-only MCP server over stdio (`mcp_server.py`) | Implemented |
+| Bearer-token tailnet listener and daemon `GET /history`; persisted reader history; measured VENTUNO Q limits; cultureos daemon with apply | (planned) |
 | Live validation on a batch window (duty vs peak temperature vs throughput) | (planned) |
 | Configuration: one TOML file, strict validation, live reload, `config` verbs (`config.py`) | Implemented |
 | GPU clock ceiling via a root helper + narrow sudoers rule (`gpuclock.py`; `gpu-clock` verbs) | Implemented; helper installed on all four boxes 2026-10-23; `lock` at max accepted on GB10 and both Jetsons; effect of a lower ceiling unmeasured |
 | CPU clock, fan speed, active cores, nvpmodel | Not driven (root-only or firmware-owned) |
 
-Read `docs/HANDOFF-2026-10-23.md` (why, and what was measured), `docs/contracts/state.md` (the client
+Read `docs/HANDOFF-2026-10-23.md` (why, and what was measured), `docs/HANDOFF-2026-11-09.md`
+(VENTUNO Q, the fleet view, what is live and still open), `docs/contracts/state.md` (the client
 contract) and `docs/integration.md` (how lobes, sparkrun and mjolnir use it) before changing behaviour.
 
 ### Working on the governing domain

@@ -1,0 +1,19 @@
+# Example fleet.toml. Copy it into the heat-governor config directory, beside config.toml
+# (run `heat-governor config path` to see where that is).
+# Hostnames below are placeholders; use your own.
+
+# Seconds between polls (1 to 3600) and per-machine timeout (0.5 to 120).
+poll_s = 10
+timeout_s = 5
+
+# transport "local": this machine, no host needed.
+[[machines]]
+name = "this-box"
+transport = "local"
+
+# transport "ssh" (the default): host is a plain hostname, IP address or user@host.
+# No leading '-', spaces or shell metacharacters; those are rejected at load time.
+[[machines]]
+name = "box-a"
+host = "box-a.example.ts.net"
+transport = "ssh"
