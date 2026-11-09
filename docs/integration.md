@@ -170,3 +170,20 @@ it and the sudoers line), then `gpu_clock = true` under `[daemon]`.
 - It does not stop work that is running. Admission gates new work; duty-cycling only pauses batch
   containers.
 - It needs no network and no LLM to keep governing.
+
+## Reading the fleet
+
+The per-host daemon contract ([`docs/contracts/state.md`](contracts/state.md)) is unchanged. To see all
+machines at once:
+
+- `heat-governor mesh status --json` asks a running `mesh serve` and falls back to a direct concurrent
+  read of every machine in `fleet.toml`.
+- `GET /api/fleet` on `mesh serve` (default `127.0.0.1:9480`) returns the same snapshot;
+  `GET /api/history?machine=<name>&range=15m|1h|6h|24h` returns the reader's compact history.
+- `heat-governor mcp` is a read-only MCP server over stdio with tools `mesh_status`, `machine_state`
+  and `sense`: `claude mcp add heat-governor -- heat-governor mcp`.
+
+Each machine entry carries `state` (`ok`, `stale`, `unreachable`) judged on the reader's clock; `admit` is
+null unless the machine is `ok`, so a missing reading never reads as permission. The list of machines is
+[`fleet.toml`](fleet.example.toml). A bearer-token tailnet listener and a daemon `GET /history` route
+are **(planned)**.
