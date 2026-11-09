@@ -146,7 +146,10 @@ Machines come from `fleet.toml` beside `config.toml` (format:
   worked (an unreachable box is data); 2 when nothing could be read; 1 for a
   bad or missing fleet file.
 - `mesh serve [--fleet PATH] [--listen HOST:PORT]` -- the page and JSON API
-  on 127.0.0.1:9480; only an explicit `--listen` changes the address.
+  on 127.0.0.1:9480; only an explicit `--listen` changes the address. The
+  server has no authentication: anyone who can reach a non-loopback address
+  can read the fleet and start history reads (at most 4 at once; more get
+  `503`), so bind one only on a network you trust.
 
 ## Usage
 

@@ -165,15 +165,7 @@ def _direct_snapshot(fleet: Fleet) -> dict:
     """One concurrent read of every machine; bounded by about ``timeout_s`` + 1 s."""
     reader = _make_reader(fleet)
     try:
-        threads = [
-            threading.Thread(target=reader.poll_once, args=(m.name,), daemon=True)
-            for m in fleet.machines
-        ]
-        for t in threads:
-            t.start()
-        deadline = _now() + fleet.timeout_s + DIRECT_SLACK_S
-        for t in threads:
-            t.join(timeout=max(0.0, deadline - _now()))
+        reader.poll_all(fleet.timeout_s + DIRECT_SLACK_S)  # a hung read closes its own ssh
         return reader.snapshot()
     finally:
         reader.close()
@@ -360,6 +352,10 @@ def register(sub: argparse._SubParsersAction) -> None:
 
     sv = noun.add_parser("serve", help="Serve the fleet page and JSON API (read-only).")
     sv.add_argument("--fleet", help="fleet.toml path (default: beside config.toml).")
-    sv.add_argument("--listen", help=f"HOST:PORT to bind (default {DEFAULT_HOST}:{DEFAULT_PORT}).")
+    sv.add_argument(
+        "--listen",
+        help=f"HOST:PORT to bind (default {DEFAULT_HOST}:{DEFAULT_PORT}). The server has no "
+        "authentication: bind a non-loopback address only on a network you trust.",
+    )
     sv.add_argument("--json", action="store_true", help=_JSON_HELP)
     sv.set_defaults(func=cmd_serve)

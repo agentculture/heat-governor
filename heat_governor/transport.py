@@ -24,6 +24,9 @@ socket path under the ~104 character limit).
 
 Timeouts: ``ConnectTimeout``, the remote ``curl -m`` and a hard subprocess deadline of
 ``timeout_s`` plus a 0.5 s grace all bound one poll; on the deadline the ssh child is killed.
+Output is capped while it is read (:data:`MAX_DOC_BYTES` for ``/state``,
+:data:`MAX_HISTORY_BYTES` for history): past the cap the child is killed and the read fails
+as :class:`Unreachable` ("output too large").
 """
 
 from __future__ import annotations
@@ -31,9 +34,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import selectors
 import shlex
 import subprocess  # nosec B404
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -44,6 +49,9 @@ from heat_governor.state import default_data_dir
 
 STATE_PORT = 9476
 MAX_DOC_BYTES = 1 << 20  # a state document is a few KiB; refuse anything absurd (as pair.py)
+MAX_HISTORY_BYTES = 8 << 20  # a history answer is at most a few hundred KiB
+MAX_ERR_BYTES = 64 << 10  # stderr keeps only its tail (the last line is the reason shown)
+_CHUNK = 65536
 GRACE_S = 0.5
 PERSIST_S = 60
 ALIVE_S = 5
@@ -129,8 +137,17 @@ class SshTransport:
         return [*self._base_argv(), "--", self.host, remote]
 
     def _run(
-        self, argv: list[str], deadline: float, label: float | None = None
+        self,
+        argv: list[str],
+        deadline: float,
+        label: float | None = None,
+        cap: int | None = None,
     ) -> tuple[int, bytes, bytes]:
+        """Run ``argv``; return ``(code, stdout, stderr)``. The child is killed, and
+        :class:`Unreachable` raised, on the deadline or once stdout exceeds ``cap`` bytes
+        (a broken or hostile remote cannot make the reader buffer without bound);
+        ``cap`` defaults to :data:`MAX_DOC_BYTES`."""
+        cap = MAX_DOC_BYTES if cap is None else cap
         try:
             proc = (
                 subprocess.Popen(  # nosec B603  # NOSONAR python:S4721 -- argv list, validated host
@@ -142,16 +159,17 @@ class SshTransport:
             )
         except OSError as exc:
             raise Unreachable(f"cannot run {self.ssh}: {exc}") from exc
+        end = time.monotonic() + deadline
         try:
-            out, err = proc.communicate(timeout=deadline)
+            out, err = _collect(proc, end, cap)
+            proc.wait(timeout=max(0.0, end - time.monotonic()))
         except subprocess.TimeoutExpired as exc:
-            proc.kill()
-            try:
-                proc.communicate(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                pass  # a lingering master holding the pipes must not block the caller
+            _kill(proc)
             shown = self.timeout_s if label is None else label
             raise Unreachable(f"timed out after {_num(shown)}s") from exc
+        except _TooLarge as exc:
+            _kill(proc)
+            raise Unreachable(f"output too large (over {cap} bytes)") from exc
         return proc.returncode, out, err
 
     def _prepare(self) -> None:
@@ -183,7 +201,7 @@ class SshTransport:
             raise Unreachable(f"refused history arguments: {exc}") from exc
         limit = timeout_for(float(until) - float(since))
         self._prepare()
-        code, out, err = self._run(argv, limit + GRACE_S, label=limit)
+        code, out, err = self._run(argv, limit + GRACE_S, label=limit, cap=MAX_HISTORY_BYTES)
         self._check(code, err)
         try:
             return parse_output(out)
@@ -209,6 +227,47 @@ class SshTransport:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+class _TooLarge(Exception):
+    """stdout passed its cap."""
+
+
+def _collect(proc: subprocess.Popen, end: float, cap: int) -> tuple[bytes, bytes]:
+    """Read the child's stdout and stderr until both close: ``TimeoutExpired`` past the
+    monotonic ``end``, :class:`_TooLarge` once stdout exceeds ``cap``. stderr keeps only
+    its last :data:`MAX_ERR_BYTES`."""
+    out, err = bytearray(), bytearray()
+    with selectors.DefaultSelector() as sel:
+        sel.register(proc.stdout, selectors.EVENT_READ, out)  # type: ignore[arg-type]
+        sel.register(proc.stderr, selectors.EVENT_READ, err)  # type: ignore[arg-type]
+        while sel.get_map():
+            left = end - time.monotonic()
+            if left <= 0:
+                raise subprocess.TimeoutExpired(proc.args, left)
+            for key, _ in sel.select(left):
+                chunk = os.read(key.fd, _CHUNK)
+                if not chunk:
+                    sel.unregister(key.fileobj)
+                    continue
+                buf = key.data
+                buf += chunk
+                if buf is out and len(out) > cap:
+                    raise _TooLarge
+                if buf is err and len(err) > MAX_ERR_BYTES:
+                    del err[:-MAX_ERR_BYTES]
+    return bytes(out), bytes(err)
+
+
+def _kill(proc: subprocess.Popen) -> None:
+    proc.kill()
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            pipe.close()
+    try:
+        proc.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        pass  # a lingering master holding the pipes must not block the caller
 
 
 class LocalTransport:

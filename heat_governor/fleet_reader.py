@@ -16,7 +16,10 @@ Public API::
 
 Threads: one daemon thread per machine (``fleet-reader:<name>``), so a hung or slow box
 never delays the others. :meth:`stop` sets an event and joins with a bounded deadline; a
-thread stuck in a fetch is left to finish on its own (it closes its transport when it does).
+thread stuck in a fetch is left to finish on its own (it closes its transport when it does,
+unless a restarted poller owns it -- and that poller waits for it, so a box never has two).
+:meth:`poll_all` is the one-shot read (``mesh status``'s direct path), tracked the same way:
+:meth:`close` only closes a transport no thread is using.
 
 Freshness follows :class:`heat_governor.pair.PeerLink`: the age is measured on the
 READER's clock from when the document's ``at`` last changed (so clock skew between boxes
@@ -41,7 +44,8 @@ Trends (what the page draws) come first from the machine's own record files:
 points)`` for :data:`TREND_TTL_S` (:data:`TREND_LONG_TTL_S` for windows over 26 h) in a
 bounded cache, and falls back to the in-memory buffer (``"source": "buffer"``) when the
 transport has no ``history``, the call fails (remembered for the same TTL so a page refresh
-does not retry ssh every time), or the records answer is empty while the buffer is not. It
+does not retry ssh every time), or the records answer is empty while the buffer is not.
+Concurrent misses of one key share a single in-flight read instead of each starting ssh. It
 runs on the caller's (HTTP handler) thread without the reader lock, bounded by the
 transport's own timeout, so the polling threads are never blocked.
 """
@@ -58,7 +62,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from heat_governor.fleet import Fleet, Machine
-from heat_governor.history import LONG_RANGE_S
+from heat_governor.history import LONG_RANGE_S, timeout_for
 from heat_governor.pair import MAX_PEER_STALE_S
 from heat_governor.policy import LEVELS
 from heat_governor.transport import GRACE_S, LocalTransport, SshTransport
@@ -198,9 +202,31 @@ def _gpu_power(doc: dict) -> dict:
     }
 
 
+_FAN_RPM = re.compile(r"^fan:.+\.fan\d+_input$")  # hwmon fanN_input is RPM; pwmN is duty
+
+
+def _fan_zones(doc: dict) -> dict:
+    """``fan_rpm``: the fastest fan's speed from the ``fan:<chip>.fan<N>_input`` sensors
+    (``pwm`` keys are duty, not speed), ``None`` without one; ``zones``: how many thermal
+    zones the box read this tick (finite ``zone:*`` sensors), ``None`` without any."""
+    sensors = doc.get("sensors")
+    s = sensors if isinstance(sensors, dict) else {}
+    rpms = [
+        float(v) for k, v in s.items() if isinstance(k, str) and _FAN_RPM.match(k) and _finite(v)
+    ]
+    zones = sum(
+        1 for k, v in s.items() if isinstance(k, str) and k.startswith("zone:") and _finite(v)
+    )
+    return {"fan_rpm": max(rpms) if rpms else None, "zones": zones or None}
+
+
 def extract(doc: dict) -> dict:
     """The thermal fields of a /state document; ``ValueError`` when it is no live decision
-    (the same test as :func:`heat_governor.pair.parse`: a known level and a finite ``at``)."""
+    (the same test as :func:`heat_governor.pair.parse`: a known level and a finite ``at``).
+
+    Derived from ``sensors`` on top of :data:`THERMAL_FIELDS`: ``memory`` (:func:`_memory`),
+    ``gpu_mhz`` / ``gpu_power_w`` / ``gpu_util_pct`` / ``power_w`` (:func:`_gpu_power`), and
+    ``fan_rpm`` / ``zones`` (:func:`_fan_zones`)."""
     if doc.get("level") not in LEVELS:
         raise ValueError(f"level {doc.get('level')!r} (daemon not ticking yet?)")
     if not _finite(doc.get("at")):
@@ -211,6 +237,7 @@ def extract(doc: dict) -> dict:
         out["limits"] = None
     out["memory"] = _memory(doc)
     out.update(_gpu_power(doc))
+    out.update(_fan_zones(doc))
     return out
 
 
@@ -385,6 +412,7 @@ class _Box:
     polls: int = 0
     failures: int = 0
     thread: threading.Thread | None = field(default=None, repr=False)
+    users: int = 0  # threads using the transport now; the last one out may close it
 
 
 def _short(exc: BaseException) -> str:
@@ -422,6 +450,7 @@ class FleetReader:
         # (name, since_s, max_points) -> (expires on the reader clock, samples or None=failed)
         self._trend_cache: dict[tuple, tuple[float, list | None]] = {}
         self._trend_lock = threading.Lock()  # guards the cache dict only, never held over I/O
+        self._trend_inflight: dict[tuple, _Flight] = {}  # key -> the one read in progress
 
     # -- one read
     def poll_once(self, name: str) -> None:
@@ -543,28 +572,49 @@ class FleetReader:
         box = self._boxes[name]
         key = (name, float(since_s), int(max_points))
         now = self.clock()
+        leader = False
         with self._trend_lock:
             hit = self._trend_cache.get(key)
-        samples: list | None = None
-        if hit is not None and hit[0] > now:
-            samples = hit[1]
-        else:
-            fn = getattr(box.transport, "history", None)
-            if callable(fn):
-                until = self.wall()
-                try:
-                    doc = fn(until - since_s, until, max_points)
-                    samples = list(doc["samples"])
-                except Exception:  # noqa: BLE001 - any failure falls back to the buffer
-                    samples = None
-                ttl = TREND_LONG_TTL_S if since_s > LONG_RANGE_S else TREND_TTL_S
-                self._remember(key, self.clock() + ttl, samples)
+            if hit is not None and hit[0] > now:
+                flight = None
+            else:
+                flight = self._trend_inflight.get(key)
+                if flight is None:
+                    flight = self._trend_inflight[key] = _Flight()
+                    leader = True
+        if flight is None:
+            samples = hit[1]  # type: ignore[index]
+        elif leader:
+            samples = self._read_trend(box, key, since_s, max_points, flight)
+        else:  # a read of the same window is running: share it, never start another
+            samples = flight.wait(timeout_for(since_s) + GRACE_S)
         if samples:
             return {"source": "records", "samples": samples}
         buffered = self.history(name, since_s, max_points)
         if buffered or samples is None:
             return {"source": "buffer", "samples": buffered}
         return {"source": "records", "samples": samples}
+
+    def _read_trend(
+        self, box: _Box, key: tuple, since_s: float, max_points: int, flight: _Flight
+    ) -> list | None:
+        """The leader's records read for ``key``: cached, then handed to every waiter."""
+        samples: list | None = None
+        try:
+            fn = getattr(box.transport, "history", None)
+            if callable(fn):
+                until = self.wall()
+                try:
+                    samples = list(fn(until - since_s, until, max_points)["samples"])
+                except Exception:  # noqa: BLE001 - any failure falls back to the buffer
+                    samples = None
+                ttl = TREND_LONG_TTL_S if since_s > LONG_RANGE_S else TREND_TTL_S
+                self._remember(key, self.clock() + ttl, samples)
+        finally:
+            with self._trend_lock:
+                self._trend_inflight.pop(key, None)
+            flight.finish(samples)
+        return samples
 
     def _remember(self, key: tuple, expires: float, samples: list | None) -> None:
         now = self.clock()
@@ -582,28 +632,67 @@ class FleetReader:
         return not self._stop.is_set()
 
     def start(self) -> None:
+        """Start one poller per machine. A machine whose previous poller is still stuck in
+        a fetch (a bounded :meth:`stop` returned without it) gets a poller that first waits
+        for the old one to exit, so one box never has two pollers or two concurrent reads."""
         if self.running:
             return
         stop = threading.Event()
         self._stop = stop
         for box in self._boxes.values():
+            prev = box.thread if box.thread is not None and box.thread.is_alive() else None
+            with self._lock:
+                box.users += 1
             box.thread = threading.Thread(
                 target=self._loop,
-                args=(box, stop),
+                args=(box, stop, prev),
                 name=f"fleet-reader:{box.machine.name}",
                 daemon=True,
             )
             box.thread.start()
 
-    def _loop(self, box: _Box, stop: threading.Event) -> None:
+    def _loop(self, box: _Box, stop: threading.Event, prev: threading.Thread | None = None) -> None:
         try:
+            if prev is not None:
+                prev.join()  # bounded: the old fetch ends at its transport's deadline
             while not stop.is_set():
                 began = time.monotonic()
                 self.poll_once(box.machine.name)
                 stop.wait(max(0.0, self.fleet.poll_s - (time.monotonic() - began)))
         finally:
-            if self._stop is stop:  # no newer start() owns this transport now
-                _close(box.transport)
+            self._release(box)
+
+    def _release(self, box: _Box) -> None:
+        """A thread is done with the box's transport: the last one out closes it unless a
+        running poller still owns it."""
+        with self._lock:
+            box.users -= 1
+            last = box.users == 0 and not self.running
+        if last:
+            _close(box.transport)
+
+    def poll_all(self, join_s: float) -> None:
+        """One concurrent read of every machine (``mesh status``'s direct path), returning
+        within ``join_s``. A read still running at the deadline keeps its transport; its
+        thread closes it when the read ends, never :meth:`close` under it."""
+        threads = []
+        for box in self._boxes.values():
+            with self._lock:
+                box.users += 1
+            th = threading.Thread(
+                target=self._once, args=(box,), name=f"fleet-read:{box.machine.name}", daemon=True
+            )
+            th.start()
+            threads.append(th)
+        deadline = time.monotonic() + join_s
+        for th in threads:
+            th.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    def _once(self, box: _Box) -> None:
+        try:
+            self.poll_once(box.machine.name)
+        finally:
+            self._release(box)
 
     def stop(self, join_s: float = STOP_JOIN_S) -> None:
         """Stop polling. Returns within about ``join_s`` even if a fetch is hung."""
@@ -614,11 +703,28 @@ class FleetReader:
                 box.thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
     def close(self) -> None:
-        """Stop, and close the transports of machines whose poller is not running."""
+        """Stop, and close the transports no thread is using; a thread still in a fetch
+        closes its own transport when the fetch ends."""
         self.stop()
-        for box in self._boxes.values():
-            if box.thread is None or not box.thread.is_alive():
-                _close(box.transport)
+        with self._lock:
+            idle = [b for b in self._boxes.values() if b.users == 0]
+        for box in idle:
+            _close(box.transport)
+
+
+class _Flight:
+    """One in-progress trend read that concurrent callers of the same key wait on."""
+
+    def __init__(self) -> None:
+        self._done = threading.Event()
+        self._samples: list | None = None
+
+    def finish(self, samples: list | None) -> None:
+        self._samples = samples
+        self._done.set()
+
+    def wait(self, timeout: float) -> list | None:
+        return self._samples if self._done.wait(timeout) else None
 
 
 def _close(t: Transport) -> None:
