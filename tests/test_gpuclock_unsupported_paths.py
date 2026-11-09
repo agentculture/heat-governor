@@ -86,7 +86,8 @@ def test_reload_enabling_gpu_on_ventunoq_never_spawns(tmp_path, spawned, text) -
     d.tick()
     d.tick()
     d.shutdown()
-    assert d.gpuclock is not None and d.gpuclock.unsupported
+    assert d.gpuclock is not None
+    assert d.gpuclock.unsupported
     assert d.gpuclock.available is False
     assert spawned == []
 
@@ -97,7 +98,8 @@ def test_reload_enabling_gpu_on_spark_still_probes(tmp_path, spawned) -> None:
     d = _daemon(tmp_path, platforms.SPARK, SPARK_ZONES, config=load(path))
     d.start()
     _reload(d, path, RELOADS[0])
-    assert d.gpuclock is not None and not d.gpuclock.unsupported
+    assert d.gpuclock is not None
+    assert not d.gpuclock.unsupported
     assert any(argv[-1] == "status" for argv in spawned)
     d.shutdown()
 
@@ -166,7 +168,8 @@ def test_hold_on_ventunoq_refused_and_writes_nothing(
     data = tmp_path / "hold-data"
     rc, out, err = _cli(capsys, "gpu-clock", "hold", "1500", "--data-dir", str(data), *json_flag)
     assert rc == 1
-    assert "unsupported platform" in err and "ventunoq" in err
+    assert "unsupported platform" in err
+    assert "ventunoq" in err
     assert out == ""
     assert not data.exists() or list(data.iterdir()) == []
     assert spawned == []

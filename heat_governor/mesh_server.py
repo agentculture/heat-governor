@@ -29,6 +29,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from urllib.parse import parse_qs, urlsplit
 
+JSON_TYPE = "application/json"
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9480
 RANGES = {"15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}
@@ -73,7 +75,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(
             code,
             json.dumps(doc).encode(),
-            "application/json",
+            JSON_TYPE,
             {"Cache-Control": "no-store"},
         )
 
@@ -109,7 +111,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(
             503,
             b'{"error": "busy, retry shortly"}',
-            "application/json",
+            JSON_TYPE,
             {"Cache-Control": "no-store", "Retry-After": "1"},
         )
 
@@ -150,7 +152,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(
             405,
             b'{"error":"method not allowed"}',
-            "application/json",
+            JSON_TYPE,
             {"Allow": "GET, HEAD"},
         )
 

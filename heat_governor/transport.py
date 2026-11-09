@@ -246,17 +246,26 @@ def _collect(proc: subprocess.Popen, end: float, cap: int) -> tuple[bytes, bytes
             if left <= 0:
                 raise subprocess.TimeoutExpired(proc.args, left)
             for key, _ in sel.select(left):
-                chunk = os.read(key.fd, _CHUNK)
-                if not chunk:
-                    sel.unregister(key.fileobj)
-                    continue
-                buf = key.data
-                buf += chunk
-                if buf is out and len(out) > cap:
-                    raise _TooLarge
-                if buf is err and len(err) > MAX_ERR_BYTES:
-                    del err[:-MAX_ERR_BYTES]
+                _drain(sel, key, out, cap)
     return bytes(out), bytes(err)
+
+
+def _drain(
+    sel: selectors.BaseSelector, key: selectors.SelectorKey, out: bytearray, cap: int
+) -> None:
+    """Read one ready chunk into its buffer: unregister the pipe at EOF, raise
+    :class:`_TooLarge` once stdout passes ``cap``, keep only stderr's tail."""
+    chunk = os.read(key.fd, _CHUNK)
+    if not chunk:
+        sel.unregister(key.fileobj)
+        return
+    buf: bytearray = key.data
+    buf += chunk
+    if buf is out:
+        if len(buf) > cap:
+            raise _TooLarge
+    elif len(buf) > MAX_ERR_BYTES:
+        del buf[:-MAX_ERR_BYTES]
 
 
 def _kill(proc: subprocess.Popen) -> None:

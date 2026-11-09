@@ -204,4 +204,5 @@ def test_unexpected_error_is_logged_and_sanitized(server, capsys):
     assert json.loads(body) == {"error": "internal error"}
     assert b"secret-detail-xyz" not in body
     err = capsys.readouterr().err
-    assert "Traceback" in err and "secret-detail-xyz" in err
+    assert "Traceback" in err
+    assert "secret-detail-xyz" in err
