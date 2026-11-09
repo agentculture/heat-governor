@@ -196,6 +196,7 @@ def _row(m: dict) -> dict:
         "admit": th.get("admit") if m.get("state") == "ok" else None,
         "version": th.get("version"),
         "last_error": health.get("last_error"),
+        "failing": bool(health.get("failing")),
     }
 
 
@@ -218,6 +219,12 @@ def _fmt(v: object, spec: str = "") -> str:
     return "-" if v is None else format(v, spec)
 
 
+def _show_error(row: dict) -> bool:
+    """Show a box's last error only while it is failing or not ok (a recovered box keeps
+    last_error in the data, but printing it would read as a current fault)."""
+    return bool(row.get("failing")) or row.get("state") != "ok"
+
+
 def render_status(st: dict) -> str:
     rows = st["machines"]
     w = max([len(str(r["name"])) for r in rows] + [4])
@@ -227,7 +234,8 @@ def render_status(st: dict) -> str:
         lines.append(
             f"{str(r['name']):<{w}}  {str(r['state']):<11} age {_fmt(r['age_s'], '.1f'):>6}s  "
             f"{_fmt(r['temp_c'], '.1f'):>5}C  {_fmt(r['level']):<8} {admit:<5} "
-            f"v{_fmt(r['version'])}" + (f"  ({r['last_error']})" if r["last_error"] else "")
+            f"v{_fmt(r['version'])}"
+            + (f"  ({r['last_error']})" if r["last_error"] and _show_error(r) else "")
         )
     rd = st.get("reader") or {}
     src = st["source"] + (f" {st['url']}" if st.get("url") else "")

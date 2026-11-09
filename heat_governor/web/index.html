@@ -451,7 +451,7 @@ function Facts({ b }) {
 
 function Lane({ b, open, onOpen }) {
   return html`<article class=${"lane " + b.state} role="button" tabIndex="0" aria-haspopup="dialog" aria-label=${(open ? "Remove " : "Show trends for ") + b.name} aria-pressed=${open} data-open=${open}
-    title=${b.health.last_error || undefined}
+    title=${b.health.failing || b.state !== 'ok' ? b.health.last_error || undefined : undefined}
     onClick=${() => onOpen(b.name)} onKeyDown=${e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(b.name); } }}>
     <div class="who">
       <div class="top"><${Mark} b=${b} /><span class="name">${b.name}</span>${b.hub && html`<span class="tag">reader</span>`}</div>
@@ -472,7 +472,7 @@ function Lane({ b, open, onOpen }) {
 
 function Tile({ b, open, onOpen }) {
   return html`<article class=${"tile " + b.state} role="button" tabIndex="0" aria-haspopup="dialog" aria-label=${(open ? "Remove " : "Show trends for ") + b.name} aria-pressed=${open} data-open=${open}
-    title=${b.health.last_error || undefined}
+    title=${b.health.failing || b.state !== 'ok' ? b.health.last_error || undefined : undefined}
     onClick=${() => onOpen(b.name)} onKeyDown=${e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(b.name); } }}>
     <div class="row"><span class="nm"><${Mark} b=${b} />${b.name}</span>${b.hub && html`<span class="tag">reader</span>`}</div>
     <div class="row"><span class="temp">${fmt(b.temp)}<small>°C</small></span><span class="status">${statusText(b)}</span></div>

@@ -283,3 +283,38 @@ def test_status_never_reports_admit_for_a_box_that_is_not_ok():
     assert rows["a"]["admit"] is None
     assert rows["b"]["admit"] is None
     assert rows["c"]["admit"] is True
+
+
+def test_status_text_hides_a_recovered_error():
+    """A box that failed once and then recovered keeps last_error in the data, but the
+    text line only shows it while the box is failing or not ok."""
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    th = {"admit": True, "concurrency_factor": 1.0, "temp_c": 48.0, "level": "cool"}
+    snap = {
+        "schema": 1,
+        "reader": {},
+        "machines": [
+            {
+                "name": "recovered",
+                "state": "ok",
+                "age_s": 1.0,
+                "thermal": dict(th),
+                "health": {"last_error": "connection refused", "failing": False},
+            },
+            {
+                "name": "down",
+                "state": "unreachable",
+                "age_s": 90.0,
+                "thermal": dict(th),
+                "health": {"last_error": "timed out", "failing": True},
+            },
+        ],
+    }
+    st = build_status(snap, "mesh serve", None)
+    rows = {r["name"]: r for r in st["machines"]}
+    assert rows["recovered"]["last_error"] == "connection refused"  # data is kept
+    assert rows["recovered"]["failing"] is False
+    text = render_status(st)
+    assert "connection refused" not in text
+    assert "timed out" in text
