@@ -20,7 +20,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- `gpu-clock` refuses ventunoq/devfreq profiles (exit 1 with a hint) in the CLI and the daemon; `lock` and `reset` gained `--platform`.
+- `gpu-clock` refuses ventunoq/devfreq profiles (exit 1 with a hint) in the CLI and the daemon; `lock`, `reset`, `hold` and `release` gained `--platform`. `hold` also refuses there, and the root helper is never spawned on such a board, including after a live config reload and when crash recovery finds a persisted `gpu_locked` entry (it is cleared, with a log line).
+- Fleet reader hardening: SSH output capped (1 MiB state, 8 MiB history; the child is killed past it); concurrent history misses share one read and `/api/history` answers `503` past 4 in flight; a restart never runs two pollers for one box; `mesh status` never closes an SSH connection under a running read; unexpected server errors are logged with a traceback.
+- The dashboard's Fan (fastest `fanN_input`, rpm) and Zones (readable thermal zones) facts are now filled.
 - Docs and harness prompt files describe the fleet view. Planned, not built: a bearer-token tailnet listener and daemon `GET /history` route; persisted reader history; measured VENTUNO Q limits.
 
 ## [0.15.0] - 2026-11-08
