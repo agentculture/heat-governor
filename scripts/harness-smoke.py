@@ -116,6 +116,10 @@ STEWARD_WAIVED_PORTABILITY_PATHS = frozenset(
         # exact path, so any other doc or config that gains a ~/.<dotfile> ref still fails.
         ".devague/frames/fleet-view-ventuno-q-fit.json",
         ".devague/plans/fleet-view-ventuno-q-fit.json",
+        # Its delivery ledger (validate-delivery, 2026-11-10): evidence records copy the
+        # claims' text verbatim as their contract (c26 quotes ~/.ssh/config) and one live
+        # observation names the reader's socket dir. Same class, same no-hand-edit rule.
+        ".devague/deliveries/fleet-view-ventuno-q-fit.json",
         "docs/specs/2026-11-08-fleet-view-ventuno-q-fit.md",
         "docs/plans/2026-11-08-fleet-view-ventuno-q-fit-split.md",
     }

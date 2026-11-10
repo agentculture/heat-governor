@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-11-10
+
+### Added
+
+- docs/deliveries/2026-11-08-fleet-view-ventuno-q-fit.md: the delivery summary for the fleet view + VENTUNO Q plan (planned vs actual for t1-t13, drift, evidence, claims, remaining work)
+- devague delivery ledger: evidence e1-e20 for obligations o1-o20 and behavioural deltas b1-b5, filed as proposed for operator adjudication
+
+### Changed
+
+- docs/HANDOFF-2026-11-09.md: every box runs 0.16.0 (rolled out 2026-11-10); delivery validated and summarized
+
 ## [0.16.0] - 2026-11-08
 
 ### Added
