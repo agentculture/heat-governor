@@ -16,11 +16,17 @@ Provenance of the numbers (keep this honest when you change them):
   from each board's own passive trip point (Thor 109 C, Orin 99 C) minus a
   margin. No reset has been observed on either board, so treat them as a
   conservative starting point to tune from recorded runs.
-* **Arduino VENTUNO Q (Qualcomm QCS8300)** -- DECLARED from the board's own trip points
-  (read 2026-11-08), not measured. Only two PMIC zones carry a critical trip (125 C); the
-  CPU, GPU and NPU zones are passive-only (CPU 126 C, GPU/NPU 115 C). The profile watches the
-  cpu/cpuss/gpuss/nsp/ddrss zone families and puts critical below the 115 C GPU/NPU trip.
-  No reset or throttle run has been recorded; tune from recorded runs.
+* **Arduino VENTUNO Q (Qualcomm QCS8300)** -- levels DECLARED from the board's own trip
+  points (read 2026-11-08); load-checked 2026-11-10 (docs/evidence/2026-11-10-ventunoq-limits.md).
+  Only two PMIC zones carry a critical trip (125 C); the CPU, GPU and NPU zones are
+  passive-only (CPU 126 C, GPU/NPU 115 C). The profile watches the cpu/cpuss/gpuss/nsp/ddrss
+  zone families and puts critical below the 115 C GPU/NPU trip. Measured: the NPU (Hexagon
+  HTP v75) is the hot block. On its own it adds about 11 C over idle, against about 5 C for
+  all 8 CPU cores and about 2 C for the Adreno 623 GPU. CPU, GPU and NPU together peaked at
+  71 C / 28 W after 15 min, with no kernel throttling, and the kernel held the emc2305 fan
+  at state 5 of 10 throughout. The levels were never reached. On this board CPU caps are a
+  weak lever: pausing NPU work (Arduino App Lab's llama.cpp or QNN runner containers, as
+  ``batch``) is what would cool it. No reset has been observed.
 * **Arduino UNO Q (``arduino,imola``)** -- no data; falls back to generic.
 * **generic** -- derived at runtime from the lowest critical trip point.
 """
@@ -169,11 +175,15 @@ VENTUNOQ = Profile(
     gpu="devfreq",  # Adreno GPU is a devfreq node (clock only) plus the ina232 board-power hwmon
     provenance=(
         "declared from trip points (GPU/NPU passive 115 C, CPU passive 126 C) minus margin; "
-        "not measured"
+        "levels not measured; a 2026-11-10 CPU+GPU+NPU load run peaked at 71 C, "
+        "never reaching them"
     ),
     notes=(
         "Watches cpu/cpuss/gpuss/nsp/ddrss only: PMIC zones (critical 125 C) are excluded and "
-        "never govern. Declared, unmeasured; no thermal reset has been observed."
+        "never govern. Load-checked 2026-11-10: worst case 71 C / 28 W, no throttling. The NPU "
+        "is the hot block (+11 C alone, against +5 C for the CPU and +2 C for the GPU), so "
+        "pause NPU work (App Lab llama.cpp or QNN runners as batch) rather than cap CPUs. No "
+        "thermal reset has been observed."
     ),
 )
 
