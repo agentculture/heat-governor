@@ -101,11 +101,19 @@ GUILD_HARNESS = {
     "colleague": ("colleague", "AGENTS.colleague.md"),
 }
 
-#: steward doctor findings we knowingly carry. These are the five pre-existing
-#: ``~/.eidetic/memory`` references in two byte-verbatim vendored skills; they
-#: are upstream's to fix (never patch a verbatim vendored copy), so they are
-#: WAIVED — reported every run, never silently dropped. Any finding outside
-#: this allowlist fails the check.
+#: steward doctor findings we knowingly carry, waived per FILE (steward reports by file):
+#: reported every run, never silently dropped. Any finding outside these files fails.
+#: Two classes:
+#:
+#: * ``~/.eidetic/memory`` references in two byte-verbatim vendored skills -- upstream's
+#:   to fix (never patch a verbatim vendored copy);
+#: * generated devague records of the 2026-11-08 fleet-view plan (frame, plan, delivery
+#:   ledger, and the spec/plan exports) that quote per-user paths as recorded text --
+#:   devague forbids hand-editing them.
+#:
+#: Because a waiver covers a whole file, a NEW per-user path written into a waived devague
+#: file passes silently. Keep such paths out of new records (name them by role, e.g.
+#: "the reader's ssh dir"), as the replacement evidence e28 does.
 STEWARD_WAIVED_PORTABILITY_PATHS = frozenset(
     {
         ".claude/skills/recall/SKILL.md",

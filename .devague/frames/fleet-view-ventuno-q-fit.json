@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-08T18:26:10Z",
-  "updated": "2026-11-08T22:47:17Z",
+  "updated": "2026-11-10T15:55:34Z",
   "claims": [
     {
       "id": "c1",
@@ -971,6 +971,17 @@
       "skipped_check": "block the merge when a mutation check survives",
       "refs": [
         "plan t10"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l7",
+      "code": "provenance-missing",
+      "what": "validate-delivery (2026-11-10) filed run timestamps for its browser, live and validator checks as round approximations (15:34:30, 15:37:30, 15:40:00), not times captured when the checks ran. e9's 15:40:00 even comes after the ledger's own last write. Every timestamp was also written without a Z. Caught by the PR #12 code review; the checks were re-run with captured UTC times and replacement records filed",
+      "skipped_check": "capture date -u at each check and file that exact time as --run-timestamp",
+      "refs": [
+        "e1 e2 e5 e7 e9 e12 e14 e18; PR #12 review"
       ],
       "origin": "llm",
       "status": "proposed"

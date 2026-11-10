@@ -10,7 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - docs/deliveries/2026-11-08-fleet-view-ventuno-q-fit.md: the delivery summary for the fleet view + VENTUNO Q plan (planned vs actual for t1-t13, drift, evidence, claims, remaining work)
-- devague delivery ledger: evidence e1-e20 for obligations o1-o20 and behavioural deltas b1-b5, filed as proposed for operator adjudication
+- devague delivery ledger: evidence for obligations o1-o20 (e1-e28; e21-e28 supersede eight originals whose run timestamps were approximated), behavioural deltas b1-b8 (b6-b8 supersede b1, b2, b5) and lapse l7, all proposed for operator adjudication
 
 ### Changed
 
