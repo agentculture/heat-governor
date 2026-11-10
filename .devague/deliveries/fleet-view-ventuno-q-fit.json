@@ -2,7 +2,7 @@
   "plan_slug": "fleet-view-ventuno-q-fit",
   "schema_version": 2,
   "created": "2026-11-09T04:31:42Z",
-  "updated": "2026-11-09T05:13:38Z",
+  "updated": "2026-11-10T15:56:12Z",
   "deviations": [
     {
       "id": "d1",
@@ -52,7 +52,731 @@
       "seq": 3
     }
   ],
-  "evidence": [],
-  "deltas": [],
-  "supersessions": []
+  "evidence": [
+    {
+      "id": "e1",
+      "obligation_ref": "o1",
+      "test_ref": "browser observation of http://core:9480 + tests/test_web_page.py::test_title_is_heat_governor, ::test_design_leftovers_are_gone",
+      "behavior_text": "title 'Heat Governor'; fleet map on top shows machines only, platform groups (VENTUNO Q, Thor, Spark x 2, Orin) around the reader's local hub, each coloured by its worst member with one status line; no Dashboard/CLI/MCP boxes",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "manual",
+      "strength": "execution",
+      "strength_basis": "observed on the live page served by 0.16.0 built from the named commit; the two static page tests ran green in the full suite. The hub is the reader machine (elitemini on core), not cultureos: see the amended delta",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:37:30",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true,
+      "seq": 4
+    },
+    {
+      "id": "e2",
+      "obligation_ref": "o2",
+      "test_ref": "browser observation of http://core:9480 + tests/test_web_page.py::test_fact_hints_present, ::test_hints_are_short_and_name_no_board",
+      "behavior_text": "platform switch (Spark: 2 of 6, Clear), Rows/Grid toggle and the Fan (i) hint on hover exercised and working; count chip, search box and Hottest first/Name sort present but not exercised",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "manual",
+      "strength": "execution",
+      "strength_basis": "interactions run in Chrome against the live page; hint tests ran green in the suite. Search typing, sort order and count-chip filtering were not exercised: partial coverage, stated not rounded up",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:37:30",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true,
+      "seq": 5
+    },
+    {
+      "id": "e3",
+      "obligation_ref": "o3",
+      "test_ref": "tests/test_web_page.py::test_single_band_label_and_states + browser observation",
+      "behavior_text": "each machine shows one shaded warm-to-crit band with a single '88-93\u00b0' style label; no 'governs' text",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "test ran green in the full suite at the named commit; the single band label was also seen on the live page",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 6
+    },
+    {
+      "id": "e4",
+      "obligation_ref": "o4",
+      "test_ref": "tests/test_web_page.py::test_only_critical_rows_and_tiles_animate, ::test_reduced_motion_keeps_static_critical_glow",
+      "behavior_text": "the stylesheet animates only critical rows and tiles and keeps a static glow under prefers-reduced-motion",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "automated",
+      "strength": "fidelity",
+      "strength_basis": "the tests ran green but assert the page source (CSS rules), not a rendered critical row; no machine was critical while the page was being watched, so the animation itself was not observed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 7
+    },
+    {
+      "id": "e5",
+      "obligation_ref": "o5",
+      "test_ref": "browser observation of the spark trend panel on http://core:9480 + tests/test_web_page.py::test_trend_ranges_include_7d",
+      "behavior_text": "clicking a machine opens a side panel with 15m/1h/6h/24h/7d, stat tiles, temperature and GPU vs the limit band, crosshair tooltip, Left/Right arrow stepping (3 presses moved the readout to earlier samples), level strip and admitting area on one time axis, time-by-level, table toggle, and adding spark2 gave \"Comparing 2 machines\" with each line in its own colour",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "manual",
+      "strength": "execution",
+      "strength_basis": "every listed behaviour exercised in Chrome against the live page; the 6-machine compare limit was not exercised",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:37:30",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true,
+      "seq": 8
+    },
+    {
+      "id": "e6",
+      "obligation_ref": "o6",
+      "test_ref": "tests/test_fleet_reader.py::test_trend_prefers_records_and_passes_the_window, ::test_trend_falls_back_to_buffer_on_failure; tests/test_web_page.py::test_design_leftovers_are_gone[Example history]; browser observation",
+      "behavior_text": "trends come from each machine's own record files (panel header 'Trends - from each machine's own records', /api/history source=records for spark), buffer fallback tested, the generated example history and its label are gone",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green in the full suite; records source seen live in the panel and in /api/history",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 9
+    },
+    {
+      "id": "e7",
+      "obligation_ref": "o7",
+      "test_ref": "tests/test_web_page.py::test_polar_night_tokens_both_modes + browser observation",
+      "behavior_text": "the page ships Polar night only; no Geothermal, Kiln or Aurora skin and no theme picker exist on the live page",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "manual",
+      "strength": "execution",
+      "strength_basis": "observed on the live page: no skin names among the page's buttons. The obligation's four-skin behaviour was deliberately not built: c18 (Polar night only) replaced it, see the removed delta",
+      "outcome": "fail",
+      "run": {
+        "timestamp": "2026-11-10T15:37:30",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true,
+      "seq": 10
+    },
+    {
+      "id": "e8",
+      "obligation_ref": "o8",
+      "test_ref": "tests/test_fleet_reader.py::test_stopped_box_goes_stale_then_unreachable_and_never_admits, ::test_classify_never_read_is_unreachable; code read of heat_governor/fleet.py and fleet_reader.py",
+      "behavior_text": "unreachable machines keep their last reading with admission withheld (tested), and trend gaps are drawn as 'no data for Ns' (seen live); but nothing in fleet.toml or the reader can produce state 'unsupported', so a machine heat-governor cannot read never shows as 'not supported'; the dashed rendering of an unreachable machine was not observed",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "reader tests ran green; the page's 'unsupported' branch exists but is unreachable from any fleet configuration, so the 'not supported' half of the obligation is unmet",
+      "outcome": "fail",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 11
+    },
+    {
+      "id": "e9",
+      "obligation_ref": "o9",
+      "test_ref": "dataviz validate_palette.js (light and dark) on the page tokens + browser observation",
+      "behavior_text": "Polar night ships with cream light and slate dark modes, Auto plus Light/Dark override, Lato everywhere, no theme picker; but the light compare palette FAILS the dataviz validator: #eda100 contrast 2.17:1 on white (2.04:1 on the #fbf8f1 chart surface) is below 2.5:1; dark c1-c6 WARN (CVD closeness), light s1-s2 WARN, dark s1-s2 PASS",
+      "contract_text": "The fleet dashboard ships Polar night as its theme (cream light mode, slate dark mode, Auto follows the host theme); Geothermal, Kiln and Aurora remain in the locked reference only",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "validator run against the live page's --c1..--c6 and --s1..--s2 values for both modes; theme, font and override seen live. No record shows the validator was run before shipping as the plan's t-instruction required",
+      "outcome": "fail",
+      "run": {
+        "timestamp": "2026-11-10T15:40:00",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true,
+      "seq": 12
+    },
+    {
+      "id": "e10",
+      "obligation_ref": "o10",
+      "test_ref": "tests/test_platform_ventunoq.py::test_monza_compatible_is_ventunoq, ::test_jetsons_still_detected, ::test_spark_still_detected_by_gb10, ::test_compatible_checked_before_nvidia_smi; live",
+      "behavior_text": "ventunoq only for the arduino,monza / qcom,qcs8300 compatible tokens; Spark, Thor, Orin detection unchanged; live: cultureos reports ventunoq, spark/spark2 spark, thor thor, orin orin, core generic under 0.16.0",
+      "contract_text": "platforms.detect() recognises the VENTUNO Q from proc/device-tree/compatible (arduino,monza / qcom,qcs8300) and resolves a built-in 'ventunoq' profile; today detect() reads only device-tree/model ('Qualcomm Technologies, Inc. Monaco Monza addons', platforms.py:158-181) so this box falls to 'generic'",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green in the full suite and the six live boxes report the expected platforms after the 0.16.0 rollout",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 13
+    },
+    {
+      "id": "e11",
+      "obligation_ref": "o11",
+      "test_ref": "tests/test_gpuclock_platform.py::test_ventunoq_refused_and_helper_never_spawned (all params), ::test_status_on_ventunoq_does_not_spawn; tests/test_gpuclock_unsupported_paths.py (14 tests)",
+      "behavior_text": "gpu-clock lock/reset/hold exit 1 with an unsupported-platform error on ventunoq and the root helper is never spawned, including after a live reload enabling GPU control and during crash recovery of a persisted gpu_locked entry",
+      "contract_text": "heat-governor does not drive the GPU clock on the VENTUNO Q in this work: gpuclock gains an explicit unsupported-platform guard, because the shell helper's is_jetson() (gpuclock.py:109) would fall through to nvidia-smi -lgc, which does not exist here",
+      "evidence_type": "automated",
+      "strength": "sensitivity",
+      "strength_basis": "all ran green at the named commit; the 14 unsupported-path tests were run against the pre-fix source (ddb72a3) and 11 failed (the 3 Spark controls passed), so the tests are shown to catch the broken behaviour",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 14
+    },
+    {
+      "id": "e12",
+      "obligation_ref": "o12",
+      "test_ref": "tests/test_actuators_daemon.py::test_dry_run_changes_nothing + live observation on cultureos",
+      "behavior_text": "with apply = false the cultureos daemon reports applying false; its two containers are unpaused with NanoCpus=0; zero pause/cap actions in its journal over 3 days",
+      "contract_text": "heat-governor is installed on cultureos (uv tool + user unit + config like the other four) so the VENTUNO Q is the fifth governed, observable box, running in dry-run (apply = false) until the declared VENTUNO Q limits are checked under load; today 'which heat-governor' is empty and the unit does not exist",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "test ran green; live state, docker inspect and journal read on cultureos under 0.16.0",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:34:30",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true,
+      "seq": 15
+    },
+    {
+      "id": "e13",
+      "obligation_ref": "o13",
+      "test_ref": "tests/test_fleet_reader.py::test_one_thread_per_machine_and_hung_box_does_not_delay_others, ::test_reader_only_fetches_and_closes; tests/test_transport.py::test_hang_is_bounded, ::test_argv_shape; tests/test_fleet_reader_qodo.py::test_restart_while_a_fetch_is_hung_never_runs_two_pollers",
+      "behavior_text": "BatchMode and ConnectTimeout in every ssh argv; a hung or slow box never delays the others; the reader only fetches and closes; live: a 5 s spark timeout left the other five machines ok",
+      "contract_text": "a fleet reader on cultureos polls all five boxes server-side: the four remote daemons through a persistent SSH connection per box (`ssh <box> curl 127.0.0.1:9476/state`, no change on any box) and cultureos locally; it tracks per-box ok/stale/unreachable on the reader's own clock, reusing pair.PeerLink's staleness logic, keeps a rolling buffer of the polled documents for trends, and never uses client.read's admit-on-unknown default",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green in the full suite; the spark timeout and unaffected peers were seen in the live snapshot",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 16
+    },
+    {
+      "id": "e14",
+      "obligation_ref": "o14",
+      "test_ref": "live observation: tick intervals in spark2 records/20261105-06.jsonl (no reader) vs 20261110.jsonl (reader polling every 3 s)",
+      "behavior_text": "daemon tick interval unchanged by the fleet reader: median 1.000 s and p99 1.087-1.089 s without the reader, median 1.000 s and p99 1.078 s with it",
+      "contract_text": "the fleet view is read-only and outside every daemon's control path: state schema 1 is unchanged (no renamed/removed fields, top-level level/admit/concurrency_factor/cpus keep their meaning, pair shown separately) and a dead box never delays any daemon tick",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "computed from the daemon's own 1 Hz records; no automated test pins this; the with-reader day runs 0.14.1 and then 0.16.0",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:34:30",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true,
+      "seq": 17
+    },
+    {
+      "id": "e15",
+      "obligation_ref": "o15",
+      "test_ref": "tests/test_cli_mesh.py::test_status_direct_json, ::test_status_bad_fleet_is_exit_1, ::test_status_missing_fleet_and_no_server_is_exit_2, ::test_serve_missing_fleet_is_exit_1; tests/test_mcp.py::test_scripted_session_stdout_is_only_frames; CI teken cli doctor --strict on PR #11",
+      "behavior_text": "mesh overview/status/serve and mcp take --json, keep results on stdout and errors on stderr with exit codes 0/1/2; teken cli doctor --strict passes",
+      "contract_text": "a 'mesh' noun (overview, status [--json], serve) and a top-level 'mcp' verb are added through register(sub) in _build_parser with parser_class=type(p), ENTRIES in explain/catalog.py, the learn _TEXT/_as_json_payload lists and overview _VERBS, so teken cli doctor --strict and test_every_catalog_path_resolves stay green",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green in the full suite; the strict rubric passed in the PR lint job",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 18
+    },
+    {
+      "id": "e16",
+      "obligation_ref": "o16",
+      "test_ref": "tests/test_mcp.py::test_tools_list_names_and_schemas, ::test_scripted_session_stdout_is_only_frames",
+      "behavior_text": "stdout carries only JSON-RPC frames; the tool list is exactly mesh_status, machine_state, sense, so no tool pauses, caps, applies or edits config",
+      "contract_text": "'heat-governor mcp' speaks MCP over stdio with read-only tools (mesh status, one box's state, sense) and owns stdout for JSON-RPC framing: all logging goes to stderr via emit_diagnostic; it still accepts --json and 'mcp --help' returns",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green; the tool-set assertion is an equality, so adding any mutating tool fails it",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 19
+    },
+    {
+      "id": "e17",
+      "obligation_ref": "o17",
+      "test_ref": "tests/test_fleet_config.py::test_bad_hosts_rejected (all params); tests/test_transport.py::test_invalid_host_rejected",
+      "behavior_text": "an invalid host fails fleet load with exit 1 and a remediation hint, before any transport exists; SshTransport re-validates the host, so ssh is never spawned for it",
+      "contract_text": "the fleet reader validates every host in the fleet list as a plain hostname or IP (no leading '-', no spaces or shell metacharacters), passes '--' before the host and runs a fixed remote command, so a host entry can never become an ssh option such as -oProxyCommand",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green in the full suite",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 20
+    },
+    {
+      "id": "e18",
+      "obligation_ref": "o18",
+      "test_ref": "tests/test_transport.py::test_argv_shape, ::test_close_tears_down_and_is_idempotent; live observation on core",
+      "behavior_text": "connections reused under ControlMaster with a ControlPath in the reader's state dir; torn down on close; live: five persistent sockets, one per ssh host, in ~/.local/state/heat-governor/ssh (0700)",
+      "contract_text": "the reader manages its own persistent SSH connections (ControlMaster/ControlPersist with a ControlPath under its state dir), with BatchMode=yes, ConnectTimeout, ServerAliveInterval and a per-poll timeout, independent of the operator's ~/.ssh/config; today ~/.ssh/config sets only IdentityFile and a fresh poll measured 0.55 s",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green; sockets seen on the running reader",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true,
+      "seq": 21
+    },
+    {
+      "id": "e19",
+      "obligation_ref": "o19",
+      "test_ref": "tests/test_fleet_reader.py::test_week_of_19_machines_stays_under_100mb, ::test_history_capacity_is_24h_at_poll_interval, ::test_ring_overwrites_oldest",
+      "behavior_text": "per-box buffer bounded to 24 h of compact samples; a simulated week of 19 machines stays under 100 MB",
+      "contract_text": "the reader's history buffer stores compact samples (time, hottest temperature, GPU temperature, level, admit factor) bounded to 24 h per box, not raw /state documents; probe: /state is 2-3 KB, so raw docs at a 2 s poll would be about 130 MB per box per day",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green in the full suite",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 22
+    },
+    {
+      "id": "e20",
+      "obligation_ref": "o20",
+      "test_ref": "tests/test_fleet_reader.py::test_snapshot_is_json_and_carries_reader_health, ::test_transport_error_is_recorded_and_persists_after_recovery; tests/test_cli_mesh.py::test_status_text_hides_a_recovered_error",
+      "behavior_text": "per-box last poll, last error and failing flag are carried apart from the thermal level in the snapshot and shown in mesh status",
+      "contract_text": "mesh status, the MCP tools and the page report the reader's own health (when each box was last polled, reader uptime, transport errors) separately from each box's thermal state, so a dead reader never looks like five stale boxes",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green in the full suite",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:33:35",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 23
+    },
+    {
+      "id": "e21",
+      "obligation_ref": "o1",
+      "test_ref": "browser observation of http://core:9480 (Chrome) + tests/test_web_page.py::test_title_is_heat_governor, ::test_design_leftovers_are_gone",
+      "behavior_text": "title 'Heat Governor'; fleet map on top shows machines only, platform groups (VENTUNO Q, Thor, Spark x 2, Orin) around the reader's local hub, each coloured by its worst member with one status line; no Dashboard/CLI/MCP boxes",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "manual",
+      "strength": "execution",
+      "strength_basis": "observed on the live page served by 0.16.0 from the named commit; the static page tests also ran green in the full suite (2026-11-10T15:33:35Z). The hub is the reader machine (elitemini on core), not cultureos: see delta b2. Run time: the page's own 'Updated' stamp read 15:35:54 UTC at the start of the session and 15:38:14 UTC on its last screenshot; the end of that window is filed. Replaces e1.",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:38:14Z",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 24
+    },
+    {
+      "id": "e22",
+      "obligation_ref": "o2",
+      "test_ref": "browser observation of http://core:9480 (Chrome) + tests/test_web_page.py::test_fact_hints_present",
+      "behavior_text": "PARTIAL CHECK, only these were exercised: the platform switch (Spark: '2 of 6', Clear), the Rows/Grid toggle and the Fan (i) hint on hover. NOT exercised: count-chip state filtering, search, and the Hottest first / Name sort order. This pass covers the exercised part only",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "manual",
+      "strength": "execution",
+      "strength_basis": "interactions run in Chrome against the live page. The unexercised controls are unverified, not passed. Run time: the page's own 'Updated' stamp read 15:35:54 UTC at the start of the session and 15:38:14 UTC on its last screenshot; the end of that window is filed. Replaces e2.",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:38:14Z",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 25
+    },
+    {
+      "id": "e23",
+      "obligation_ref": "o5",
+      "test_ref": "browser observation of the spark trend panel on http://core:9480 (Chrome) + tests/test_web_page.py::test_trend_ranges_include_7d",
+      "behavior_text": "PARTIAL CHECK, these were exercised: 15m/1h/6h/24h/7d ranges, stat tiles, temperature and GPU against the limit band, the crosshair tooltip, Left/Right arrow stepping, the level strip and admitting area on one axis, time-by-level, the table toggle, and a 2-machine compare (spark + spark2, each in its own colour). NOT exercised: the 6-machine compare limit. This pass covers the exercised part only",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "manual",
+      "strength": "execution",
+      "strength_basis": "exercised in Chrome against the live page; the compare cap is unverified. Run time: the page's own 'Updated' stamp read 15:35:54 UTC at the start of the session and 15:38:14 UTC on its last screenshot; the end of that window is filed. Replaces e5.",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:38:14Z",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 26
+    },
+    {
+      "id": "e24",
+      "obligation_ref": "o7",
+      "test_ref": "browser observation of http://core:9480 (Chrome) + tests/test_web_page.py::test_polar_night_tokens_both_modes",
+      "behavior_text": "the page ships Polar night only; no Geothermal, Kiln or Aurora skin and no theme picker exist on the live page",
+      "contract_text": "The heat-governor fleet dashboard design is locked (2026-11-08) to artifact JMe4tUb7V64zQhii6bmsS4 version 1794166791-7eb1, kept as docs/design/fleet-dashboard.html; the real 'heat-governor mesh serve' page is built to it",
+      "evidence_type": "manual",
+      "strength": "execution",
+      "strength_basis": "no skin names among the live page's buttons. The obligation's four-skin behaviour was deliberately not built; c18 (Polar night only) replaced it, see delta b1. Run time: the page's own 'Updated' stamp read 15:35:54 UTC at the start of the session and 15:38:14 UTC on its last screenshot; the end of that window is filed. Replaces e7.",
+      "outcome": "fail",
+      "run": {
+        "timestamp": "2026-11-10T15:38:14Z",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 27
+    },
+    {
+      "id": "e25",
+      "obligation_ref": "o9",
+      "test_ref": "dataviz validate_palette.js on the page tokens (light --c1..--c6 and --s1..--s2; dark likewise)",
+      "behavior_text": "light c1-c6 FAILS: #eda100 contrast 2.165:1 against white, below 2.5:1 (2.04:1 on the #fbf8f1 chart surface, measured separately with the WCAG formula); dark c1-c6 WARN (CVD closeness); light s1-s2 WARN; dark s1-s2 PASS. Polar night ships with cream light and slate dark, Auto plus a Light/Dark override, and Lato everywhere",
+      "contract_text": "The fleet dashboard ships Polar night as its theme (cream light mode, slate dark mode, Auto follows the host theme); Geothermal, Kiln and Aurora remain in the locked reference only",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "validator re-run at the filed time (captured with date -u). Theme, font and override were seen live in the browser session. No record shows the validator was run before shipping, as the plan's instruction required Replaces e9.",
+      "outcome": "fail",
+      "run": {
+        "timestamp": "2026-11-10T15:54:59Z",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 28
+    },
+    {
+      "id": "e26",
+      "obligation_ref": "o12",
+      "test_ref": "live observation on cultureos + tests/test_actuators_daemon.py::test_dry_run_changes_nothing",
+      "behavior_text": "with apply = false the cultureos daemon (0.16.0) reports applying false; model-gear-gateway and lobes-cloudflared are unpaused with NanoCpus=0; 0 pause/cap actions in its journal over 3 days",
+      "contract_text": "heat-governor is installed on cultureos (uv tool + user unit + config like the other four) so the VENTUNO Q is the fifth governed, observable box, running in dry-run (apply = false) until the declared VENTUNO Q limits are checked under load; today 'which heat-governor' is empty and the unit does not exist",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "state, docker inspect and journal read at the filed time (captured with date -u). The unit test also ran green in the full suite (2026-11-10T15:33:35Z) Replaces e12.",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:54:59Z",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 29
+    },
+    {
+      "id": "e27",
+      "obligation_ref": "o14",
+      "test_ref": "live observation: daemon tick intervals from spark2's own 1 Hz records, records/20261105.jsonl and 20261106.jsonl (no fleet reader yet) vs 20261110.jsonl (reader polling every 3 s)",
+      "behavior_text": "PARTIAL CHECK, the reader-running vs reader-absent case only: median 1.000 s and p99 1.087-1.089 s without the reader, median 1.000 s and p99 1.078 s with it. NOT exercised: a SLOW or hung reader (stalled ssh sessions, long history reads); that case is unverified",
+      "contract_text": "the fleet view is read-only and outside every daemon's control path: state schema 1 is unchanged (no renamed/removed fields, top-level level/admit/concurrency_factor/cpus keep their meaning, pair shown separately) and a dead box never delays any daemon tick",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "computed from the records at the filed time (captured with date -u). No automated test pins any case. The with-reader day spans 0.14.1 and 0.16.0 Replaces e14.",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:55:05Z",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 30
+    },
+    {
+      "id": "e28",
+      "obligation_ref": "o18",
+      "test_ref": "tests/test_transport.py::test_argv_shape, ::test_close_tears_down_and_is_idempotent + live observation on core",
+      "behavior_text": "connections are reused under ControlMaster with a ControlPath in the reader's state dir and torn down on close; live: five persistent sockets, one per ssh host, in the reader's ssh dir (mode 0700)",
+      "contract_text": "the reader manages its own persistent SSH connections (ControlMaster/ControlPersist with a ControlPath under its state dir), with BatchMode=yes, ConnectTimeout, ServerAliveInterval and a per-poll timeout, independent of the operator's ~/.ssh/config; today ~/.ssh/config sets only IdentityFile and a fresh poll measured 0.55 s",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green in the full suite (2026-11-10T15:33:35Z); the sockets were listed on the running reader at the filed time (captured with date -u) Replaces e18.",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-10T15:55:00Z",
+        "commit": "7f9e6e3"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 31
+    }
+  ],
+  "deltas": [
+    {
+      "id": "b1",
+      "kind": "removed",
+      "behavior_text": "the four-skin theme picker (Geothermal, Kiln, Aurora) is not on the shipped page; Polar night is the only theme",
+      "caused_by": [
+        "c18"
+      ],
+      "evidence_refs": [
+        "e7"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true
+    },
+    {
+      "id": "b2",
+      "kind": "amended",
+      "behavior_text": "the fleet map's hub is the reader's own machine (transport local): since 2026-11-09 that is elitemini on core, not cultureos; cultureos is a platform group like the others",
+      "caused_by": [
+        "c17"
+      ],
+      "evidence_refs": [
+        "e1"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true
+    },
+    {
+      "id": "b3",
+      "kind": "added",
+      "behavior_text": "every path to the GPU root helper is shut on a board with no supported GPU clock control: a live config reload enabling gpu_clock or an operator ceiling, crash recovery (a persisted gpu_locked entry is cleared with a log line, never reset through the helper), and gpu-clock hold (refused, nothing written); release stays allowed",
+      "caused_by": [
+        "c5"
+      ],
+      "evidence_refs": [
+        "e11"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b4",
+      "kind": "added",
+      "behavior_text": "the fleet reader caps ssh output while reading (1 MiB state, 8 MiB history; child killed past it), coalesces concurrent history reads per (machine, range, points), answers 503 past 4 history requests in flight, never runs two pollers for one box after a restart, and never closes an ssh connection under a running read",
+      "caused_by": [
+        "c8"
+      ],
+      "evidence_refs": [
+        "e13"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b5",
+      "kind": "added",
+      "behavior_text": "the dashboard's Fan fact shows the fastest fan:*.fanN_input in rpm (pwm-only boxes such as Thor and Orin show none) and Zones shows the count of readable thermal zones with the hottest one",
+      "caused_by": [
+        "c17"
+      ],
+      "evidence_refs": [
+        "e2"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": true
+    },
+    {
+      "id": "b6",
+      "kind": "removed",
+      "behavior_text": "the four-skin theme picker (Geothermal, Kiln, Aurora) is not on the shipped page; Polar night is the only theme",
+      "caused_by": [
+        "c18"
+      ],
+      "evidence_refs": [
+        "e24"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b7",
+      "kind": "amended",
+      "behavior_text": "the fleet map's hub is the reader's own machine (transport local): since 2026-11-09 that is elitemini on core, not cultureos; cultureos is a platform group like the others",
+      "caused_by": [
+        "c17"
+      ],
+      "evidence_refs": [
+        "e21"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b8",
+      "kind": "added",
+      "behavior_text": "the dashboard's Fan fact shows the fastest fan:*.fanN_input in rpm (pwm-only boxes such as Thor and Orin show none) and Zones shows the count of readable thermal zones with the hottest one",
+      "caused_by": [
+        "c17"
+      ],
+      "evidence_refs": [
+        "e22"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    }
+  ],
+  "supersessions": [
+    {
+      "id": "s1",
+      "action": "supersede",
+      "target_ref": "b1",
+      "replacement_ref": "b6",
+      "origin": "llm"
+    },
+    {
+      "id": "s2",
+      "action": "supersede",
+      "target_ref": "b2",
+      "replacement_ref": "b7",
+      "origin": "llm"
+    },
+    {
+      "id": "s3",
+      "action": "supersede",
+      "target_ref": "b5",
+      "replacement_ref": "b8",
+      "origin": "llm"
+    },
+    {
+      "id": "s4",
+      "action": "supersede",
+      "target_ref": "e1",
+      "replacement_ref": "e21",
+      "origin": "llm"
+    },
+    {
+      "id": "s5",
+      "action": "supersede",
+      "target_ref": "e2",
+      "replacement_ref": "e22",
+      "origin": "llm"
+    },
+    {
+      "id": "s6",
+      "action": "supersede",
+      "target_ref": "e5",
+      "replacement_ref": "e23",
+      "origin": "llm"
+    },
+    {
+      "id": "s7",
+      "action": "supersede",
+      "target_ref": "e7",
+      "replacement_ref": "e24",
+      "origin": "llm"
+    },
+    {
+      "id": "s8",
+      "action": "supersede",
+      "target_ref": "e9",
+      "replacement_ref": "e25",
+      "origin": "llm"
+    },
+    {
+      "id": "s9",
+      "action": "supersede",
+      "target_ref": "e12",
+      "replacement_ref": "e26",
+      "origin": "llm"
+    },
+    {
+      "id": "s10",
+      "action": "supersede",
+      "target_ref": "e14",
+      "replacement_ref": "e27",
+      "origin": "llm"
+    },
+    {
+      "id": "s11",
+      "action": "supersede",
+      "target_ref": "e18",
+      "replacement_ref": "e28",
+      "origin": "llm"
+    }
+  ]
 }
