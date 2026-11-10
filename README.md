@@ -68,8 +68,12 @@ flowchart LR
 | DGX Spark (GB10) | 88 / 91.5 / 93 C (ACPI zones) | operator ceiling **2200 MHz** (law); 1800 / 1400 above warm | measured (resets at about 94.5-95 C; clock sweep 2026-10-24) |
 | Jetson AGX Thor | 95 / 100 / 104 C | 1300 / 1000 MHz | limits declared; clock sweep 2026-10-24: no default ceiling |
 | Jetson AGX Orin | 85 / 90 / 94 C | **1122 MHz at 85 C, 918 MHz at 88 C** | limits declared; GPU steps measured 2026-10-24 |
-| VENTUNO Q (Qualcomm QCS8300) | 94 / 98 / 102 C (30 zones: cpu, cpuss, gpuss, nsp, ddrss) | none (Adreno clock is read, not written) | declared from trip points, unmeasured |
+| VENTUNO Q (Qualcomm QCS8300) | 94 / 98 / 102 C (30 zones: cpu, cpuss, gpuss, nsp, ddrss) | none (Adreno clock is read, not written) | declared from trip points; a CPU+GPU+NPU load run peaked at 71 C ([evidence](docs/evidence/2026-11-10-ventunoq-limits.md)) |
 | anything else (incl. UNO Q) | lowest critical trip minus 15 C | none | derived |
+
+On the VENTUNO Q the NPU is the hottest block. Alone it adds about 11 C over idle, against
+about 5 C for all 8 CPU cores and 2 C for the GPU, so CPU caps do little there. To cool it,
+mark Arduino App Lab's NPU runner containers (llama.cpp or QNN) as `batch`.
 
 ### The operator's ceiling is law
 
@@ -269,8 +273,6 @@ claude mcp add heat-governor -- heat-governor mcp
 
 Planned, not built: a bearer-token-protected tailnet listener on each daemon
 and a read-only `GET /history` route on daemons (upgrade release) **(planned)**.
-VENTUNO Q limits are declared from trip points and wait for a measured load
-run **(planned)**.
 
 ## Configure and tune
 

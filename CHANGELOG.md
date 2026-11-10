@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-11-10
+
+### Added
+
+- docs/evidence/2026-11-10-ventunoq-limits.md: VENTUNO Q limits measured on cultureos (handoff open item 4). CPU, GPU and NPU together peaked at 71 C / 28 W with no kernel throttling; a 45 min soak serving Gemma 4 E4B (Arduino's runner, 2 NPU sessions) under full CPU+GPU load levelled off at about 65 C, with decode unchanged (10.2 tok/s)
+- scripts/measure/: the sampler, the CPU/GPU/NPU burns, the serving client and soak runner, and the analysis used for that evidence
+
+### Changed
+
+- ventunoq profile: provenance and notes now cite the load run, and the notes say the NPU is the hot block, so pause NPU work rather than cap CPUs (shown by `capabilities`)
+- README, CLAUDE.md, the harness prompt files and docs/HANDOFF-2026-11-09.md: the VENTUNO Q limits are load-checked; open item 4 is done; leaving dry-run on cultureos stays the operator's call
+
 ## [0.16.1] - 2026-11-10
 
 ### Added
