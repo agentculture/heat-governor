@@ -226,7 +226,9 @@ curl -L -o ~/hg-measure/models/gemma-4-E2B_q4_0-it.gguf \
   https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/347eef722ec7f151f37d1ef0b5c7c77d8de4efcb/gemma-4-E2B_q4_0-it.gguf
 cd ~/hg-measure && uv venv venv && uv pip install --python venv/bin/python numpy wgpu
 setsid nohup ./run.sh runs/limits-$(date +%Y%m%dT%H%M) 600 900 >/dev/null 2>&1 &
-venv/bin/python analyze.py runs/limits-<stamp> ~/.local/state/heat-governor/records/<day>.jsonl
+# <records> is the daemon's records directory (its state dir's records/); the second
+# argument is optional and adds the dry-run decisions
+venv/bin/python analyze.py runs/limits-<stamp> <records>/<day>.jsonl
 
 # run 2: Arduino's model layout (<org>/<repo>/<file>.gguf), then the serving soak
 D=~/hg-measure/models-e4b/google/gemma-4-E4B-it-qat-q4_0-gguf && mkdir -p $D
