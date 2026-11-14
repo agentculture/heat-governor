@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-11-14T18:37:22Z",
-  "updated": "2026-11-14T21:55:59Z",
+  "updated": "2026-11-14T22:28:04Z",
   "targets": [
     {
       "id": "c1",
@@ -781,6 +781,14 @@
       "text": "t9 agent saw exactly one uncaptured full-suite failure; not reproduced in 5 full runs + 20 runs of tests/test_daemon_memory.py after merge. Possible thread-timing flake; watch CI.",
       "kind": "unknown_nonblocking",
       "task_id": "t9",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r9",
+      "text": "tests/test_ship.py failed once locally (1 failed, 24 passed; test name not captured) right after the S9073 split, then passed 10 serial runs and 25 parallel stress runs; CI passed. The t7 agent flagged its 0.2-0.6 s timing windows as timing-based. Watch for flakes; widen the windows if it recurs.",
+      "kind": "unknown_nonblocking",
+      "task_id": "t7",
       "resolved": false,
       "resolution": ""
     }
