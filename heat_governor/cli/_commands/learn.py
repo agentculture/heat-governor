@@ -43,6 +43,15 @@ Commands
                                    running mesh serve, else reads every machine once
                                    (exit 2 if none answered); serve = page + JSON API on
                                    127.0.0.1:9480 (read-only).
+  heat-governor memory <verb>      overview | status | top [--n N] | replay <file>: the memory
+                                   guard. status = the daemon's mem_guard; top = biggest
+                                   processes now; replay = when the trigger would have fired
+                                   over a records .jsonl or a t,avail CSV (--total-mib).
+                                   Try: memory replay <file>.
+  heat-governor ship <verb>        overview | test | fetch --machine M [--boot B] [--out DIR]:
+                                   S3 shipping ([ship] config). test = PUT+GET a probe;
+                                   fetch = a boot's events, postmortem and black box.
+                                   Try: ship fetch --machine M.
   heat-governor mcp [--json]       read-only MCP server over stdio (JSON-RPC lines; tools
                                    mesh_status, machine_state, sense); --json has no effect.
   heat-governor whoami | learn | explain <path> | overview | doctor | cli overview
@@ -100,6 +109,15 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["mesh", "overview"], "summary": "Describe the mesh noun."},
             {"path": ["mesh", "status"], "summary": "Every machine's state, age, temp, level."},
             {"path": ["mesh", "serve"], "summary": "Serve the fleet page and JSON API."},
+            {"path": ["memory"], "summary": "The memory guard."},
+            {"path": ["memory", "overview"], "summary": "Describe the memory noun."},
+            {"path": ["memory", "status"], "summary": "The daemon's memory guard state."},
+            {"path": ["memory", "top"], "summary": "Biggest processes by anonymous memory."},
+            {"path": ["memory", "replay"], "summary": "When the memory trigger would fire."},
+            {"path": ["ship"], "summary": "Ship records to S3-compatible storage."},
+            {"path": ["ship", "overview"], "summary": "Describe the ship noun."},
+            {"path": ["ship", "test"], "summary": "PUT and GET a probe object."},
+            {"path": ["ship", "fetch"], "summary": "Download a shipped boot and summarise it."},
         ],
         "exit_codes": {
             "0": "success",
