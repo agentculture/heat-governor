@@ -301,10 +301,15 @@ _MEMORY = """\
 # heat-governor memory
 
 The memory guard: the daemon watches MemAvailable and, when memory is about to
-run out (below `floor_pct` of RAM, or below `soft_pct` and projected to hit the
+run out (below the floor, or below the soft limit and projected to hit the
 floor within `horizon_s`), records the top processes and, with `action =
 "kill"`, ends the biggest eligible one. Configure it in `[memory]` of
 config.toml; with the section absent it never acts.
+
+Limits, first match wins: `floor_mib`/`soft_mib` from `[memory]`; else the
+platform's declared limits (spark and thor 3072/6144 MiB, orin 2048/4096,
+ventunoq 1024/2048 -- boxes that run full of AI work); else `floor_pct`/`soft_pct`
+of RAM. `memory status` shows the effective limits and their source.
 
 - `memory overview` -- describe this noun.
 - `memory status [--source S]` -- the running daemon's `mem_guard`: action,
@@ -390,8 +395,10 @@ half of a tensor-parallel pair; `listen` needs a restart.
 
 `[memory]` (the memory guard; absent = record only, never kill): `action` =
 record|kill (default record), `floor_pct` 5, `horizon_s` 10, `soft_pct` 20,
-`window_s` 10, `min_victim_mib` 2048, `max_kills_per_hour` 3, `protect` (extra
-process names never killed), `poll_s` 0.25, `top_n` 10, `top_every_s` 10.
+`floor_mib`/`soft_mib` (absolute MiB, set together, win over the percentages and
+the platform's limits), `window_s` 10, `min_victim_mib` 2048,
+`max_kills_per_hour` 3, `protect` (extra process names never killed), `poll_s`
+0.25, `top_n` 10, `top_every_s` 10.
 `[ship]` (off unless `enabled = true`): `endpoint`, `bucket` (both required
 when enabled), `region` us-east-1, `prefix` fleet, `profile` (AWS credentials
 profile), `machine` (default: the hostname), `blackbox_every_s` 60,

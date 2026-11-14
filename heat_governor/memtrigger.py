@@ -53,12 +53,15 @@ class Trigger:
         horizon_s: float = 10.0,
         soft_pct: float = 20.0,
         window_s: float = 10.0,
+        floor_mib: float | None = None,
+        soft_mib: float | None = None,
     ) -> None:
         if total_mib <= 0:
             raise ValueError("total_mib must be positive")
         self.total_mib = float(total_mib)
-        self.floor_mib = self.total_mib * floor_pct / 100.0
-        self.soft_mib = self.total_mib * soft_pct / 100.0
+        # absolute limits (deviation d3) win over the percentages when given
+        self.floor_mib = float(floor_mib) if floor_mib is not None else total_mib * floor_pct / 100
+        self.soft_mib = float(soft_mib) if soft_mib is not None else total_mib * soft_pct / 100
         self.horizon_s = float(horizon_s)
         self.window_s = float(window_s)
         self._win: deque[tuple[float, float]] = deque()

@@ -782,16 +782,21 @@ class Daemon:
                 emit=self._on_memory_event,
                 log=self._log,
                 cgroups=self._own_cgroup(),
+                platform_limits=self.profile.memory_limits_mib,
             )
             guard.start()
         except Exception as exc:  # noqa: BLE001 - no guard is today's behaviour, not a crash
             self._log(f"memory guard: cannot start ({exc!r}); running without it")
             return
         self.guard = guard
-        self._log(
-            f"memory guard: on action={rule.action} floor={rule.floor_pct}% "
-            f"soft={rule.soft_pct}% poll={rule.poll_s}s"
-        )
+        if rule.floor_mib is not None:
+            limits = f"floor={rule.floor_mib} MiB soft={rule.soft_mib} MiB (config)"
+        elif self.profile.memory_limits_mib is not None:
+            floor, soft = self.profile.memory_limits_mib
+            limits = f"floor={floor} MiB soft={soft} MiB (platform {self.profile.name})"
+        else:
+            limits = f"floor={rule.floor_pct}% soft={rule.soft_pct}% (percent)"
+        self._log(f"memory guard: on action={rule.action} {limits} poll={rule.poll_s}s")
 
     def _stop_guard(self) -> None:
         guard, self.guard = self.guard, None
@@ -878,14 +883,18 @@ class Daemon:
             )
 
     def _low_memory(self) -> bool:
-        """For the shipper's black-box cadence: the guard's avail under soft_pct of RAM."""
+        """For the shipper's black-box cadence: the guard's avail under its soft limit."""
         guard = self.guard
-        with self._mem_lock:
-            total = self._mem_total
-        if guard is None or not total:
+        if guard is None:
             return False
-        avail = guard.doc().get("avail_mib")
-        return avail is not None and avail < total * float(guard.rule.soft_pct) / 100.0
+        doc = guard.doc()
+        avail = doc.get("avail_mib")
+        soft = (doc.get("limits") or {}).get("soft_mib")
+        if soft is None:  # an older/fake guard without limits: fall back to the percentage
+            with self._mem_lock:
+                total = self._mem_total
+            soft = total * float(guard.rule.soft_pct) / 100.0 if total else None
+        return avail is not None and soft is not None and avail < soft
 
     def _on_memory_event(self, ev: dict) -> None:
         """The guard's sink, called ON THE GUARD THREAD. Never raises: the recorder write and

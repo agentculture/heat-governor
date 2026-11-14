@@ -11,10 +11,10 @@ Each ``step()``:
 1. reads ``MemTotal`` / ``MemAvailable`` from ``<proc_root>/meminfo`` and feeds the
    ``memtrigger.Trigger`` (monotonic time);
 2. scans processes and updates the growth ``Tracker`` only while available memory is under
-   ``soft_pct`` of total (a full scan costs ~34 ms, too much for every 0.25 s poll), plus
+   the soft limit (a full scan costs ~34 ms, too much for every 0.25 s poll), plus
    once every ``top_every_s`` for the routine top snapshot;
 3. emits a ``memory_top`` snapshot every ``top_every_s``, and every poll while under
-   ``soft_pct``;
+   the soft limit;
 4. on a trigger fire hands the scan to ``memkill.MemKiller.act`` (which kills with
    ``action = "kill"`` or returns ``memory_would_kill`` with ``action = "record"``) and emits
    its events, re-stamped with wall-clock ``t``;
@@ -82,6 +82,22 @@ def _read_counter(path: Path, key: str) -> int | None:
     return None
 
 
+def effective_limits(
+    rule, platform_limits: tuple[int, int] | None, total_mib: float
+) -> tuple[float, float, str]:
+    """(floor_mib, soft_mib, source) with precedence config > platform > percent (d3).
+
+    ``source`` is "config" ([memory] floor_mib/soft_mib), "platform" (the profile's declared
+    limits, for boxes that run full of AI work) or "percent" (floor_pct/soft_pct of RAM)."""
+    floor, soft = getattr(rule, "floor_mib", None), getattr(rule, "soft_mib", None)
+    if floor is not None and soft is not None:
+        return float(floor), float(soft), "config"
+    if platform_limits is not None:
+        return float(platform_limits[0]), float(platform_limits[1]), "platform"
+    total = float(total_mib)
+    return total * float(rule.floor_pct) / 100.0, total * float(rule.soft_pct) / 100.0, "percent"
+
+
 class MemGuard:
     def __init__(
         self,
@@ -97,8 +113,11 @@ class MemGuard:
         cgroups: tuple[str, ...] = (),
         uid: int | None = None,
         self_pid: int | None = None,
+        platform_limits: tuple[int, int] | None = None,
     ) -> None:
         self.rule = rule
+        self.platform_limits = platform_limits
+        self._limits: tuple[float, float, str] | None = None
         self.proc_root = Path(proc_root)
         self.sys_root = Path(sys_root)
         self._clock = clock
@@ -185,7 +204,17 @@ class MemGuard:
             "avail_mib": None if avail_mib is None else int(avail_mib),
             "last_kill": None if self._last_kill is None else dict(self._last_kill),
             "kills_last_hour": int(kills),
+            "limits": self._limits_doc(),
         }
+
+    def _limits_doc(self) -> dict:
+        """The effective limits; floor/soft are None until MemTotal has been read."""
+        if self._limits is None:
+            src = "config" if getattr(self.rule, "floor_mib", None) is not None else None
+            src = src or ("platform" if self.platform_limits is not None else "percent")
+            return {"floor_mib": None, "soft_mib": None, "source": src}
+        floor, soft, src = self._limits
+        return {"floor_mib": int(floor), "soft_mib": int(soft), "source": src}
 
     # --- one poll --------------------------------------------------------------------------
 
@@ -225,15 +254,17 @@ class MemGuard:
     def _memory(self, mono: float, wall: float, total: float, avail: float) -> None:
         r = self.rule
         if self._trigger is None or total != self._total_mib:
+            self._limits = effective_limits(r, self.platform_limits, total)
+            floor_mib, soft_mib, _ = self._limits
             self._trigger = Trigger(
                 total,
-                floor_pct=r.floor_pct,
                 horizon_s=r.horizon_s,
-                soft_pct=r.soft_pct,
                 window_s=r.window_s,
+                floor_mib=floor_mib,
+                soft_mib=soft_mib,
             )
             self._total_mib = total
-        soft_mib = total * float(r.soft_pct) / 100.0
+        soft_mib = self._limits[1]
         if avail >= soft_mib:
             self._armed = True  # mirrors Trigger's re-arm rule
         fire = self._trigger.step(mono, avail)

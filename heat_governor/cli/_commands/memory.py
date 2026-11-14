@@ -37,6 +37,12 @@ def _guard_text(g: dict) -> str:
         f"memory guard: action {g.get('action')}, {armed}, avail {g.get('avail_mib')} MiB, "
         f"{g.get('kills_last_hour', 0)} kill(s) in the last hour"
     ]
+    lim = g.get("limits")
+    if isinstance(lim, dict):
+        lines.append(
+            f"limits: floor {lim.get('floor_mib')} MiB, soft {lim.get('soft_mib')} MiB "
+            f"(source: {lim.get('source')})"
+        )
     k = g.get("last_kill")
     if isinstance(k, dict):
         when = _fmt_time(k.get("t"))
@@ -190,7 +196,24 @@ def _params(args: argparse.Namespace) -> dict:
         )
     if p["horizon_s"] <= 0 or p["window_s"] <= 0:
         raise CliError(EXIT_USER_ERROR, "--horizon-s and --window-s must be positive", "")
+    floor_mib, soft_mib = getattr(args, "floor_mib", None), getattr(args, "soft_mib", None)
+    if (floor_mib is None) != (soft_mib is None):
+        raise CliError(
+            EXIT_USER_ERROR,
+            "--floor-mib and --soft-mib must be given together",
+            "absolute limits replace both percentages (e.g. --floor-mib 3072 --soft-mib 6144)",
+        )
+    if floor_mib is not None:
+        if not 0 < floor_mib < soft_mib:
+            raise CliError(EXIT_USER_ERROR, "need 0 < --floor-mib < --soft-mib", "")
+        p["floor_mib"], p["soft_mib"] = float(floor_mib), float(soft_mib)
     return p
+
+
+def _limits_text(params: dict) -> str:
+    if "floor_mib" in params:
+        return f"floor {params['floor_mib']:g} MiB soft {params['soft_mib']:g} MiB"
+    return f"floor {params['floor_pct']:g}% soft {params['soft_pct']:g}%"
 
 
 def _load_series(path: Path, args: argparse.Namespace) -> tuple[list, float, str]:
@@ -249,8 +272,8 @@ def cmd_replay(args: argparse.Namespace) -> int:
         return 0
     lines = [
         f"{path}: {len(rows)} samples, MemTotal {total:g} MiB ({source}); "
-        f"floor {params['floor_pct']:g}% horizon {params['horizon_s']:g}s "
-        f"soft {params['soft_pct']:g}% window {params['window_s']:g}s"
+        f"{_limits_text(params)} horizon {params['horizon_s']:g}s "
+        f"window {params['window_s']:g}s"
     ]
     for f in fires:
         lines.append(
@@ -331,5 +354,7 @@ def register(sub: argparse._SubParsersAction) -> None:
     rp.add_argument("--horizon-s", type=float, help="Act if the floor is this close (default 10).")
     rp.add_argument("--soft-pct", type=float, help="Watch closely below this %% (default 20).")
     rp.add_argument("--window-s", type=float, help="Trend-fit window in seconds (default 10).")
+    rp.add_argument("--floor-mib", type=float, help="Absolute floor in MiB (with --soft-mib).")
+    rp.add_argument("--soft-mib", type=float, help="Absolute soft limit in MiB (with --floor-mib).")
     rp.add_argument("--json", action="store_true", help=_JSON_HELP)
     rp.set_defaults(func=cmd_replay)

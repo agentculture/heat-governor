@@ -138,6 +138,8 @@ MEMORY_KEYS = {
     "poll_s": (int, float),
     "top_n": int,
     "top_every_s": (int, float),
+    "floor_mib": int,
+    "soft_mib": int,
 }
 SHIP_KEYS = {
     "enabled": bool,
@@ -216,6 +218,10 @@ class MemoryRule:
     poll_s: float = 0.25
     top_n: int = 10  # processes recorded per top snapshot
     top_every_s: float = 10.0
+    # Absolute limits (MiB), set together; they override floor_pct/soft_pct. Unset: the
+    # platform profile's declared limits, else the percentages (deviation d3).
+    floor_mib: int | None = None
+    soft_mib: int | None = None
 
 
 @dataclass(frozen=True)
@@ -305,6 +311,8 @@ class Config:
             float(m.get("poll_s", d.poll_s)),
             int(m.get("top_n", d.top_n)),
             float(m.get("top_every_s", d.top_every_s)),
+            m.get("floor_mib", d.floor_mib),
+            m.get("soft_mib", d.soft_mib),
         )
 
     @property
@@ -498,6 +506,18 @@ def _validate_memory(mem: dict, problems: list[str]) -> None:
     soft = mem["soft_pct"] if "soft_pct" in ok else MemoryRule.soft_pct
     if ("floor_pct" in ok or "soft_pct" in ok) and soft <= floor:
         problems.append("memory.soft_pct must be greater than memory.floor_pct")
+    _validate_memory_mib(mem, ok, problems)
+
+
+def _validate_memory_mib(mem: dict, ok: set, problems: list[str]) -> None:
+    """floor_mib/soft_mib: absolute limits, set together, soft above floor."""
+    have = {k for k in ("floor_mib", "soft_mib") if k in mem}
+    if len(have) == 1:
+        problems.append("memory.floor_mib and memory.soft_mib must be set together")
+    if "floor_mib" in ok and mem["floor_mib"] < 256:
+        problems.append("memory.floor_mib must be at least 256")
+    if {"floor_mib", "soft_mib"} <= ok and mem["soft_mib"] <= mem["floor_mib"]:
+        problems.append("memory.soft_mib must be greater than memory.floor_mib")
 
 
 def endpoint_problem(url: str) -> str | None:
@@ -932,6 +952,8 @@ def template(profile: Profile) -> str:
         "# floor_pct = 5                # MemAvailable floor, % of RAM (1-50)",
         "# horizon_s = 10               # act when the floor is projected within this",
         "# soft_pct = 20                # watch closely below this % (> floor_pct)",
+        "# floor_mib = 3072             # absolute limits, set together; they win over the %",
+        "# soft_mib = 6144              # (spark/thor/orin/ventunoq profiles declare their own)",
         "# window_s = 10                # span of the trend fit (2-120)",
         "# min_victim_mib = 2048        # never kill a process smaller than this",
         "# max_kills_per_hour = 3       # 0-60",

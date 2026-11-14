@@ -372,7 +372,10 @@ def test_shipper_arguments(tmp_path):
     assert kw["default_machine"] == "box1"
     low = kw["low_memory"]
     assert low() is False
-    write_meminfo(rig.proc, 10_000)  # under 20 % of ~120 GiB
+    write_meminfo(rig.proc, 10_000)  # 8 % free is normal on a spark (d3): above its 6 GiB soft
+    rig.guard.step()
+    assert low() is False
+    write_meminfo(rig.proc, 5_000)  # under the spark platform's 6144 MiB soft limit
     rig.guard.step()
     assert low() is True
     write_meminfo(rig.proc, 60_000)
