@@ -192,7 +192,8 @@ def test_client_get_missing_and_bad_secret(s3):
         bad.put("k", b"v")
     assert err.value.status == 403
     assert err.value.code == "SignatureDoesNotMatch"
-    assert "wrong-k" not in str(err.value) and "wrong-k" not in repr(err.value)
+    assert "wrong-k" not in str(err.value)
+    assert "wrong-k" not in repr(err.value)
 
 
 def test_client_refuses_plain_http_to_open_internet():
