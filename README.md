@@ -311,6 +311,8 @@ heat-governor gpu-clock helper        # the root helper + sudoers line for GPU c
 | `gpu-clock overview\|status\|helper\|lock\|reset\|hold\|release` | The GPU clock ceiling (root helper); `hold`/`release` declare the operator's ceiling (law). |
 | `mesh overview\|status\|serve` | The fleet view: every machine's state, or the dashboard and JSON API on `127.0.0.1:9480`. |
 | `mcp` | Read-only MCP server over stdio (tools `mesh_status`, `machine_state`, `sense`). |
+| `memory overview\|status\|top\|replay` | The memory guard: its state and limits, the biggest processes now, or when it would have fired over recorded memory. |
+| `ship overview\|test\|fetch` | Off-machine evidence in an S3-compatible bucket: check the bucket, or download a machine's kill events, postmortem and black box. |
 | `whoami`, `learn`, `explain <path>`, `overview`, `doctor`, `cli overview` | Agent verbs. |
 
 Every command supports `--json`. Results go to stdout and errors/diagnostics

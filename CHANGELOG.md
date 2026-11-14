@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-11-15
+
+### Added
+
+- Memory guard ([memory]): a guard thread reads /proc/meminfo every 0.25 s and fires on the fill-rate slope plus a floor (not PSI); with action = "kill" it SIGKILLs the fastest-growing own-user process by anonymous memory, pinned by pidfd, within a kill budget (3/hour), naming repeat offenders and falling back to the fastest-growing process group; it never touches root or container processes (memtrigger.py, memprocs.py, memkill.py, memguard.py)
+- Absolute, per-platform memory limits: [memory] floor_mib/soft_mib, and declared defaults for spark/thor (3072/6144 MiB), orin (2048/4096) and ventunoq (1024/2048), for boxes that run full of AI work (deviation d3)
+- Per-process memory records: memory_kill, memory_would_kill, memory_budget_exhausted and oom_kill event rows (kernel and cgroup OOM kills from /proc/vmstat and memory.events), an optional top list on tick rows, and memory in the reboot report
+- Off-machine evidence ([ship]): stdlib SigV4 client for any S3-compatible store (AWS, R2, MinIO), kill and OOM events uploaded immediately, a rolling black box, a postmortem after an unclean boot, spool and retry; keys use the fleet machine name, never the hostname (sigv4.py, ship.py)
+- CLI: memory overview|status|top|replay and ship overview|test|fetch; report shows memory; unit emits MemoryMin=128M
+- state.md: optional mem_guard object; docs/contracts/memory.md; spec, plan and split for the memory guard (docs/specs, docs/plans)
+
+### Changed
+
+- Recorder writes are serialized (the guard and shipper write from their own threads); recorder.tail() feeds the black box
+- run passes [memory]/[ship] to the daemon even with [daemon] reload = false (deviation d2)
+
 ## [0.16.1] - 2026-11-10
 
 ### Added

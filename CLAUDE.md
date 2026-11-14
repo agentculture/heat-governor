@@ -33,6 +33,8 @@ files, and a CI/deploy pipeline. It is a sibling to
 | Fleet reader: `fleet.toml` (`fleet.py`), SSH/local transport (`transport.py`), concurrent poll with ok/stale/unreachable and 24 h history (`fleet_reader.py`) | Implemented, unit-tested; remote daemons unchanged (loopback, reached over SSH) |
 | `mesh overview\|status\|serve`, dashboard on `127.0.0.1:9480` (`mesh_server.py`, `web/`, vendored React/htm/Lato) | Implemented |
 | `mcp`: read-only MCP server over stdio (`mcp_server.py`) | Implemented |
+| Memory guard (`[memory]`): own thread, slope + floor trigger, absolute per-platform limits, own-user victim by anonymous growth, pidfd-pinned SIGKILL, kill budget, repeat offenders, OOM-kill events, `top` snapshots (`memtrigger.py`, `memprocs.py`, `memkill.py`, `memguard.py`; `memory` verbs) | Implemented, unit-tested; replayed on the 2026-11-14 incident and 2026-11-10..13 records; platform limits declared, unmeasured; not yet run with `action = "kill"` on a real box |
+| Off-machine evidence (`[ship]`): stdlib SigV4 S3 client, spool + retry, kill events, black box, postmortem (`sigv4.py`, `ship.py`; `ship` verbs) | Implemented, tested against a local fake S3; not yet run against MinIO, R2 or AWS |
 | Bearer-token tailnet listener and daemon `GET /history`; persisted reader history; measured VENTUNO Q limits; cultureos daemon with apply | (planned) |
 | Live validation on a batch window (duty vs peak temperature vs throughput) | (planned) |
 | Configuration: one TOML file, strict validation, live reload, `config` verbs (`config.py`) | Implemented |
@@ -50,6 +52,10 @@ contract) and `docs/integration.md` (how lobes, sparkrun and mjolnir use it) bef
   cpufreq / fan / CPU-hotplug controls changes the **live machine**, not the repo.
   Don't run it without the user's go-ahead, and keep tests off the real
   `/sys` (point code at a configurable root and use `tmp_path` fixtures).
+- `[memory] action = "kill"` SIGKILLs real processes, and `[ship]` uploads records off the
+  machine. Same rule: the user's go-ahead before enabling either on a box, tests on fake
+  `/proc` trees and a local fake S3, and never signal a process a test did not spawn. See
+  `docs/contracts/memory.md`.
 - The runtime package has **no third-party dependencies**
   (`dependencies = []` in `pyproject.toml`). Keep it that way unless there's a
   deliberate decision otherwise; dev-only tools go in `[dependency-groups].dev`.

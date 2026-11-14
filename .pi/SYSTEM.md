@@ -34,7 +34,8 @@ else to apply, rather than applying it yourself.
   or a Claude Code session).
 - **No hardware actuation.** This repo's daemon pauses and CPU-caps containers
   to govern heat. Never run `heat-governor run --apply`, pause or update a
-  container, or write to cpufreq, fan or CPU-hotplug controls. Reading sensors
+  container, enable `[memory] action = "kill"` or `[ship]`, or write to
+  cpufreq, fan or CPU-hotplug controls. Reading sensors
   (`heat-governor sense`, `capabilities`, `state`, `run --once` without
   `--apply`) is fine.
 - **No final decisions.** You propose or report; someone else decides and

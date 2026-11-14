@@ -164,11 +164,22 @@ is recorded, so `heat-governor replay` can check a change against real traces be
 GPU clock ceilings need a one-time root install of a small helper (`heat-governor gpu-clock helper` prints
 it and the sudoers line), then `gpu_clock = true` under `[daemon]`.
 
+## The memory guard
+
+With `[memory]` in the config, the daemon also watches available memory. With
+`action = "kill"` it kills the runaway when memory is about to run out, but only processes owned
+by the daemon's own user, never root or container processes. It records who used the memory, and
+with `[ship]` keeps that evidence in an S3-compatible bucket. Clients see an optional `mem_guard`
+object in `/state`; admission stays thermal-only. Agents running heavy tests on a governed box
+should still wrap them in `systemd-run --user --scope -p MemoryMax=...`. The guard is the
+backstop. See [`contracts/memory.md`](contracts/memory.md).
+
 ## What it does not do
 
 - It does not change power modes (`nvpmodel`) or fans; those stay with NVIDIA's own tools.
-- It does not stop work that is running. Admission gates new work; duty-cycling only pauses batch
-  containers.
+- For heat, it does not stop work that is running. Admission gates new work; duty-cycling only
+  pauses batch containers. The one exception is the memory guard, which with `action = "kill"`
+  kills a runaway own-user process when memory is about to run out.
 - It needs no network and no LLM to keep governing.
 
 ## Reading the fleet
