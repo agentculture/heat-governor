@@ -175,7 +175,7 @@ class MemGuard:
     def _lock_memory(self) -> None:
         try:
             rc = self._mlockall(MCL_CURRENT | MCL_FUTURE)
-        except Exception as e:  # noqa: BLE001 - best effort, never fail start()
+        except Exception as e:  # noqa: BLE001 - best effort that must never fail start()
             self._log(f"mlockall: unavailable ({e}), continuing")
             return
         if rc == 0:

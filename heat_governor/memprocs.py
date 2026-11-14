@@ -215,7 +215,8 @@ def top(procs: dict[int, Proc], tracker: Tracker | None = None, n: int = 10) -> 
 _SENSITIVE_FLAG_WORDS = r"(?:token|key|secret|passw(?:or)?d|passwd|pwd|auth|credential)"
 _AUTH_RE = re.compile(r"(?i)(authorization\s*[:=]\s*)(?:(?:bearer|basic|token)\s+)?[^\s\"']+")
 _FLAG_RE = re.compile(rf"(?i)(--?[\w.-]*{_SENSITIVE_FLAG_WORDS}[\w.-]*)(=|\s+)(?!-)(\S+)")
-_ENV_RE = re.compile(r"(?<!\S)([A-Za-z_][A-Za-z0-9_]*)=(\S*)")
+_ENV_NAME = r"[A-Za-z_][A-Za-z0-9_]*"  # NOSONAR python:S6353 -- ASCII names: \w is Unicode
+_ENV_RE = re.compile(rf"(?<!\S)({_ENV_NAME})=(\S*)")
 _KNOWN_RES = [
     re.compile(p)
     for p in (

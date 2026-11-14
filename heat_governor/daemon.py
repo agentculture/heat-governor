@@ -167,11 +167,7 @@ class Daemon:
             Recorder(data / "records", fsync=opts.fsync) if (data and opts.record) else None
         )
         self.server = StateServer(*opts.listen) if (opts.listen and opts.listeners) else None
-        # -- the tensor-parallel pair ([pair]); None without one
-        self.pair_link: PeerLink | None = peer_link
-        if self.pair_link is None and opts.pair is not None:
-            self.pair_link = PeerLink(opts.pair)
-        self.pair_server = self._pair_server(opts.pair) if opts.listeners else None
+        self._init_pair(peer_link, opts)
         self.pair_ids: set[str] = set()  # ids of this box's rank containers
         self._pair_forced: set[str] = set()  # pair containers found as batch, logged once
         self._pair: PairDecision | None = None
@@ -213,7 +209,24 @@ class Daemon:
         if opts.units:
             self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
             self._sync_adaptive(opts.units)
-        # -- the memory guard ([memory]) and the shipper ([ship]); both start with start()
+        self._init_memory(opts, proc_root, sys_root, make_guard, make_shipper)
+
+    def _init_pair(self, peer_link: PeerLink | None, opts: Options) -> None:
+        """The tensor-parallel pair ([pair]): its peer link and server; None without one."""
+        self.pair_link: PeerLink | None = peer_link
+        if self.pair_link is None and opts.pair is not None:
+            self.pair_link = PeerLink(opts.pair)
+        self.pair_server = self._pair_server(opts.pair) if opts.listeners else None
+
+    def _init_memory(
+        self,
+        opts: Options,
+        proc_root: Path,
+        sys_root: Path,
+        make_guard: Callable[..., MemGuard] | None,
+        make_shipper: Callable[..., Shipper] | None,
+    ) -> None:
+        """The memory guard ([memory]) and the shipper ([ship]); both start with start()."""
         self.proc_root = Path(proc_root)  # /proc for the guard, the boot id and boot time
         self.sys_root = Path(sys_root)  # /sys: the guard reads cgroup memory.events here
         self._make_guard = make_guard or MemGuard
@@ -785,7 +798,7 @@ class Daemon:
                 platform_limits=self.profile.memory_limits_mib,
             )
             guard.start()
-        except Exception as exc:  # noqa: BLE001 - no guard is today's behaviour, not a crash
+        except Exception as exc:  # noqa: BLE001 - running without a guard is today's behaviour
             self._log(f"memory guard: cannot start ({exc!r}); running without it")
             return
         self.guard = guard
@@ -811,10 +824,12 @@ class Daemon:
             text = (self.proc_root / "self" / "cgroup").read_text()
         except OSError:
             return ()
-        for line in text.splitlines():
-            if line.startswith("0::") and line[3:].strip("/"):
-                return (line[3:].strip().strip("/"),)
-        return ()
+        unified = [
+            line[3:].strip().strip("/")
+            for line in text.splitlines()
+            if line.startswith("0::") and line[3:].strip("/")
+        ]
+        return tuple(unified[:1])  # the first unified (v2) entry, or none
 
     def _start_shipper(self) -> None:
         rule = self.opts.ship
@@ -1222,40 +1237,79 @@ def previous_boot_postmortem(
     and parsed only at the end, so a 74 MB day file costs a substring scan, not a JSON
     parse per line. When the previous run's start row is older than those files, its boot
     is "unknown" and the kernel boot time decides whether a reboot came in between."""
-    boot: str | None = None
-    ticks: deque = deque(maxlen=4000)
-    events: list[dict] = []
-    clean = ours = False
+    scan = _PostmortemScan(this_boot, pid)
     for path in sorted(Path(directory).glob("*.jsonl"))[-files:]:
-        if ours:
+        if scan.ours:
             break
+        scan.scan_file(path)
+    if scan.clean:
+        return None
+    tail = _tick_tail(scan.ticks)
+    if not tail:
+        return None
+    boot = scan.boot or "unknown"
+    if not _rebooted_since(boot, this_boot, btime, tail):
+        return None
+    return _reboot_entry(boot, this_boot, {"t": now}, tail, window_s, scan.events)
+
+
+class _PostmortemScan:
+    """The running state of :func:`previous_boot_postmortem`'s pass over the day files."""
+
+    def __init__(self, this_boot: str, pid: int | None) -> None:
+        self.this_boot = this_boot
+        self.pid = pid
+        self.boot: str | None = None
+        self.ticks: deque = deque(maxlen=4000)
+        self.events: list[dict] = []
+        self.clean = False
+        self.ours = False
+
+    def scan_file(self, path: Path) -> None:
+        """Feed one day file; stops (and sets ``ours``) at this run's own start row."""
         try:
             fh = open(path, encoding="utf-8")
         except OSError:
-            continue
+            return
         with fh:
             for line in fh:
-                if '"event"' not in line:
-                    ticks.append(line)
-                    clean = False
-                    continue
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                kind = rec.get("event") if isinstance(rec, dict) else None
-                if kind == "start":
-                    if pid is not None and (rec.get("pid"), rec.get("boot_id")) == (pid, this_boot):
-                        ours = True  # this run's own start: everything after is ours
-                        break
-                    boot, events, clean = str(rec.get("boot_id") or "unknown"), [], False
-                    ticks.clear()
-                elif kind == "action" and str(rec.get("msg", "")).startswith("stop:"):
-                    clean = True
-                elif kind in MEMORY_EVENTS and isinstance(rec.get("t"), (int, float)):
-                    events = (events + [rec])[-500:]
-    if clean:
-        return None
+                if self._feed(line):
+                    self.ours = True  # this run's own start: everything after is ours
+                    return
+
+    def _feed(self, line: str) -> bool:
+        """Take one line; True at this run's own start row."""
+        if '"event"' not in line:
+            self.ticks.append(line)
+            self.clean = False
+            return False
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            return False
+        kind = rec.get("event") if isinstance(rec, dict) else None
+        if kind == "start":
+            return self._start(rec)
+        if kind == "action" and str(rec.get("msg", "")).startswith("stop:"):
+            self.clean = True
+        elif kind in MEMORY_EVENTS and isinstance(rec.get("t"), (int, float)):
+            self.events = (self.events + [rec])[-500:]
+        return False
+
+    def _start(self, rec: dict) -> bool:
+        """A start row: True when it is this run's own; else a new previous run begins."""
+        if self.pid is not None and (rec.get("pid"), rec.get("boot_id")) == (
+            self.pid,
+            self.this_boot,
+        ):
+            return True
+        self.boot, self.events, self.clean = str(rec.get("boot_id") or "unknown"), [], False
+        self.ticks.clear()
+        return False
+
+
+def _tick_tail(ticks: deque) -> list[dict]:
+    """The raw tick lines parsed: the dicts with a temperature and a numeric time."""
     tail = []
     for line in ticks:
         try:
@@ -1264,16 +1318,14 @@ def previous_boot_postmortem(
             continue  # a torn last line after a power loss
         if isinstance(rec, dict) and "temp_c" in rec and isinstance(rec.get("t"), (int, float)):
             tail.append(rec)
-    if not tail:
-        return None
-    boot = boot or "unknown"
+    return tail
+
+
+def _rebooted_since(boot: str, this_boot: str, btime: float | None, tail: list[dict]) -> bool:
+    """Whether a reboot came between the previous run's last tick and this boot."""
     if "unknown" not in (boot, this_boot):
-        rebooted = boot != this_boot
-    else:
-        rebooted = btime is not None and tail[-1]["t"] < btime
-    if not rebooted:
-        return None
-    return _reboot_entry(boot, this_boot, {"t": now}, tail, window_s, events)
+        return boot != this_boot
+    return btime is not None and tail[-1]["t"] < btime
 
 
 def _mhz(v: int | None) -> str:
