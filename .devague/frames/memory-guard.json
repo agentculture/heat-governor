@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-14T18:19:42Z",
-  "updated": "2026-11-14T18:36:28Z",
+  "updated": "2026-11-14T21:42:06Z",
   "claims": [
     {
       "id": "c1",
@@ -1053,7 +1053,30 @@
       "seeds": []
     }
   ],
-  "lapses": [],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "control-absent",
+      "what": "t8 task agent wrote heat_governor/memguard.py before tests/test_memguard.py (not test-first); the 15 tests were never seen failing first. Mitigation reported by the agent: three temporary mutations of the module (drop wall-clock re-stamp, emit on baseline OOM read, skip scanning below soft_pct) each made tests fail.",
+      "skipped_check": "TDD red step: tests failing before the implementation",
+      "refs": [
+        "t8"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l2",
+      "code": "provenance-missing",
+      "what": "t3 task agent returned no final report (only the word 'placeholder'); its claims about the AWS example signature, secret handling and lint were unprovenanced until the main agent re-checked them in the worktree (AWS GET Object signature asserted in tests/test_sigv4.py, 9 tests, scan-secrets clean, lint clean) before merge.",
+      "skipped_check": "task agent final report",
+      "refs": [
+        "t3"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    }
+  ],
   "obligations": [
     {
       "id": "o1",

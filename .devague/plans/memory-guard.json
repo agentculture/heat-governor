@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-11-14T18:37:22Z",
-  "updated": "2026-11-14T20:22:31Z",
+  "updated": "2026-11-14T21:55:59Z",
   "targets": [
     {
       "id": "c1",
@@ -773,6 +773,14 @@
       "text": "Sonar may flag os.kill / pidfd_send_signal or ctypes mlockall as hotspots; each needs a reviewed NOSONAR with a rule id.",
       "kind": "unknown_nonblocking",
       "task_id": "t11",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r8",
+      "text": "t9 agent saw exactly one uncaptured full-suite failure; not reproduced in 5 full runs + 20 runs of tests/test_daemon_memory.py after merge. Possible thread-timing flake; watch CI.",
+      "kind": "unknown_nonblocking",
+      "task_id": "t9",
       "resolved": false,
       "resolution": ""
     }
