@@ -1,0 +1,1131 @@
+{
+  "slug": "memory-guard",
+  "title": "memory guard",
+  "schema_version": 6,
+  "status": "exported",
+  "created": "2026-11-14T18:19:42Z",
+  "updated": "2026-11-14T18:36:28Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "heat-governor catches a runaway process before it takes the machine down: when memory is about to run out it kills the biggest own-user grower, records who used the memory and what started it, and keeps that record in S3 so a dead machine's last minutes survive off-box.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "All three parts ship together: kill, per-process records, and S3 upload; none of them depends on the thermal path.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Acceptance = success signals c26 and c27 pass and 'heat-governor memory status' / 'ship test' work on the EliteMini.",
+      "revisions": []
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "A memory guard runs in its own thread, reading /proc/meminfo every ~0.25 s, independent of the 1 s tick: the tick is single-threaded and its docker discover blocked (records 2026-11-14 18:48:30Z 'docker socket TimeoutError'; tick gaps of 133 s and 52 s while memory filled).",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "A blocked docker socket or slow tick never delays a guard poll by more than one poll interval.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Test: a fake tick that sleeps 30 s while the guard thread still polls and fires on a fake /proc/meminfo.",
+      "revisions": [
+        {
+          "text": "x",
+          "kind": "requirement",
+          "reason": "probe placeholder replaced by the first real finding"
+        }
+      ]
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "Trigger on the MemAvailable slope plus a floor, not on PSI: kill when available < floor (default 5% of MemTotal), or when projected exhaustion (available / fill rate) < horizon (default 10 s) and available < 20%. On 2026-11-14 memory PSI stayed ~0 until available fell below ~2 GB, while each wave took 36-62 s at up to ~1.2 GB/s.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "The trigger fires on all five 2026-11-14 waves with >= 15 s to spare and never on 2026-11-10..13.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Covered by the replay success signal; unit tests for floor, horizon and slope edge cases with a fake clock.",
+      "revisions": []
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "Victim: the own-uid process whose RSS grew most over the last ~10 s, with RSS >= min_victim_mib (default 2048), skipping a protect list (the governor and its parent chain, pid 1, systemd, sshd, gnome-shell, Xwayland, tailscaled, dockerd, containerd and any [memory] protect entries). Sent SIGKILL (no grace: at 1.2 GB/s a SIGTERM grace period costs GBs). os.kill and proc_root are injected for tests.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "The guard never signals a protected process, a process of another uid, its own process or its parent chain, or anything under min_victim_mib.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Unit tests over a fake proc_root with a fake kill callable; one test spawns a real 'sleep' child and confirms SIGKILL reaches only it.",
+      "revisions": []
+    },
+    {
+      "id": "c5",
+      "kind": "decision",
+      "text": "Kill scope: own-user processes only, biggest grower; on for the EliteMini, off (record-only) by default elsewhere. (User choice, 2026-11-14.)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "Per-process tracking in the records: a 'top' snapshot (top-N by RSS: pid, ppid, uid, comm, cmdline redacted and truncated, rss_mib, growth MiB/s, start time, cgroup) every 10 s normally and every guard poll once available < 20%; a kill writes an event row with the victim, its parent chain to the session, the last 60 s of memory, and the top list at that moment.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "From the records alone, an operator can name the process that filled memory, its command line and what started it.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Replay test: write a synthetic run, then a 'memory top --since' read prints the grower with its parent chain.",
+      "revisions": []
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "OOM-kill events: read /proc/vmstat oom_kill and the delegated cgroups' memory.events each guard poll; a delta writes an event row (counter, cgroup if found), so kernel and memcg kills are on record even when the guard did not act.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "Every kernel or memcg OOM kill during the daemon's life appears as an oom_kill event row.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Fake /proc/vmstat and memory.events counters stepped in a test; one event row per delta.",
+      "revisions": []
+    },
+    {
+      "id": "c8",
+      "kind": "boundary",
+      "text": "New record rows carry an 'event' key (memory_kill, memory_would_kill, oom_kill) and tick rows gain only an optional 'top' field, so the fleet view's history reader ignores them unchanged.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h13",
+          "text": "history.py and report() read the new records unchanged.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Run the existing history/report tests over a fixture containing memory_kill/oom_kill rows and top fields.",
+      "revisions": []
+    },
+    {
+      "id": "c9",
+      "kind": "requirement",
+      "text": "Off-box shipping to S3 with a stdlib SigV4 signer (hmac, hashlib, urllib.request PUT; no boto3): on a kill or OOM event, PUT the event JSON immediately; every 60 s (every 10 s while available < 20%) PUT a rolling black box (last 10 min of records, gzipped) to `<prefix>/<host>/<boot_id>/blackbox.jsonl.gz`; on start after an unclean boot, PUT a postmortem. Runs in its own thread with a bounded queue; failures spool to disk and retry, never blocking the guard.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "An upload failure or a slow network never blocks the guard or the tick; events are uploaded at least once, retried after a restart.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Test against a localhost ThreadingHTTPServer fake S3 (port 0): success, 500, timeout, server down then up; check the spool drains.",
+      "revisions": [
+        {
+          "text": "Off-box shipping to S3 with a stdlib SigV4 signer (hmac, hashlib, urllib.request PUT; no boto3): on a kill or OOM event, PUT the event JSON immediately; every 60 s (every 10 s while available < 20%) PUT a rolling black box (last 10 min of records, gzipped) to <prefix>/<host>/<boot_id>/blackbox.jsonl.gz; on start after an unclean boot, PUT a postmortem. Runs in its own thread with a bounded queue; failures spool to disk and retry, never blocking the guard.",
+          "kind": "requirement",
+          "reason": "backtick the object path so the exported spec passes MD033 (no content change)"
+        }
+      ]
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "Credentials and target from config: [ship] bucket, region, prefix, optional profile (read from ~/.aws/credentials and ~/.aws/config via configparser) or AWS_* environment variables, optional endpoint for S3-compatible stores. Secrets are never written to records, logs or uploads.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h15",
+          "text": "Credentials never appear in records, logs, uploads or the state doc, and the SigV4 signature matches AWS's published test vectors.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Test the signer against the AWS SigV4 test-suite vectors (built at runtime, no AKIA literals); grep test output for the fake secret.",
+      "revisions": []
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "Config: new strict [memory] (action = record|kill, floor_pct, horizon_s, window_s, min_victim_mib, protect, poll_s, top_n) and [ship] sections, added to TOP_KEYS with validators and documented in config template and explain config; live-reloadable like the rest.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h16",
+          "text": "An invalid [memory] or [ship] section is rejected with a specific message, as every other section is.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "config check tests for each key's type/range and unknown keys.",
+      "revisions": []
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "CLI: noun 'memory' (overview, status, top) and noun 'ship' (overview, test, fetch), each a module with register(sub) wired in _build_parser, listed in overview _VERBS, learn text and JSON, and explain catalog ENTRIES; tests copy tests/test_cli_mesh.py:266-301.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h17",
+          "text": "Every new path resolves in explain and teken cli doctor . --strict passes.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test_every_catalog_path_resolves plus a test_cli_memory/ship copy of tests/test_cli_mesh.py:266-301; run teken cli doctor . --strict.",
+      "revisions": []
+    },
+    {
+      "id": "c13",
+      "kind": "requirement",
+      "text": "report gains memory: for each reboot, the last 60 s minimum available, swap used and peak memory PSI, plus any memory_kill/oom_kill events before it, so an OOM-driven reset reads as memory, not as 'max 20.0 C'.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "report on the 2026-11-14 records says memory, not 'max 20.0 C' only.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Fixture built from the incident shape; assert the reboot entry carries min avail, swap and peak PSI.",
+      "revisions": []
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "The governor stays responsive under memory pressure: best-effort mlockall(MCL_CURRENT|MCL_FUTURE) via ctypes when the [memory] guard is enabled (logged if refused), and the 'unit' verb emits MemoryMin= for the daemon's unit.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h19",
+          "text": "Under memory pressure the governor's own pages stay resident (mlockall accepted or MemoryMin set) and the result is logged at start.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Unit test with a fake mlockall; check 'unit' output contains MemoryMin=.",
+      "revisions": []
+    },
+    {
+      "id": "c15",
+      "kind": "requirement",
+      "text": "The state doc gains an optional mem_guard object (action, armed, last_kill {t, pid, comm, rss_mib}); level, admit and concurrency_factor stay thermal-only.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h20",
+          "text": "Existing clients (client.read/wait/Gate) behave identically with mem_guard present.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Run tests/test_client_state.py against a state doc with mem_guard added.",
+      "revisions": []
+    },
+    {
+      "id": "c16",
+      "kind": "non_goal",
+      "text": "Memory does not change the thermal level, admit or concurrency_factor in this change (state.md:29 defines them thermally); a memory-driven admission hold is a later decision.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c17",
+      "kind": "boundary",
+      "text": "The guard can only signal processes its own uid owns; root and container processes (other uids, e.g. uid 10001 containers here) are out of reach, and docker kill of opted-in containers is not part of this change.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "The guard refuses, rather than tries and fails, to target processes of other uids.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c18",
+      "kind": "boundary",
+      "text": "Uploaded evidence must not leak secrets: cmdlines are truncated and redacted (token/key/secret/password-style arguments), environment variables are never captured, and the credentials never leave the signer.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "No uploaded object contains a value matching the scan-secrets patterns.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Test: redact() on cmdlines with --token=, --api-key, PASSWORD=, then run scripts/scan-secrets.py patterns over an uploaded fixture.",
+      "revisions": []
+    },
+    {
+      "id": "c19",
+      "kind": "boundary",
+      "text": "CI constraints: no AKIA literals in tests, '# nosec B310' on urlopen, NOSONAR with a rule id on any hotspot (e.g. plain-HTTP custom endpoint), version bump + CHANGELOG, coverage >= 60%.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h23",
+          "text": "CI passes: lint, bandit, scan-secrets, teken doctor, version-check, sonar gate with zero unaccepted issues.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Run the CLAUDE.md lint set locally plus 'python3 scripts/sonar-gate.py --pull-request N' on the PR.",
+      "revisions": []
+    },
+    {
+      "id": "c20",
+      "kind": "non_goal",
+      "text": "Machine-level containment (MemoryMax/oomd on user-1000.slice or SSH session scopes, a hardware watchdog, kernel.panic) is host configuration, not this repo; the guard is a backstop, documented alongside those recommendations.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c21",
+      "kind": "non_goal",
+      "text": "The fleet view (dashboard, mcp, mesh) is not changed in this change; it already shows mem_used_pct and ignores event rows. Surfacing kills there is a follow-up.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c22",
+      "kind": "audience",
+      "text": "The operator (Ori) and the agents that run heavy jobs on the fleet (Claude Code sessions, culture mesh agents, sparkrun/lobes clients); first the EliteMini, where a runaway test reset the box on 2026-11-14.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h2",
+          "text": "The memory guard's state and evidence are reachable without a shell on the box (state doc mem_guard + S3).",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Check the README and docs/integration.md name the operator and agent clients as the readers of memory-guard state and evidence.",
+      "revisions": []
+    },
+    {
+      "id": "c23",
+      "kind": "before_state",
+      "text": "Before: heat-governor recorded mem:* and psi:* every second but acted on none of it and kept no per-process data. On 2026-11-14 a test grew to ~41 GB five times in 17 min, the kernel OOM killer fired late twice, the box thrashed 16 min and was reset, and the only evidence of what ran was the kernel's OOM tables. The governor's last record was 16 min before the reset, and it stayed on the box.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "The before-state numbers match the records: 5 waves, 36-62 s each, peak ~1.2 GB/s, gaps 133/52/942 s.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Compare against the incident timeline in the 2026-11-14 records (records/20261114.jsonl 19:34-19:51 local) and journalctl -b -1 -k.",
+      "revisions": []
+    },
+    {
+      "id": "c24",
+      "kind": "why_it_matters",
+      "text": "A box that thrashes into a reset loses every agent session and service on it (mesh IRCd, tunnels, mongo, dashboards) and leaves nothing to learn from; killing one runaway costs one test run.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "Killing one own-user process is always cheaper than a reset of the whole box.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Confirm by listing the services that restarted after the 2026-11-14 reboot (systemctl --user list-units, docker ps).",
+      "revisions": []
+    },
+    {
+      "id": "c25",
+      "kind": "after_state",
+      "text": "After: a runaway own-user process is SIGKILLed before available memory reaches zero; the box stays up and responsive; the records name the process, its growth, its parent chain and the moment of the kill; and the same evidence plus a rolling black box is in S3 within seconds, readable with 'heat-governor ship fetch' from any machine even if the box never comes back.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "The guard kills before the kernel OOM killer would and before the box thrashes, at the measured fill rates.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Verify end-to-end with the controlled allocation test (success signal) and 'heat-governor ship fetch --host elitemini' from another box.",
+      "revisions": []
+    },
+    {
+      "id": "c26",
+      "kind": "success_signal",
+      "text": "In a controlled test on the EliteMini, a process allocating 1.2 GB/s is killed with available memory still >= 2 GB, the governor records no tick gap > 2 s during the run, and the memory_kill event is in S3 within 10 s of the kill.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "The controlled test is safe to run: it runs inside a MemoryMax scope so a guard failure is contained by the cgroup, not the box.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Run a capped allocator (python bytearray growth at ~1.2 GB/s, under systemd-run --user --scope -p MemoryMax=30G as a safety net) with [memory] action=kill; check records for min mem:avail_mib, max tick gap, and the S3 object timestamp vs the event t.",
+      "revisions": []
+    },
+    {
+      "id": "c27",
+      "kind": "success_signal",
+      "text": "Replaying the 2026-11-14 records through the trigger fires on every one of the five waves at least 15 s before available memory fell below 2 GB, and fires 0 times across the 2026-11-10..13 records (no false kills on a normal week).",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "The recorded 1 Hz mem:avail_mib series is a faithful input for the trigger (same /proc/meminfo field the guard reads).",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Add a replay test/command that feeds recorded mem:avail_mib series into the trigger and asserts fire times per wave and zero fires on the quiet days.",
+      "revisions": []
+    },
+    {
+      "id": "c28",
+      "kind": "decision",
+      "text": "Storage target: bucket 'heat-governor', backend-agnostic over the S3 API (custom endpoint, path-style addressing, region configurable incl. R2's 'auto'), so AWS S3, Cloudflare R2 and a self-hosted store all work through the same code path. First target: a self-hosted store on spark. (User decision 2026-11-14.)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c29",
+      "kind": "decision",
+      "text": "The self-hosted store on spark is a MinIO container (S3 API, data on spark's disk, port 9000 reachable on the tailnet only). Installing it on spark is a live change made with the user's go-ahead at deploy time. (User decision 2026-11-14.)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "The kill pins its target: open a pidfd (os.pidfd_open) for the chosen pid, re-read `/proc/<pid>/stat` start time and uid through it, and signal with signal.pidfd_send_signal, so a pid that exited and was reused between the scan and the kill is never signalled.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h24",
+          "text": "A pid recycled between selection and kill is never signalled.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Unit test: the fake process exits and a new process takes its pid between scan and kill; assert no signal. Probe: python 3.13 here has os.pidfd_open and signal.pidfd_send_signal; requires-python >= 3.12.",
+      "revisions": [
+        {
+          "text": "The kill pins its target: open a pidfd (os.pidfd_open) for the chosen pid, re-read /proc/<pid>/stat start time and uid through it, and signal with signal.pidfd_send_signal, so a pid that exited and was reused between the scan and the kill is never signalled.",
+          "kind": "requirement",
+          "reason": "backtick the /proc path so the exported spec passes MD033 (no content change)"
+        }
+      ]
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "Victim growth and size use anonymous memory (RssAnon from `/proc/<pid>/status`), not total RSS, so mmap-heavy services whose file pages the kernel can drop (mongod, mongot) never look like runaways.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h25",
+          "text": "A process whose growth is file-backed pages is never chosen as the victim.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Unit test with a fake status file: large RssFile + flat RssAnon is never chosen; growing RssAnon is.",
+      "revisions": [
+        {
+          "text": "Victim growth and size use anonymous memory (RssAnon from /proc/<pid>/status), not total RSS, so mmap-heavy services whose file pages the kernel can drop (mongod, mongot) never look like runaways.",
+          "kind": "requirement",
+          "reason": "backtick the /proc path so the exported spec passes MD033 (no content change)"
+        }
+      ]
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "Repeat offenders are named: the guard keys kills by (uid, exe, cmdline hash); a second kill of the same key within 30 min writes 'repeat': N on the event and on mem_guard.last_kill, so the relaunching agent or operator can see the loop rather than a series of unrelated kills.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h26",
+          "text": "A relaunch loop is visible as one repeating offender in the records, state doc and S3.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Unit test: three kills of the same cmdline in 30 min yield repeat 1, 2, 3; a different cmdline resets.",
+      "revisions": []
+    },
+    {
+      "id": "c33",
+      "kind": "requirement",
+      "text": "Kill budget: at most max_kills (default 3) per rolling hour; past the budget the guard drops to record-only, writes a memory_budget_exhausted event and ships it, so a wrong threshold cannot kill legitimate work indefinitely.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h27",
+          "text": "A misconfigured guard can kill at most max_kills processes per hour.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Unit test with a fake clock: the 4th trigger in an hour records memory_would_kill and memory_budget_exhausted, never signals.",
+      "revisions": []
+    },
+    {
+      "id": "c34",
+      "kind": "requirement",
+      "text": "An http:// endpoint is allowed only for loopback or tailnet (100.64.0.0/10) hosts; any other plain-HTTP endpoint is rejected by config check. SigV4 protects integrity, not confidentiality; tailscale's WireGuard covers the MinIO-on-spark hop.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h28",
+          "text": "Records never travel in clear text over a network the fleet does not own.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "config check tests: http://127.0.0.1 and http://100.x accepted, http://example.org rejected, https accepted; the one plain-HTTP call site carries '# NOSONAR python:S5332 -- loopback/tailnet only'.",
+      "revisions": []
+    },
+    {
+      "id": "c35",
+      "kind": "requirement",
+      "text": "Object keys use the configured machine name ([ship] machine, defaulting to the fleet name), never the kernel hostname: here the hostname is 'ori-EliteMini-Series', which carries the operator's name into any bucket (later R2).",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h29",
+          "text": "No object key contains the kernel hostname unless the operator configured it.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Unit test: with machine unset and hostname 'x-Personal-Name', keys use the configured default, not the hostname; config template documents the key.",
+      "revisions": []
+    },
+    {
+      "id": "c36",
+      "kind": "requirement",
+      "text": "Uploads that fail with RequestTimeTooSkewed (or any 403 within the first minutes after boot), 5xx, timeouts or connection errors stay spooled and retry with backoff; only 4xx errors the config caused (NoSuchBucket, InvalidAccessKeyId) are logged once per hour, not retried in a tight loop.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h30",
+          "text": "The postmortem written at boot survives a not-yet-synced clock and lands once the clock is right.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "Fake S3 tests returning RequestTimeTooSkewed then 200, 503 then 200, NoSuchBucket forever; assert spool and log behaviour.",
+      "revisions": []
+    },
+    {
+      "id": "c37",
+      "kind": "decision",
+      "text": "When no single own-uid process is >= min_victim_mib, the guard groups own-uid processes by their top-level ancestor below the login session or systemd scope, picks the group whose anonymous memory grew fastest, and kills that group's biggest member each poll until the trigger clears, within the same kill budget. (User decision 2026-11-14.)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "The S3 bucket, region and profile are not named yet (user said 'existing bucket, I'll name it'); config and the live probe upload wait on it.",
+      "kind": "unknown_nonblocking",
+      "claim_id": "c10",
+      "resolved": true,
+      "resolution": "Bucket 'heat-governor'; any S3-API store (AWS, R2, self-hosted) via [ship] endpoint/region; first target self-hosted on spark (user, 2026-11-14).",
+      "resolution_claim_id": "c28"
+    },
+    {
+      "id": "v2",
+      "text": "Thresholds (floor 5%, horizon 10 s, window 10 s, min victim 2 GB, poll 0.25 s) are untuned; replaying the 2026-11-14 records through the trigger should show when it would have fired.",
+      "kind": "unknown_nonblocking",
+      "claim_id": "c3",
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v3",
+      "text": "Spark / GB10 boxes share memory with the GPU and run vLLM near full memory in containers; whether the trigger misfires there (low available is normal) is unmeasured, so the default stays record-only off the EliteMini.",
+      "kind": "unknown_nonblocking",
+      "claim_id": "c5",
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v4",
+      "text": "Branch base: origin/main is 0.16.1 with PR #13 (0.16.2) open; this work branches from origin/main and takes the next minor (0.17.0), rebasing on #13 if it merges first.",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v5",
+      "text": "A box should not ship its only black box to itself: spark's own daemon needs a target other than spark (R2 or another box), or its dead-box evidence is lost with it.",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v6",
+      "text": "Kill events land in records, the state doc and S3, but nobody is notified; a culture-mesh or dashboard alert on memory_kill is a follow-up (the fleet view is out of scope, c21).",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v7",
+      "text": "S3 retention: events accumulate per boot (small) and the black box is overwritten; no lifecycle rule or daily archive is set. Decide retention when moving beyond spark (R2 bills storage).",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v8",
+      "text": "MinIO credentials on spark (root vs a scoped 'heat-governor' user with write access to one bucket) and where they live on the EliteMini (a [heat-governor] profile in ~/.aws/credentials, mode 600) are deployment steps for the plan.",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v9",
+      "text": "Recorder is single-threaded today (recorder.py:37-66); the guard and shipper add writers, so writes must be serialized. Plan-side constraint.",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "heat_governor/daemon.py tick()/_act()",
+      "finding": "tick() senses, publishes, then runs _act() inline; discover() can block on the docker socket, so a guard inside the tick inherits every stall. Records on 2026-11-14 show tick gaps of 133 s, 52 s and 942 s while memory filled.",
+      "seeds": [
+        "c2"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "records 20261114.jsonl (19:34-19:51 local)",
+      "finding": "five fill waves, 35 GB -> <2 GB in 62/46/49/38/36 s; peak 1246 MiB/s; psi:memory_full_avg10 0.0 until avail < ~2 GB, then 27-98. Slope gives 30+ s warning at 1 Hz; PSI gives seconds.",
+      "seeds": [
+        "c3"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "heat_governor/sense.py SystemProbe",
+      "finding": "SystemProbe(proc_root, sys_root, clock) is the injection pattern (sense.py:118-121); scanning /proc/*/statm for 422 processes took 6.7 ms here, cheap enough for a sub-second guard.",
+      "seeds": [
+        "c4"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "os.kill precedent (whole package)",
+      "finding": "no os.kill or signal sent to another process anywhere in heat_governor; only signal.signal handler registration (daemon.py:929-930). The kill path is new code and needs an injected kill callable.",
+      "seeds": [
+        "c4"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "AskUserQuestion answer 2026-11-14",
+      "finding": "user chose 'Biggest grower, own user (Recommended)': SIGKILL the ori-owned process that grew most, >= 2 GB, not protected; on for this box, off by default elsewhere.",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "incident attribution 2026-11-14",
+      "finding": "naming the 41 GB process needed the kernel OOM tables (journalctl -k: pid 43985 MainThread under session-545.scope, sibling claude.exe, bash, head) and the sshd log (session from cultureos 100.97.170.7); the governor's records had no per-process data at all.",
+      "seeds": [
+        "c6"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "/proc/vmstat and memory.events (live box)",
+      "finding": "this boot already shows oom_kill 2: memcg kills of 'node --test js/test/search-panel.test.js' run under systemd-run scopes with MemoryMax (20:10:39, 20:11:40). The governor recorded neither.",
+      "seeds": [
+        "c7"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "heat_governor/history.py",
+      "finding": "history skips any row with 'event' (history.py:118) and reads only t, temp_c, gpu.temp_c, level and system mem:used_pct (history.py:118-145); new event rows and a 'top' field cannot break it. Larger tick rows add scan cost (stride/DEADLINE at history.py:96-110).",
+      "seeds": [
+        "c8"
+      ]
+    },
+    {
+      "id": "s9",
+      "surface": "fleet view (fleet_reader.py, transport.py, mesh.py)",
+      "finding": "nothing ships data off-box today: the fleet view is pull-only (SSH curl of /state, LocalTransport loopback urlopen at transport.py:298-307); no S3-capable client exists to reuse.",
+      "seeds": [
+        "c9"
+      ]
+    },
+    {
+      "id": "s10",
+      "surface": "pyproject.toml dependencies",
+      "finding": "dependencies = [] (pyproject.toml:16) and CLAUDE.md keeps the runtime dependency-free, so S3 needs a hand-written SigV4 signer, not boto3.",
+      "seeds": [
+        "c9"
+      ]
+    },
+    {
+      "id": "s11",
+      "surface": "~/.aws on the EliteMini (names only)",
+      "finding": "no aws CLI; ~/.aws/credentials holds one profile and ~/.aws/config names [profile league-evals]; no bucket is configured anywhere yet.",
+      "seeds": [
+        "c10"
+      ]
+    },
+    {
+      "id": "s12",
+      "surface": "heat_governor/config.py",
+      "finding": "TOP_KEYS = {platform, profile, daemon, containers, units, pair} (config.py:126) and validation is strict, so unknown sections are rejected; DAEMON_KEYS/_validate_daemon (config.py:96-108, 340-353) is the validator pattern.",
+      "seeds": [
+        "c11"
+      ]
+    },
+    {
+      "id": "s13",
+      "surface": "heat_governor/cli (+ explain/catalog.py, learn.py, overview.py)",
+      "finding": "nouns register in _build_parser (cli/__init__.py:64-98, mesh at 97); every noun needs an overview verb (mesh.py:300-345); _VERBS in overview.py:27-35; learn _TEXT and commands list (learn.py:42-45, 80-103); catalog ENTRIES (catalog.py:387-425) checked by test_every_catalog_path_resolves (tests/test_cli.py:111-115).",
+      "seeds": [
+        "c12"
+      ]
+    },
+    {
+      "id": "s14",
+      "surface": "heat_governor/recorder.py report()",
+      "finding": "_reboot_entry (recorder.py:78-93) carries only temperature, level, duty, cpus, gpu and zones; the 2026-11-14 reset reported 'max 20.0 C in the last 60 s; last level cool'. cmd_report (governing.py:429-445) prints a fixed format.",
+      "seeds": [
+        "c13"
+      ]
+    },
+    {
+      "id": "s15",
+      "surface": "heat_governor/cli/_commands/governing.py unit verb",
+      "finding": "_UNIT (governing.py:508-520) has no Memory*, OOMScoreAdjust or OOMPolicy; a user unit cannot set a negative OOMScoreAdjust, but MemoryMin= works (memory controller delegated to `user@1000.service` here) and RLIMIT_MEMLOCK here is ~5.6 GB, so mlockall of a ~50 MB process is possible.",
+      "seeds": [
+        "c14"
+      ]
+    },
+    {
+      "id": "s16",
+      "surface": "docs/contracts/state.md + client.py",
+      "finding": "admit is defined purely by thermal level (state.md:29); reason is the temperature trend (state.md:45); client rule 4 (state.md:97-98) says unknown fields are ignored, so an optional mem_guard field needs no schema bump.",
+      "seeds": [
+        "c15"
+      ]
+    },
+    {
+      "id": "s17",
+      "surface": "docs/contracts/state.md admit semantics",
+      "finding": "conflating memory with the thermal level would change what every client's Gate means; kept out.",
+      "seeds": [
+        "c16"
+      ]
+    },
+    {
+      "id": "s18",
+      "surface": "OOM process tables 2026-11-14",
+      "finding": "the victims were uid 1000; container processes in the same table ran as uid 10001 and root, which a user daemon cannot signal.",
+      "seeds": [
+        "c17"
+      ]
+    },
+    {
+      "id": "s19",
+      "surface": "scripts/scan-secrets.py",
+      "finding": "the scanner flags AKIA keys (L52) and *access_key/secret_key = <20+ chars> (L68-79), with no inline allowlist; test fixtures must build fake keys at runtime.",
+      "seeds": [
+        "c18"
+      ]
+    },
+    {
+      "id": "s20",
+      "surface": "CI (.github/workflows/tests.yml, sonar-gate.py)",
+      "finding": "sonar-gate fails on any unresolved issue or TO_REVIEW hotspot (sonar-gate.py:81-95); precedent is inline '# NOSONAR python:S5332 -- loopback' (transport.py:299); bandit does not skip B310 (pyproject.toml:70-72); version-check blocks unbumped PRs.",
+      "seeds": [
+        "c19"
+      ]
+    },
+    {
+      "id": "s21",
+      "surface": "systemd-oomd / user-1000.slice (live box)",
+      "finding": "oomctl watches only `user@1000.service`; `session-*.scope` and `user-1000.slice` have MemoryMax=infinity; no /dev/watchdog, kernel.panic=0. The memcg-capped re-runs since the reboot show per-command MemoryMax already contains the test.",
+      "seeds": [
+        "c20"
+      ]
+    },
+    {
+      "id": "s22",
+      "surface": "web/index.html + mcp_server.py",
+      "finding": "dashboard shows Memory used_pct (index.html:539, 576, 666-674); mcp tools mesh_status/machine_state/sense carry the same memory object (mcp_server.py:32-65); no surface shows events today.",
+      "seeds": [
+        "c21"
+      ]
+    },
+    {
+      "id": "s23",
+      "surface": "spark (ssh, read-only 2026-11-14)",
+      "finding": "no S3-compatible server running (no minio/garage/seaweed containers or listeners on 9000/3900/8333/7480); 520 GB free on /; memory 121 GB total with only 11 GB available at idle-serving, so low MemAvailable is normal there (supports v3: record-only default off the EliteMini).",
+      "seeds": [
+        "c28",
+        "c5"
+      ]
+    },
+    {
+      "id": "s24",
+      "surface": "challenge pass / depth",
+      "finding": "rigorous: c19 escalation signals present: destructive operation (SIGKILL), security-sensitive (credentials, cmdlines shipped off-box), concurrency (guard thread + shipper thread + tick), live hardware (EliteMini kills, MinIO on spark).",
+      "seeds": []
+    },
+    {
+      "id": "s25",
+      "surface": "challenge pass / concurrency lens: kill path vs pid reuse",
+      "finding": "selection (scan /proc) and kill are separate moments; at 1.2 GB/s churn the victim may die first. Probe: requires-python >= 3.12 (pyproject.toml), installed 3.13.15 has os.pidfd_open + signal.pidfd_send_signal.",
+      "seeds": [
+        "c30"
+      ]
+    },
+    {
+      "id": "s26",
+      "surface": "challenge pass / unstated-assumptions lens: RSS as the size measure",
+      "finding": "statm/RSS counts file-backed pages; probe: mongod here has RssAnon 136 MB vs RssFile 93 MB; the 2026-11-14 victim was anon-rss 41 GB (kernel OOM line). Anonymous memory is what exhausts MemAvailable.",
+      "seeds": [
+        "c31"
+      ]
+    },
+    {
+      "id": "s27",
+      "surface": "challenge pass / failure-modes lens: relaunching caller",
+      "finding": "2026-11-14: the same test was relaunched 5 times in 17 min (records waves at 19:34, 19:36, 19:45, 19:49, 19:51); killing each relaunch alone leaves a loop nobody sees.",
+      "seeds": [
+        "c32"
+      ]
+    },
+    {
+      "id": "s28",
+      "surface": "challenge pass / containment lens: wrong thresholds on the wrong box",
+      "finding": "spark probe: 121 GB total, 11 GB available at idle serving (~9%); a floor tuned on the EliteMini would fire constantly there. action=kill is opt-in, but a bad value still needs a bound.",
+      "seeds": [
+        "c33"
+      ]
+    },
+    {
+      "id": "s29",
+      "surface": "challenge pass / failure-modes lens: multi-process growers",
+      "finding": "the 2026-11-14 grower was one process (41 GB), but node --test, pytest -n auto and vitest fan out to workers; with min_victim_mib = 2048, N workers under 2 GB each sum past MemTotal with no eligible victim. Needs a user decision (question).",
+      "seeds": []
+    },
+    {
+      "id": "s30",
+      "surface": "challenge pass / security lens: MinIO on spark over HTTP",
+      "finding": "MinIO's default listener is plain HTTP on 9000; the precedent for allowed plain HTTP is loopback/LAN with NOSONAR (transport.py:299, pair.py:63).",
+      "seeds": [
+        "c34"
+      ]
+    },
+    {
+      "id": "s31",
+      "surface": "challenge pass / security lens: object key naming",
+      "finding": "probe: hostname = ori-EliteMini-Series; fleet.toml names this machine 'elitemini'.",
+      "seeds": [
+        "c35"
+      ]
+    },
+    {
+      "id": "s32",
+      "surface": "challenge pass / operations lens: boot-time uploads",
+      "finding": "the postmortem is uploaded at start after an unclean boot, which is exactly when the clock may be unsynced (systemd-timesyncd starts at 20:07:20, same second as the daemon's dependencies); SigV4 rejects requests skewed > 15 min.",
+      "seeds": [
+        "c36"
+      ]
+    },
+    {
+      "id": "s33",
+      "surface": "challenge pass / observability lens: who learns of a kill",
+      "finding": "mem_guard in /state is read by the fleet reader only through its THERMAL_FIELDS allow-list (fleet_reader.py:78-98), so it would not appear on the dashboard without fleet-view work, which c21 excludes.",
+      "seeds": []
+    },
+    {
+      "id": "s34",
+      "surface": "challenge pass / lifecycle lens: object growth",
+      "finding": "event objects are KB-sized; blackbox.jsonl.gz is overwritten per machine and boot (10 min of ~1 KB rows at 1 Hz, ~0.6 MB raw); daily record files are 74 MB raw and are not shipped by this change.",
+      "seeds": []
+    },
+    {
+      "id": "s35",
+      "surface": "challenge pass / adjacent-systems lens: credential store",
+      "finding": "probe: ~/.aws/credentials is mode 600 with one profile; adding a named profile keeps MinIO keys out of the governor config and the repo.",
+      "seeds": []
+    },
+    {
+      "id": "s36",
+      "surface": "challenge pass / migration/reversibility lens: config and records",
+      "finding": "clean pass: [memory]/[ship] are new optional sections (absent = today's behaviour); new record rows are additive and ignored by history.py:118; turning action back to 'record' or removing the section reverts with no state to undo. Residual: a kill itself is irreversible by nature, bounded by c4/budget.",
+      "seeds": []
+    },
+    {
+      "id": "s37",
+      "surface": "challenge pass / concurrency lens: recorder writes from three threads",
+      "finding": "the Recorder (recorder.py:37-66) is not thread-safe today (one file handle, write+flush+fsync); guard and shipper must hand rows to one writer (queue or lock). Folded into the plan as an implementation constraint, not a spec change.",
+      "seeds": []
+    }
+  ],
+  "lapses": [],
+  "obligations": [
+    {
+      "id": "o1",
+      "claim_id": "c15",
+      "seam": "state doc (GET /state, state file)",
+      "behavior": "mem_guard is optional and additive; level, admit and concurrency_factor are byte-identical with or without it; clients that ignore unknown fields see no change.",
+      "source_text": "The state doc gains an optional mem_guard object (action, armed, last_kill {t, pid, comm, rss_mib}); level, admit and concurrency_factor stay thermal-only.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o2",
+      "claim_id": "c8",
+      "seam": "records JSONL",
+      "behavior": "every new row type carries an 'event' key; tick rows gain only an optional 'top' list; history.py and report() parse all existing and new rows without error.",
+      "source_text": "New record rows carry an 'event' key (memory_kill, memory_would_kill, oom_kill) and tick rows gain only an optional 'top' field, so the fleet view's history reader ignores them unchanged.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o3",
+      "claim_id": "c9",
+      "seam": "S3 object layout",
+      "behavior": "keys are <prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json, <prefix>/<machine>/<boot_id>/blackbox.jsonl.gz and <prefix>/<machine>/<boot_id>/postmortem.json; ship fetch reads exactly this layout.",
+      "source_text": "Off-box shipping to S3 with a stdlib SigV4 signer (hmac, hashlib, urllib.request PUT; no boto3): on a kill or OOM event, PUT the event JSON immediately; every 60 s (every 10 s while available < 20%) PUT a rolling black box (last 10 min of records, gzipped) to `<prefix>/<host>/<boot_id>/blackbox.jsonl.gz`; on start after an unclean boot, PUT a postmortem. Runs in its own thread with a bounded queue; failures spool to disk and retry, never blocking the guard.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o4",
+      "claim_id": "c10",
+      "seam": "S3 API (AWS, R2, MinIO)",
+      "behavior": "path-style PUT/GET/ListObjectsV2 signed with SigV4 (UNSIGNED-PAYLOAD never used; x-amz-content-sha256 is the payload hash), region configurable incl. 'auto'; the same requests work against all three.",
+      "source_text": "Credentials and target from config: [ship] bucket, region, prefix, optional profile (read from ~/.aws/credentials and ~/.aws/config via configparser) or AWS_* environment variables, optional endpoint for S3-compatible stores. Secrets are never written to records, logs or uploads.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o5",
+      "claim_id": "c4",
+      "seam": "process kill",
+      "behavior": "only processes of the daemon's own uid, never protected or below min_victim_mib, pinned by pidfd, SIGKILL only, within the kill budget; every kill and would-kill writes its event before the next poll.",
+      "source_text": "Victim: the own-uid process whose RSS grew most over the last ~10 s, with RSS >= min_victim_mib (default 2048), skipping a protect list (the governor and its parent chain, pid 1, systemd, sshd, gnome-shell, Xwayland, tailscaled, dockerd, containerd and any [memory] protect entries). Sent SIGKILL (no grace: at 1.2 GB/s a SIGTERM grace period costs GBs). os.kill and proc_root are injected for tests.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o6",
+      "claim_id": "c11",
+      "seam": "config [memory] / [ship]",
+      "behavior": "unknown keys and out-of-range values are rejected by config check and by a live reload (the running config stays in force), like every other section.",
+      "source_text": "Config: new strict [memory] (action = record|kill, floor_pct, horizon_s, window_s, min_victim_mib, protect, poll_s, top_n) and [ship] sections, added to TOP_KEYS with validators and documented in config template and explain config; live-reloadable like the rest.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o7",
+      "claim_id": "c12",
+      "seam": "CLI memory / ship",
+      "behavior": "every verb takes --json, writes results to stdout and errors to stderr, exits 0/1/2 per _errors.py, and has an explain entry.",
+      "source_text": "CLI: noun 'memory' (overview, status, top) and noun 'ship' (overview, test, fetch), each a module with register(sub) wired in _build_parser, listed in overview _VERBS, learn text and JSON, and explain catalog ENTRIES; tests copy tests/test_cli_mesh.py:266-301.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o8",
+      "claim_id": "c18",
+      "seam": "uploaded evidence",
+      "behavior": "no object contains environment variables, credentials, or cmdline values following token/key/secret/password-style flags; cmdlines are truncated to 512 chars.",
+      "source_text": "Uploaded evidence must not leak secrets: cmdlines are truncated and redacted (token/key/secret/password-style arguments), environment variables are never captured, and the credentials never leave the signer.",
+      "origin": "llm",
+      "status": "approved"
+    }
+  ]
+}
