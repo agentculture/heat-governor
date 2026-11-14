@@ -42,7 +42,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -95,11 +95,19 @@ def resolve_credentials(
     ak, sk = env.get("AWS_ACCESS_KEY_ID"), env.get("AWS_SECRET_ACCESS_KEY")
     if ak and sk:
         return Credentials(ak, sk, env.get("AWS_SESSION_TOKEN") or None, "env")
+    return _profile_credentials(_credentials_path(env, home), profile or DEFAULT_PROFILE, log)
+
+
+def _credentials_path(env, home: Path | str | None) -> Path:
+    """``AWS_SHARED_CREDENTIALS_FILE``, else ``<home>/.aws/credentials``."""
     if env.get("AWS_SHARED_CREDENTIALS_FILE"):
-        path = Path(env["AWS_SHARED_CREDENTIALS_FILE"])
-    else:
-        base = Path(home) if home is not None else Path(env.get("HOME") or Path.home())
-        path = base / ".aws" / "credentials"
+        return Path(env["AWS_SHARED_CREDENTIALS_FILE"])
+    base = Path(home) if home is not None else Path(env.get("HOME") or Path.home())
+    return base / ".aws" / "credentials"
+
+
+def _profile_credentials(path: Path, name: str, log: Log) -> Credentials | None:
+    """Profile ``name`` of the shared credentials file at ``path``, or None."""
     try:
         mode = path.stat().st_mode
     except OSError:
@@ -112,7 +120,6 @@ def resolve_credentials(
     except (OSError, configparser.Error):
         log(f"ship: cannot parse {path}")
         return None
-    name = profile or DEFAULT_PROFILE
     if not parser.has_section(name):
         log(f"ship: no [{name}] profile in {path}")
         return None
@@ -197,11 +204,32 @@ class S3Client:
     def _request(
         self, method: str, url: str, body: bytes = b"", headers: dict | None = None
     ) -> bytes:
+        signed = self._sign(method, url, body, headers)
+        # the scheme is http(s) only: endpoint_problem() was checked in __init__
+        req = urllib.request.Request(  # nosec B310
+            url, data=body if method == "PUT" else None, headers=signed, method=method
+        )
+        try:
+            with self._opener.open(req, timeout=self.timeout) as resp:  # nosec B310
+                return resp.read()
+        except urllib.error.HTTPError as err:
+            raise self._http_error(err) from None
+        except (socket.timeout, TimeoutError):
+            raise ShipError(None, "Timeout", f"no answer in {self.timeout:g} s") from None
+        except urllib.error.URLError as err:
+            if isinstance(err.reason, (socket.timeout, TimeoutError)):
+                raise ShipError(None, "Timeout", f"no answer in {self.timeout:g} s") from None
+            raise ShipError(None, "Connection", type(err.reason).__name__) from None
+        except (OSError, ValueError) as err:
+            raise ShipError(None, "Connection", type(err).__name__) from None
+
+    def _sign(self, method: str, url: str, body: bytes, headers: dict | None) -> dict:
+        """The SigV4-signed headers (plus the session token, when there is one)."""
         hdrs = dict(headers or {})
         if self._creds.session_token:
             hdrs["x-amz-security-token"] = self._creds.session_token
         try:
-            signed = sigv4.sign(
+            return sigv4.sign(
                 method,
                 url,
                 hdrs,
@@ -213,31 +241,18 @@ class S3Client:
             )
         except sigv4.SigV4Error as err:
             raise ShipError(None, "InvalidRequest", str(err)) from None
-        # the scheme is http(s) only: endpoint_problem() was checked in __init__
-        req = urllib.request.Request(  # nosec B310
-            url, data=body if method == "PUT" else None, headers=signed, method=method
-        )
+
+    def _http_error(self, err: urllib.error.HTTPError) -> ShipError:
+        """The ShipError for an HTTP error answer; learns the clock skew on the way."""
         try:
-            with self._opener.open(req, timeout=self.timeout) as resp:  # nosec B310
-                return resp.read()
-        except urllib.error.HTTPError as err:
-            try:
-                text = err.read(4096).decode("utf-8", "replace")
-            except Exception:  # pylint: disable=broad-except
-                text = ""
-            m = _CODE_RE.search(text)
-            code = m.group(1) if m else f"HTTP{err.code}"
-            if code == "RequestTimeTooSkewed":
-                self._learn_skew(err.headers.get("Date") if err.headers else None)
-            raise ShipError(err.code, code) from None
-        except (socket.timeout, TimeoutError):
-            raise ShipError(None, "Timeout", f"no answer in {self.timeout:g} s") from None
-        except urllib.error.URLError as err:
-            if isinstance(err.reason, (socket.timeout, TimeoutError)):
-                raise ShipError(None, "Timeout", f"no answer in {self.timeout:g} s") from None
-            raise ShipError(None, "Connection", type(err.reason).__name__) from None
-        except (OSError, ValueError) as err:
-            raise ShipError(None, "Connection", type(err).__name__) from None
+            text = err.read(4096).decode("utf-8", "replace")
+        except Exception:  # pylint: disable=broad-except
+            text = ""
+        m = _CODE_RE.search(text)
+        code = m.group(1) if m else f"HTTP{err.code}"
+        if code == "RequestTimeTooSkewed":
+            self._learn_skew(err.headers.get("Date") if err.headers else None)
+        return ShipError(err.code, code)
 
     def _learn_skew(self, date_header: str | None) -> None:
         if not date_header:
@@ -348,6 +363,26 @@ def read_spool(path: Path) -> tuple[str, str, bytes] | None:
 # --- shipper -----------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ShipperTuning:
+    """The shipper's cadence, backoff, queue and spool knobs, and its clocks.
+
+    ``log_clock`` (default: ``mono``) times the once-an-hour config-error log line."""
+
+    blackbox_every_s: float = 60.0
+    blackbox_minutes: float = 10.0
+    blackbox_low_memory_s: float = 10.0
+    queue_size: int = 256
+    backoff_initial_s: float = 1.0
+    backoff_max_s: float = 300.0
+    config_retry_s: float = 300.0
+    boot_window_s: float = 600.0
+    max_spool_files: int = 5000
+    wall: Callable[[], float] = time.time
+    mono: Callable[[], float] = time.monotonic
+    log_clock: Callable[[], float] | None = None
+
+
 class Shipper:
     def __init__(
         self,
@@ -359,43 +394,34 @@ class Shipper:
         prefix: str = "fleet",
         log: Log | None = None,
         records_dir: Path | str | None = None,
-        blackbox_every_s: float = 60.0,
-        blackbox_minutes: float = 10.0,
-        blackbox_low_memory_s: float = 10.0,
         low_memory: Callable[[], bool] | None = None,
-        queue_size: int = 256,
-        backoff_initial_s: float = 1.0,
-        backoff_max_s: float = 300.0,
-        config_retry_s: float = 300.0,
-        boot_window_s: float = 600.0,
-        max_spool_files: int = 5000,
-        wall: Callable[[], float] = time.time,
-        mono: Callable[[], float] = time.monotonic,
-        log_clock: Callable[[], float] | None = None,
+        tuning: ShipperTuning | None = None,
     ) -> None:
         if not machine or not str(machine).strip():
             raise ValueError("ship needs a machine name (config machine or the fleet name)")
+        tune = tuning or ShipperTuning()
+        self.tuning = tune
         self.client = client
         self.machine = str(machine).strip()
         self.boot_id = boot_id
         self.prefix = prefix
         self.spool_dir = Path(spool_dir)
         self.records_dir = Path(records_dir) if records_dir is not None else None
-        self.blackbox_every_s = blackbox_every_s
-        self.blackbox_minutes = blackbox_minutes
-        self.blackbox_low_memory_s = blackbox_low_memory_s
+        self.blackbox_every_s = tune.blackbox_every_s
+        self.blackbox_minutes = tune.blackbox_minutes
+        self.blackbox_low_memory_s = tune.blackbox_low_memory_s
         self.low_memory = low_memory or (lambda: False)
-        self.backoff_initial_s = backoff_initial_s
-        self.backoff_max_s = backoff_max_s
-        self.config_retry_s = config_retry_s
-        self.boot_window_s = boot_window_s
-        self.max_spool_files = max_spool_files
+        self.backoff_initial_s = tune.backoff_initial_s
+        self.backoff_max_s = tune.backoff_max_s
+        self.config_retry_s = tune.config_retry_s
+        self.boot_window_s = tune.boot_window_s
+        self.max_spool_files = tune.max_spool_files
         self._log = log or _quiet
-        self._wall = wall
-        self._mono = mono
-        self._log_clock = log_clock or mono
-        self._started_at = mono()
-        self._queue: queue.Queue = queue.Queue(maxsize=max(1, queue_size))
+        self._wall = tune.wall
+        self._mono = tune.mono
+        self._log_clock = tune.log_clock or tune.mono
+        self._started_at = tune.mono()
+        self._queue: queue.Queue = queue.Queue(maxsize=max(1, tune.queue_size))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._key_lock = threading.Lock()
@@ -425,7 +451,8 @@ class Shipper:
         **kw,
     ) -> "Shipper":
         """Build from a :class:`~heat_governor.config.ShipRule`. ``spool_dir`` is the
-        default used when the rule leaves ``spool_dir`` unset. Raises ValueError when
+        default used when the rule leaves ``spool_dir`` unset. The rule's black-box
+        cadence overrides those of a ``tuning`` passed in ``kw``. Raises ValueError when
         the endpoint, bucket or credentials are missing or refused."""
         if not rule.endpoint or not rule.bucket:
             raise ValueError("ship.endpoint and ship.bucket are required")
@@ -433,6 +460,11 @@ class Shipper:
         if creds is None:
             raise ValueError("no ship credentials (AWS_* env vars or the credentials profile)")
         client = S3Client(rule.endpoint, rule.region, rule.bucket, creds, timeout=timeout)
+        tuning = replace(
+            kw.pop("tuning", None) or ShipperTuning(),
+            blackbox_every_s=rule.blackbox_every_s,
+            blackbox_minutes=rule.blackbox_minutes,
+        )
         return cls(
             client,
             machine=rule.machine or default_machine,
@@ -441,8 +473,7 @@ class Shipper:
             prefix=rule.prefix,
             log=log,
             records_dir=records_dir,
-            blackbox_every_s=rule.blackbox_every_s,
-            blackbox_minutes=rule.blackbox_minutes,
+            tuning=tuning,
             **kw,
         )
 
@@ -518,25 +549,10 @@ class Shipper:
         self._next_blackbox = self._mono()  # first black box right away
         while not self._stop.is_set():
             now = self._mono()
-            if self.records_dir is not None:
-                due = self._next_blackbox
-                if now >= due:
-                    self._spool_blackbox()
-                    self._next_blackbox = now + self._blackbox_interval()
-            if now >= self._retry_at:
-                try:
-                    self.drain()
-                except Exception as err:  # pylint: disable=broad-except
-                    # never let the worker die; the type only (no message: no secrets)
-                    self._log(f"ship: unexpected {type(err).__name__} while uploading")
-                    self._retry_at = self._mono() + self.config_retry_s
-            wait = 3600.0
-            if self.records_dir is not None:
-                wait = min(wait, max(0.0, self._next_blackbox - self._mono()))
-            if self._retry_at > self._mono() and self.pending():
-                wait = min(wait, self._retry_at - self._mono())
+            self._blackbox_if_due(now)
+            self._drain_if_due(now)
             try:
-                item = self._queue.get(timeout=max(0.01, wait))
+                item = self._queue.get(timeout=max(0.01, self._wait_s()))
             except queue.Empty:
                 continue
             if item is None:
@@ -545,6 +561,31 @@ class Shipper:
                 self._next_blackbox = min(
                     self._next_blackbox, self._mono() + self._blackbox_interval()
                 )
+
+    def _blackbox_if_due(self, now: float) -> None:
+        if self.records_dir is not None:
+            due = self._next_blackbox
+            if now >= due:
+                self._spool_blackbox()
+                self._next_blackbox = now + self._blackbox_interval()
+
+    def _drain_if_due(self, now: float) -> None:
+        if now >= self._retry_at:
+            try:
+                self.drain()
+            except Exception as err:  # pylint: disable=broad-except
+                # never let the worker die; the type only (no message: no secrets)
+                self._log(f"ship: unexpected {type(err).__name__} while uploading")
+                self._retry_at = self._mono() + self.config_retry_s
+
+    def _wait_s(self) -> float:
+        """How long the worker may sleep: until the next black box or the next retry."""
+        wait = 3600.0
+        if self.records_dir is not None:
+            wait = min(wait, max(0.0, self._next_blackbox - self._mono()))
+        if self._retry_at > self._mono() and self.pending():
+            wait = min(wait, self._retry_at - self._mono())
+        return wait
 
     def blackbox_body(self) -> bytes:
         rows = recorder.tail(self.records_dir, self.blackbox_minutes, clock=self._wall)
@@ -594,42 +635,59 @@ class Shipper:
     def drain(self) -> int:
         """Upload what is held in memory and spooled, oldest first; stop at the first
         failure (backing off). Returns how many objects were uploaded."""
-        done = 0
-        with self._mem_lock:
-            held = list(self._memory)
-        for item in held:
-            if not self._upload(*item):
-                return done
-            with self._mem_lock:
-                if item in self._memory:
-                    self._memory.remove(item)
-            done += 1
+        done, ok = self._drain_memory()
+        if not ok:
+            return done
         for path in self._trim_spool(self._spool_paths()):
             if self._stop.is_set():
                 break
-            try:
-                before = path.stat()
-            except OSError:
-                continue  # already uploaded
-            parsed = read_spool(path)
-            if parsed is None:
-                self._log(f"ship: dropping unreadable spool file {path.name}")
-                self._unlink(path)
+            sent = self._drain_spooled(path)
+            if sent is None:
                 continue
-            if not self._upload(*parsed):
+            if not sent:
                 return done
-            try:
-                after = path.stat()
-                if (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns):
-                    path.unlink()  # unchanged since read: a newer version would have a new inode
-            except OSError:
-                pass
             done += 1
         if done and self._failing:
             self._log(f"ship: uploads recovered ({done} sent)")
         if done:
             self._failing = False
         return done
+
+    def _drain_memory(self) -> tuple[int, bool]:
+        """Upload the objects held in memory: (how many sent, whether all of them were)."""
+        done = 0
+        with self._mem_lock:
+            held = list(self._memory)
+        for item in held:
+            if not self._upload(*item):
+                return done, False
+            with self._mem_lock:
+                if item in self._memory:
+                    self._memory.remove(item)
+            done += 1
+        return done, True
+
+    def _drain_spooled(self, path: Path) -> bool | None:
+        """Upload one spool file: True sent, False failed (stop draining), None skipped
+        (already gone, or unreadable and dropped)."""
+        try:
+            before = path.stat()
+        except OSError:
+            return None  # already uploaded
+        parsed = read_spool(path)
+        if parsed is None:
+            self._log(f"ship: dropping unreadable spool file {path.name}")
+            self._unlink(path)
+            return None
+        if not self._upload(*parsed):
+            return False
+        try:
+            after = path.stat()
+            if (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns):
+                path.unlink()  # unchanged since read: a newer version would have a new inode
+        except OSError:
+            pass
+        return True
 
     @staticmethod
     def _unlink(path: Path) -> None:

@@ -155,7 +155,9 @@ SHIP_KEYS = {
 }
 # S3 bucket naming: 3-63 chars of lowercase letters, digits, hyphens, dots; alnum at both ends
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]")
-CGNAT = ipaddress.ip_network("100.64.0.0/10")  # Tailscale / carrier-grade NAT range
+# Tailscale / carrier-grade NAT range: the RFC 6598 shared address space the tailnet uses
+CGNAT = ipaddress.ip_network("100.64.0.0/10")  # NOSONAR python:S1313 -- RFC 6598 policy constant
+_SECONDS = " seconds"  # the unit suffix of range-check messages
 TOP_KEYS = {"platform", "profile", "daemon", "containers", "units", "pair", "memory", "ship"}
 
 
@@ -489,10 +491,10 @@ def _validate_memory(mem: dict, problems: list[str]) -> None:
     ranges = (
         ("floor_pct", 1, 50, "%"),
         ("soft_pct", 1, 100, "%"),
-        ("horizon_s", 1, 120, " seconds"),
-        ("window_s", 2, 120, " seconds"),
-        ("poll_s", 0.1, 2, " seconds"),
-        ("top_every_s", 1, 3600, " seconds"),
+        ("horizon_s", 1, 120, _SECONDS),
+        ("window_s", 2, 120, _SECONDS),
+        ("poll_s", 0.1, 2, _SECONDS),
+        ("top_every_s", 1, 3600, _SECONDS),
         ("max_kills_per_hour", 0, 60, ""),
         ("top_n", 1, 100, ""),
     )
@@ -547,7 +549,7 @@ def _validate_ship(ship: dict, problems: list[str]) -> None:
     for key in ("region", "machine", "spool_dir", "profile"):
         if key in ok and not ship[key].strip():
             problems.append(f"ship.{key} must not be empty")
-    problems.extend(_in_range("ship", ship, ok, "blackbox_every_s", 5, 3600, " seconds"))
+    problems.extend(_in_range("ship", ship, ok, "blackbox_every_s", 5, 3600, _SECONDS))
     problems.extend(_in_range("ship", ship, ok, "blackbox_minutes", 1, 120, " minutes"))
     if "endpoint" in ok:
         why = endpoint_problem(ship["endpoint"])

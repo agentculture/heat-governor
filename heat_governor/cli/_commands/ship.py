@@ -25,6 +25,7 @@ from heat_governor.cli._output import emit_result
 
 _JSON_HELP = "Emit structured JSON."
 _EVENT_RE = re.compile(r"^(\d{8}T\d{6}\.\d{3}Z)(?:-\d+)?-(.+)\.json$")
+_EVENTS = "events/"  # a boot's event objects live under <root><boot>/events/
 _MAX_OBJECT = 64 * 1024 * 1024  # a sanity cap on what we decode for the summary
 
 
@@ -134,7 +135,7 @@ def _boots(keys: list[str], root: str) -> dict[str, str]:
         boot, _, tail = rest.partition("/")
         if not boot or boot == "_probe" or not tail:
             continue
-        m = _EVENT_RE.match(tail[len("events/") :]) if tail.startswith("events/") else None
+        m = _EVENT_RE.match(tail[len(_EVENTS) :]) if tail.startswith(_EVENTS) else None
         boots[boot] = max(boots.get(boot, ""), m.group(1) if m else "")
     return boots
 
@@ -158,11 +159,15 @@ def _parse(body: bytes) -> dict:
 def _event_row(name: str, doc: dict) -> dict:
     m = _EVENT_RE.match(name)
     t = doc.get("t")
+    if isinstance(t, (int, float)):
+        utc = _utc(t)
+    else:
+        utc = m.group(1) if m else None
     return {
         "file": name,
         "kind": doc.get("event") or (m.group(2) if m else name),
         "t": t,
-        "utc": _utc(t) if isinstance(t, (int, float)) else (m.group(1) if m else None),
+        "utc": utc,
         "pid": doc.get("pid"),
         "comm": doc.get("comm"),
     }
@@ -222,27 +227,11 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     except shipmod.ShipError as err:
         raise _env_error(err, "listing the bucket") from err
     boots = _boots(keys, root)
-    boot = args.boot or (_pick_boot(boots) if boots else None)
-    if boot is None or boot not in boots:
-        raise CliError(
-            EXIT_USER_ERROR,
-            f"nothing shipped for machine {args.machine!r}"
-            + (f" boot {boot!r}" if args.boot else "")
-            + f" under {root}",
-            "check the name and [ship] prefix; known boots: "
-            + (", ".join(sorted(boots)) or "none"),
-        )
+    boot = _resolve_boot(args, boots, root)
     base = shipmod.object_root(rule.prefix, args.machine, boot) + "/"
     out = Path(args.out) if args.out else Path("heat-governor-fetch") / args.machine / boot
     (out / "events").mkdir(parents=True, exist_ok=True)
-    events = []
-    for key in sorted(k for k in keys if k.startswith(base + "events/")):
-        name = _safe_name(key.rsplit("/", 1)[-1])
-        body = _get(client, key, "an event")
-        if body is None:
-            continue
-        (out / "events" / name).write_bytes(body)
-        events.append(_event_row(name, _parse(body)))
+    events = _fetch_events(client, keys, base, out)
     pm_body = _get(client, shipmod.postmortem_key(rule.prefix, args.machine, boot), "postmortem")
     bb_body = _get(client, shipmod.blackbox_key(rule.prefix, args.machine, boot), "black box")
     postmortem = None
@@ -265,7 +254,42 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     if _json(args):
         emit_result(doc, json_mode=True)
         return 0
-    lines = [f"machine {args.machine}, boot {boot} -> {out}"]
+    emit_result(_fetch_text(doc), json_mode=False)
+    return 0
+
+
+def _resolve_boot(args: argparse.Namespace, boots: dict[str, str], root: str) -> str:
+    """The boot to fetch: ``--boot``, else the newest; a user error when it has nothing."""
+    boot = args.boot or (_pick_boot(boots) if boots else None)
+    if boot is None or boot not in boots:
+        raise CliError(
+            EXIT_USER_ERROR,
+            f"nothing shipped for machine {args.machine!r}"
+            + (f" boot {boot!r}" if args.boot else "")
+            + f" under {root}",
+            "check the name and [ship] prefix; known boots: "
+            + (", ".join(sorted(boots)) or "none"),
+        )
+    return boot
+
+
+def _fetch_events(client, keys: list[str], base: str, out: Path) -> list[dict]:
+    """Download the boot's event objects into ``out/events``; one summary row each."""
+    events = []
+    for key in sorted(k for k in keys if k.startswith(base + _EVENTS)):
+        name = _safe_name(key.rsplit("/", 1)[-1])
+        body = _get(client, key, "an event")
+        if body is None:
+            continue
+        (out / "events" / name).write_bytes(body)
+        events.append(_event_row(name, _parse(body)))
+    return events
+
+
+def _fetch_text(doc: dict) -> str:
+    """The human-readable summary of a fetch (``doc`` is the ``--json`` result)."""
+    events, postmortem, blackbox = doc["events"], doc["postmortem"], doc["blackbox"]
+    lines = [f"machine {doc['machine']}, boot {doc['boot']} -> {doc['out']}"]
     lines.append(f"events: {len(events)}")
     for e in events:
         who = f" pid {e['pid']} {e['comm']}" if e["pid"] is not None else ""
@@ -277,8 +301,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         lines.append("black box: none")
     else:
         lines.append(f"black box: {blackbox['rows']} rows, {blackbox['from']} to {blackbox['to']}")
-    emit_result("\n".join(lines), json_mode=False)
-    return 0
+    return "\n".join(lines)
 
 
 # -- overview -----------------------------------------------------------------------

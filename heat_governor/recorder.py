@@ -81,20 +81,26 @@ def tail(
     days = {datetime.fromtimestamp(x, timezone.utc).strftime("%Y%m%d") for x in (since, now)}
     out: list[dict] = []
     for day in sorted(days):
-        path = directory / f"{day}.jsonl"
-        try:
-            fh = open(path, encoding="utf-8")
-        except OSError:
-            continue
-        with fh:
-            for line in fh:
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                t = rec.get("t") if isinstance(rec, dict) else None
-                if isinstance(t, (int, float)) and since <= t <= now:
-                    out.append(rec)
+        out.extend(_rows_between(directory / f"{day}.jsonl", since, now))
+    return out
+
+
+def _rows_between(path: Path, since: float, now: float) -> list[dict]:
+    """The rows of one day file with ``since <= t <= now``; none if it cannot be opened."""
+    out: list[dict] = []
+    try:
+        fh = open(path, encoding="utf-8")
+    except OSError:
+        return out
+    with fh:
+        for line in fh:
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            t = rec.get("t") if isinstance(rec, dict) else None
+            if isinstance(t, (int, float)) and since <= t <= now:
+                out.append(rec)
     return out
 
 
@@ -178,14 +184,17 @@ def report(directory: Path, *, window_s: float = 60.0) -> list[dict]:
                 out.append(_reboot_entry(boot, new, rec, tail, window_s, events))
             boot, tail, events = new, [], []
         elif rec.get("event") in MEMORY_EVENTS and _num(rec.get("t")) is not None:
-            events.append(rec)
-            if len(events) > 500:
-                del events[:250]
+            _append_capped(events, rec, cap=500, drop=250)
         elif "temp_c" in rec and "t" in rec:
-            tail.append(rec)
-            if len(tail) > 4000:
-                del tail[:2000]
+            _append_capped(tail, rec, cap=4000, drop=2000)
     return out
+
+
+def _append_capped(rows: list[dict], rec: dict, *, cap: int, drop: int) -> None:
+    """Append ``rec``; past ``cap`` rows, drop the oldest ``drop``."""
+    rows.append(rec)
+    if len(rows) > cap:
+        del rows[:drop]
 
 
 def _utc(t: float) -> str:

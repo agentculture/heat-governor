@@ -127,12 +127,8 @@ def _csv_rows(path: Path) -> tuple[list[tuple[float, float]], float | None]:
         for line in fh:
             line = line.strip()
             if line.startswith("#"):
-                if "MemTotal_mib=" in line and total is None:
-                    frag = line.split("MemTotal_mib=", 1)[1].split()[0]
-                    try:
-                        total = float(frag)
-                    except ValueError:
-                        pass
+                if total is None:
+                    total = _header_total(line)
                 continue
             if not line or line.startswith("t,"):
                 continue
@@ -142,6 +138,17 @@ def _csv_rows(path: Path) -> tuple[list[tuple[float, float]], float | None]:
             except ValueError:
                 continue
     return rows, total
+
+
+def _header_total(line: str) -> float | None:
+    """The ``MemTotal_mib=`` value of a ``#`` header line, or None."""
+    if "MemTotal_mib=" not in line:
+        return None
+    frag = line.split("MemTotal_mib=", 1)[1].split()[0]
+    try:
+        return float(frag)
+    except ValueError:
+        return None
 
 
 def _jsonl_rows(path: Path) -> Iterator[tuple[float, float]]:
@@ -161,7 +168,7 @@ def _is_csv(path: Path) -> bool:
         return True
     with open(path, encoding="utf-8", errors="replace") as fh:
         first = fh.readline()
-    return first.startswith("#") or first.startswith("t,")
+    return first.startswith(("#", "t,"))
 
 
 def _fire_row(f: memtrigger.Fire) -> dict:

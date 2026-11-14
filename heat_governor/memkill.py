@@ -33,6 +33,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from heat_governor import memprocs
 from heat_governor.memprocs import Proc
@@ -85,12 +86,12 @@ class Choice:
 class MemKiller:
     rule: object  # config.MemoryRule
     proc_root: Path = Path("/proc")
-    clock: object = time.time
+    clock: Callable[[], float] = time.time
     uid: int | None = None
     self_pid: int | None = None
-    pidfd_open: object = _default_pidfd_open
-    pidfd_send_signal: object = _default_send
-    close: object = os.close
+    pidfd_open: Callable[[int, int], int] = _default_pidfd_open
+    pidfd_send_signal: Callable[..., None] = _default_send
+    close: Callable[[int], None] = os.close
     _kills: deque = field(default_factory=deque, init=False, repr=False)
     _repeats: dict = field(default_factory=dict, init=False, repr=False)
 

@@ -9,6 +9,7 @@ import re
 import socket
 import stat
 import time
+from dataclasses import fields
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -66,11 +67,15 @@ def wait_for(pred, timeout=4.0):
     return pred()
 
 
+TUNING_FIELDS = {f.name for f in fields(ship.ShipperTuning)}
+
+
 def make_shipper(fake_or_client, tmp_path, log=None, **kw):
     c = fake_or_client if isinstance(fake_or_client, ship.S3Client) else client(fake_or_client)
     kw.setdefault("backoff_initial_s", 0.05)
     kw.setdefault("backoff_max_s", 0.2)
     kw.setdefault("config_retry_s", 0.2)
+    tuning = {k: kw.pop(k) for k in TUNING_FIELDS & set(kw)}
     return ship.Shipper(
         c,
         machine=MACHINE,
@@ -78,6 +83,7 @@ def make_shipper(fake_or_client, tmp_path, log=None, **kw):
         spool_dir=tmp_path / "spool",
         prefix="fleet",
         log=log or Log(),
+        tuning=ship.ShipperTuning(**tuning),
         **kw,
     )
 
@@ -190,8 +196,9 @@ def test_client_get_missing_and_bad_secret(s3):
 
 
 def test_client_refuses_plain_http_to_open_internet():
+    cred = creds()
     with pytest.raises(ValueError):
-        ship.S3Client("http://203.0.113.9:9000", REGION, BUCKET, creds())
+        ship.S3Client("http://203.0.113.9:9000", REGION, BUCKET, cred)
     ship.S3Client("http://100.100.1.2:9000", REGION, BUCKET, creds())  # tailnet ok
     ship.S3Client("https://s3.example.invalid", "auto", BUCKET, creds())
 
@@ -236,8 +243,9 @@ def test_key_layout_obligation_o3():
 
 
 def test_shipper_needs_a_machine_name(s3, tmp_path):
+    c = client(s3)
     with pytest.raises(ValueError):
-        ship.Shipper(client(s3), machine="", boot_id=BOOT, spool_dir=tmp_path / "s")
+        ship.Shipper(c, machine="", boot_id=BOOT, spool_dir=tmp_path / "s")
 
 
 # --- shipper ---------------------------------------------------------------
