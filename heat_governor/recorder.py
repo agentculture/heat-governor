@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -40,6 +41,7 @@ class Recorder:
         self.fsync = fsync
         self._day: str | None = None
         self._fh = None
+        self._lock = threading.Lock()  # the tick loop, guard and shipper all write
 
     def _file(self, t: float):
         day = datetime.fromtimestamp(t, timezone.utc).strftime("%Y%m%d")
@@ -53,16 +55,47 @@ class Recorder:
 
     def write(self, rec: dict) -> None:
         t = float(rec.get("t") or time.time())
-        fh = self._file(t)
-        fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
-        fh.flush()
-        if self.fsync:
-            os.fsync(fh.fileno())
+        line = json.dumps(rec, separators=(",", ":")) + "\n"
+        with self._lock:
+            fh = self._file(t)
+            fh.write(line)
+            fh.flush()
+            if self.fsync:
+                os.fsync(fh.fileno())
 
     def close(self) -> None:
-        if self._fh:
-            self._fh.close()
-            self._fh = None
+        with self._lock:
+            if self._fh:
+                self._fh.close()
+                self._fh = None
+            self._day = None
+
+
+def tail(
+    directory: Path, minutes: float, *, now: float | None = None, clock=time.time
+) -> list[dict]:
+    """Rows with ``t >= now - minutes*60``, oldest first, from today's file and (the window
+    may straddle UTC midnight) the previous day's. ``now`` or ``clock`` is injectable."""
+    now = clock() if now is None else now
+    since = now - minutes * 60.0
+    days = {datetime.fromtimestamp(x, timezone.utc).strftime("%Y%m%d") for x in (since, now)}
+    out: list[dict] = []
+    for day in sorted(days):
+        path = directory / f"{day}.jsonl"
+        try:
+            fh = open(path, encoding="utf-8")
+        except OSError:
+            continue
+        with fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                t = rec.get("t") if isinstance(rec, dict) else None
+                if isinstance(t, (int, float)) and since <= t <= now:
+                    out.append(rec)
+    return out
 
 
 def iter_records(directory: Path) -> Iterator[dict]:
@@ -75,7 +108,44 @@ def iter_records(directory: Path) -> Iterator[dict]:
                     continue  # a torn last line after a power loss
 
 
-def _reboot_entry(boot: str, new: str | None, rec: dict, tail: list[dict], window_s: float) -> dict:
+MEMORY_EVENTS = ("memory_kill", "oom_kill", "memory_budget_exhausted")
+EVENT_LOOKBACK_S = 600.0  # kills precede the final freeze: look 10 minutes back from the last tick
+
+
+def _num(v: object) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _mem_block(recent: list[dict]) -> dict:
+    """Memory over the report window; a field absent from every tick is None."""
+    avail, swap, psi = [], [], []
+    for r in recent:
+        sysd = r.get("system")
+        if not isinstance(sysd, dict):
+            continue
+        for key, bucket in (
+            ("mem:avail_mib", avail),
+            ("mem:swap_used_mib", swap),
+            ("psi:memory_full_avg10", psi),
+        ):
+            v = _num(sysd.get(key))
+            if v is not None:
+                bucket.append(v)
+    return {
+        "min_avail_mib": min(avail) if avail else None,
+        "max_swap_used_mib": max(swap) if swap else None,
+        "peak_psi_memory_full": max(psi) if psi else None,
+    }
+
+
+def _reboot_entry(
+    boot: str,
+    new: str | None,
+    rec: dict,
+    tail: list[dict],
+    window_s: float,
+    events: list[dict] | None = None,
+) -> dict:
     last = tail[-1]
     recent = [r for r in tail if last["t"] - r["t"] <= window_s]
     temps = [r["temp_c"] for r in recent if r.get("temp_c") is not None]
@@ -90,6 +160,8 @@ def _reboot_entry(boot: str, new: str | None, rec: dict, tail: list[dict], windo
         "last": {k: last.get(k) for k in ("temp_c", "effective_c", "level", "duty", "cpus", "gpu")},
         "last_zones": last.get("zones"),
         "levels": dict(Counter(r.get("level") for r in recent)),
+        "mem": _mem_block(recent),
+        "events": [e for e in (events or []) if last["t"] - EVENT_LOOKBACK_S <= e["t"] <= rec["t"]],
     }
 
 
@@ -98,12 +170,17 @@ def report(directory: Path, *, window_s: float = 60.0) -> list[dict]:
     out: list[dict] = []
     boot: str | None = None
     tail: list[dict] = []
+    events: list[dict] = []
     for rec in iter_records(directory):
         if rec.get("event") == "start":
             new = rec.get("boot_id")
             if boot is not None and new != boot and tail:
-                out.append(_reboot_entry(boot, new, rec, tail, window_s))
-            boot, tail = new, []
+                out.append(_reboot_entry(boot, new, rec, tail, window_s, events))
+            boot, tail, events = new, [], []
+        elif rec.get("event") in MEMORY_EVENTS and _num(rec.get("t")) is not None:
+            events.append(rec)
+            if len(events) > 500:
+                del events[:250]
         elif "temp_c" in rec and "t" in rec:
             tail.append(rec)
             if len(tail) > 4000:
