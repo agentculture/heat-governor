@@ -144,11 +144,14 @@ def test_replay_fires_once_per_wave():
 def test_replay_lead_time_before_danger():
     """Measured lead (s) between the fire and avail first dropping below 2048 MiB."""
     rows = load()
-    leads = [t_bad - f.t for f, t_bad in zip(replay(rows, TOTAL), crossings(rows))]
-    # MEASURED, not the plan's >= 15 s: waves fall ~1 GiB/s, so a 10 s horizon (and the floor
-    # at 5% = 2297 MiB, just above the danger line) fires only 4-18 s ahead. Pinned as a floor
-    # of 3 s so a regression shows; see the task report for the shortfall against 15 s.
-    assert len(leads) == 5 and min(leads) >= 3, leads
+    fires = list(replay(rows, TOTAL))
+    leads = [t_bad - f.t for f, t_bad in zip(fires, crossings(rows))]
+    # Approved deviation d1 (devague, 2026-11-14): with the default horizon 10 s / soft 20% the
+    # measured leads are 17.6/7/5/6/4 s with 5423-7097 MiB still available at the fire. The
+    # original ">= 15 s" margin was unmeasured; the criterion is now ">= 4 s ahead of 2048 MiB
+    # with >= 5 GB (5120 MiB) available at the fire" on every wave.
+    assert len(leads) == 5 and min(leads) >= 4, leads
+    assert min(f.avail_mib for f in fires) >= 5120, [f.avail_mib for f in fires]
 
 
 def test_wave_shapes_match_before_state():
