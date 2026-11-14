@@ -17,17 +17,26 @@ containers it names are this box's rank: governed as serving (never paused),
 CPU-capped by the hotter of the two boxes' decisions. Everything else keeps
 using this box's readings only.
 
+With ``[memory]`` a :class:`~heat_governor.memguard.MemGuard` runs on its own thread
+(started and stopped with the daemon, rebuilt or stopped by a live reload); its kill, OOM and
+budget events become record rows, and with ``[ship]`` the kill / OOM / budget events, the black
+box and (after an unclean boot) a postmortem go to S3 through a
+:class:`~heat_governor.ship.Shipper`. The thermal path never reads memory: level, admit and
+concurrency_factor are the same with or without the guard.
+
 Without ``apply`` the loop still senses, publishes the admission signal and
 records -- all harmless -- but changes no container (it logs what it would do).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import socket
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -40,7 +49,9 @@ from heat_governor.config import (
     Config,
     ConfigError,
     ContainerRule,
+    MemoryRule,
     PairRule,
+    ShipRule,
     UnitRule,
 )
 from heat_governor.config import changed as config_changed
@@ -54,14 +65,16 @@ from heat_governor.docker import Container, Docker, DockerError
 from heat_governor.gpuclock import GpuClock
 from heat_governor.gpuclock import unsupported_reason as gpuclock_unsupported
 from heat_governor.gpulaw import GpuGovernor, Plan
+from heat_governor.memguard import EV_TOP, MemGuard
 from heat_governor.operator_ceiling import OperatorCeiling, hold_path
 from heat_governor.pair import PairDecision, PeerLink, PeerStatus
 from heat_governor.pair import decide as pair_decide
 from heat_governor.pair import lost
 from heat_governor.platforms import Profile
 from heat_governor.policy import Controller, Decision, unit_cpus
-from heat_governor.recorder import Recorder, boot_id
+from heat_governor.recorder import MEMORY_EVENTS, Recorder, _reboot_entry, boot_id
 from heat_governor.sense import Reading, Sensor
+from heat_governor.ship import Shipper
 from heat_governor.state import SCHEMA, StateServer, write_state
 from heat_governor.units import Systemctl, SystemctlLike, UnitCapper, containing
 
@@ -82,6 +95,8 @@ class Options:
     containers: tuple[ContainerRule, ...] = ()  # from the config file
     units: tuple[UnitRule, ...] = ()  # systemd user units to CPU-cap (config [[units]])
     pair: PairRule | None = None  # one half of a tensor-parallel pair (config [pair])
+    memory: MemoryRule | None = None  # the memory guard (config [memory]); None: no guard
+    ship: ShipRule | None = None  # shipping to S3 (config [ship], enabled); None: no shipper
     gpu_clock: bool = False  # lower the GPU clock ceiling per gpu_clock_bands
     gpu_ceiling_mhz: int | None = None  # the operator's ceiling from the config (law)
     platform: str | None = None  # explicit --platform (else config, else detected)
@@ -96,6 +111,23 @@ class Options:
 
 def utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+SHIP_EVENTS = MEMORY_EVENTS  # memory_kill, oom_kill, memory_budget_exhausted (not would_kill)
+POSTMORTEM_FILES = 2  # the newest day files read for the postmortem (never the whole archive)
+
+
+def memory_rule(cfg: Config) -> MemoryRule | None:
+    """``[memory]`` when the table is present; absent section = no guard."""
+    return cfg.memory if isinstance(cfg.data.get("memory"), dict) else None
+
+
+def ship_rule(cfg: Config) -> ShipRule | None:
+    """``[ship]`` when the table is present and enabled."""
+    if not isinstance(cfg.data.get("ship"), dict):
+        return None
+    rule = cfg.ship
+    return rule if rule.enabled else None
 
 
 def _decision_fields(dec: PairDecision | None) -> dict:
@@ -117,6 +149,10 @@ class Daemon:
         clock: Callable[[], float] = time.time,
         host_cpus: int | None = None,
         peer_link: PeerLink | None = None,
+        proc_root: Path = Path("/proc"),
+        sys_root: Path = Path("/sys"),
+        make_guard: Callable[..., MemGuard] | None = None,
+        make_shipper: Callable[..., Shipper] | None = None,
     ) -> None:
         self.profile = profile
         self.opts = opts
@@ -143,6 +179,7 @@ class Daemon:
         self._peer_ok: bool | None = None  # last logged peer health
         self._ceilings: tuple | None = None  # (ours, the peer's) operator ceiling, last logged
         self._started = False
+        self._started_at = 0.0
         self.containers: dict[str, Container] = {}
         self._discovered_at = 0.0
         self._observed_at = 0.0
@@ -176,6 +213,22 @@ class Daemon:
         if opts.units:
             self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
             self._sync_adaptive(opts.units)
+        # -- the memory guard ([memory]) and the shipper ([ship]); both start with start()
+        self.proc_root = Path(proc_root)  # /proc for the guard, the boot id and boot time
+        self.sys_root = Path(sys_root)  # /sys: the guard reads cgroup memory.events here
+        self._make_guard = make_guard or MemGuard
+        self._make_shipper = make_shipper or Shipper.from_rule
+        self.guard: MemGuard | None = None
+        self.shipper: Shipper | None = None
+        self._mem_lock = threading.Lock()  # the guard thread hands its top snapshot over
+        self._top: list | None = None
+        self._mem_total: float | None = None
+        self._postmortem_done = False
+        if opts.config is not None:
+            if opts.memory is None:
+                opts.memory = memory_rule(opts.config)
+            if opts.ship is None:
+                opts.ship = ship_rule(opts.config)
 
     def _actuators(
         self, docker: Docker | None, profile: Profile, opts: Options
@@ -486,6 +539,8 @@ class Daemon:
         self.opts.containers = tuple(cfg.containers)
         self._set_units(tuple(cfg.units))
         self.set_pair(cfg.pair)
+        self.set_memory(memory_rule(cfg))
+        self.set_ship(ship_rule(cfg))
         self._discovered_at = 0.0  # re-discover on the next tick
 
     RESTART_ONLY = ("apply", "listen", "state", "data_dir", "record", "fsync", "reload")
@@ -692,6 +747,178 @@ class Daemon:
             self._log(f"gpu: operator ceiling {self.operator.describe()} is law")
         self.gpu.operator_changed()
 
+    # -- the memory guard and the shipper (their own threads; the tick never waits on them)
+    def set_memory(self, rule: MemoryRule | None) -> None:
+        """A reload: start, rebuild (any change) or stop the guard."""
+        if rule == self.opts.memory:
+            return
+        self.opts.memory = rule
+        if self._started:
+            self._stop_guard()
+            self._start_guard()
+            if rule is None:
+                self._log("memory guard: off")
+
+    def set_ship(self, rule: ShipRule | None) -> None:
+        """A reload: start, rebuild (any change) or stop the shipper."""
+        if rule == self.opts.ship:
+            return
+        self.opts.ship = rule
+        if self._started:
+            self._stop_shipper()
+            self._start_shipper()
+            if rule is None:
+                self._log("ship: off")
+
+    def _start_guard(self) -> None:
+        rule = self.opts.memory
+        if rule is None or self.guard is not None:
+            return
+        try:
+            guard = self._make_guard(
+                rule,
+                proc_root=self.proc_root,
+                sys_root=self.sys_root,
+                emit=self._on_memory_event,
+                log=self._log,
+                cgroups=self._own_cgroup(),
+            )
+            guard.start()
+        except Exception as exc:  # noqa: BLE001 - no guard is today's behaviour, not a crash
+            self._log(f"memory guard: cannot start ({exc!r}); running without it")
+            return
+        self.guard = guard
+        self._log(
+            f"memory guard: on action={rule.action} floor={rule.floor_pct}% "
+            f"soft={rule.soft_pct}% poll={rule.poll_s}s"
+        )
+
+    def _stop_guard(self) -> None:
+        guard, self.guard = self.guard, None
+        if guard is not None:
+            self._fenced("memory guard stop", guard.stop)
+        with self._mem_lock:
+            self._top, self._mem_total = None, None
+
+    def _own_cgroup(self) -> tuple[str, ...]:
+        """The daemon's own (delegated) cgroup, relative to the cgroup root."""
+        try:
+            text = (self.proc_root / "self" / "cgroup").read_text()
+        except OSError:
+            return ()
+        for line in text.splitlines():
+            if line.startswith("0::") and line[3:].strip("/"):
+                return (line[3:].strip().strip("/"),)
+        return ()
+
+    def _start_shipper(self) -> None:
+        rule = self.opts.ship
+        if rule is None or self.shipper is not None:
+            return
+        machine = rule.machine or self._fleet_machine()
+        if not machine:
+            self._log("ship: set [ship] machine (no local fleet entry); shipping disabled")
+            return
+        try:
+            shipper = self._make_shipper(
+                rule,
+                default_machine=machine,
+                boot_id=boot_id(self.proc_root),
+                spool_dir=(self.opts.data_dir or Path(".")) / "spool",
+                records_dir=self.recorder.directory if self.recorder else None,
+                log=self._log,
+                low_memory=self._low_memory,
+            )
+            shipper.start()
+        except Exception as exc:  # noqa: BLE001 - ValueError: endpoint/bucket/credentials
+            self._log(f"ship: {exc}; shipping disabled")
+            return
+        self.shipper = shipper
+        self._log(f"ship: on, to {rule.endpoint} bucket {rule.bucket} as {machine}")
+        self._fenced("ship postmortem", self._submit_postmortem)
+
+    def _stop_shipper(self) -> None:
+        shipper, self.shipper = self.shipper, None
+        if shipper is not None:
+            self._fenced("ship stop", shipper.stop)
+
+    def _fleet_machine(self) -> str | None:
+        """The name of fleet.toml's ``transport = "local"`` machine (never the hostname)."""
+        from heat_governor.fleet import default_fleet_path, load_fleet
+
+        cfg = self.opts.config
+        path = cfg.path.parent / "fleet.toml" if cfg and cfg.path else default_fleet_path()
+        if not path.exists():
+            return None
+        try:
+            fleet = load_fleet(path)
+        except Exception as exc:  # noqa: BLE001 - CliError from a bad fleet.toml
+            self._log(f"ship: cannot read {path} ({exc})")
+            return None
+        return next((m.name for m in fleet.machines if m.transport == "local"), None)
+
+    def _submit_postmortem(self) -> None:
+        """Once per daemon: if the previous boot ended without a clean stop, ship its
+        reboot entry. Reads only the newest day files, up to this run's start row."""
+        if self._postmortem_done or self.shipper is None or self.recorder is None:
+            return
+        self._postmortem_done = True
+        entry = previous_boot_postmortem(
+            self.recorder.directory,
+            boot_id(self.proc_root),
+            self._started_at,
+            boot_time(self.proc_root),
+            pid=os.getpid(),
+        )
+        if entry is not None:
+            self.shipper.submit_postmortem(entry)
+            self._log(
+                f"ship: postmortem queued for unclean boot {entry['previous_boot']} "
+                f"(last record {entry['last_record_utc']})"
+            )
+
+    def _low_memory(self) -> bool:
+        """For the shipper's black-box cadence: the guard's avail under soft_pct of RAM."""
+        guard = self.guard
+        with self._mem_lock:
+            total = self._mem_total
+        if guard is None or not total:
+            return False
+        avail = guard.doc().get("avail_mib")
+        return avail is not None and avail < total * float(guard.rule.soft_pct) / 100.0
+
+    def _on_memory_event(self, ev: dict) -> None:
+        """The guard's sink, called ON THE GUARD THREAD. Never raises: the recorder write and
+        the ship submit are each fenced by ``_quiet``."""
+        kind = ev.get("event") if isinstance(ev, dict) else None
+        if kind == EV_TOP:
+            with self._mem_lock:
+                self._top, self._mem_total = ev.get("top"), ev.get("total_mib")
+            return
+        if kind is None:
+            return
+        if self.recorder:
+            self._quiet(f"record {kind}", lambda: self.recorder.write(ev))
+        shipper = self.shipper
+        if shipper is not None and kind in SHIP_EVENTS:
+            self._quiet(f"ship {kind}", lambda: shipper.submit(kind, ev, t=ev.get("t")))
+
+    def _quiet(self, what: str, fn) -> None:
+        """``_fenced`` for the guard thread: even a failing log is swallowed."""
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001 - routing must not reach the guard
+            try:
+                self._log(f"memory guard: {what}: {exc!r}")
+            except Exception:  # noqa: BLE001 - nowhere left to report it # nosec B110
+                pass
+
+    def _top_record(self) -> dict:
+        """The latest top snapshot, attached to one tick row and then cleared."""
+        with self._mem_lock:
+            top, self._top = self._top, None
+        return {"top": top} if top else {}
+
     # -- one tick
     def tick(self) -> Decision:
         """Sense, decide and PUBLISH first; only then touch docker or the GPU
@@ -737,6 +964,7 @@ class Daemon:
                     "fans": reading.fans,
                     "gpu": reading.gpu,
                     "system": reading.system,
+                    **self._top_record(),
                 }
             )
         return d
@@ -771,7 +999,7 @@ class Daemon:
     def state_doc(self, d: Decision, reading: Reading, now: float) -> dict:
         lim = self.profile.limits
         hot = reading.hottest
-        return {
+        doc = {
             "schema": SCHEMA,
             "host": self.host,
             "platform": self.profile.name,
@@ -817,6 +1045,10 @@ class Daemon:
             "units": [self._unit_doc(u) for u in self.opts.units],
             "pair": self.pair_doc(),
         }
+        guard = self.guard
+        if guard is not None:
+            doc["mem_guard"] = guard.doc()  # optional; clients ignore unknown fields
+        return doc
 
     def _pair_record(self) -> dict:
         if self._pair is None:
@@ -852,12 +1084,13 @@ class Daemon:
 
     # -- lifecycle
     def start(self) -> None:
+        self._started_at = self.clock()
         if self.recorder:
             self.recorder.write(
                 {
-                    "t": self.clock(),
+                    "t": self._started_at,
                     "event": "start",
-                    "boot_id": boot_id(),
+                    "boot_id": boot_id(self.proc_root),
                     "platform": self.profile.name,
                     "version": __version__,
                     "apply": self.opts.apply,
@@ -886,6 +1119,8 @@ class Daemon:
                 f"{', '.join(self.opts.pair.containers)}"
             )
         self._started = True
+        self._start_guard()
+        self._start_shipper()
         self._log(
             f"start platform={self.profile.name} apply={self.opts.apply} poll={self.opts.poll_s}s "
             f"limits warm/hot/crit={self.profile.limits.warm_c}/{self.profile.limits.hot_c}/"
@@ -908,6 +1143,7 @@ class Daemon:
             self.capper.restored.update(restored)  # so 0 ("no limit") survives as 0
 
     def shutdown(self) -> None:
+        self._stop_guard()
         if self.cycler:
             self.cycler.stop()
         if self.capper:
@@ -922,6 +1158,7 @@ class Daemon:
         if self.pair_server:
             self.pair_server.stop()
         self._log("stop: own pauses released, CPU limits, unit quotas and GPU ceiling restored")
+        self._stop_shipper()
         if self.recorder:
             self.recorder.close()
 
@@ -943,6 +1180,91 @@ class Daemon:
                 self._stop.wait(max(0.0, self.opts.poll_s - (time.monotonic() - t0)))
         finally:
             self.shutdown()
+
+
+def boot_time(proc_root: Path = Path("/proc")) -> float | None:
+    """The kernel's boot time (``btime`` of /proc/stat, epoch seconds), or None."""
+    try:
+        text = (proc_root / "stat").read_text()
+    except OSError:
+        return None
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == "btime" and parts[1].isdigit():
+            return float(parts[1])
+    return None
+
+
+def previous_boot_postmortem(
+    directory: Path,
+    this_boot: str,
+    now: float,
+    btime: float | None,
+    *,
+    pid: int | None = None,
+    files: int = POSTMORTEM_FILES,
+    window_s: float = 60.0,
+) -> dict | None:
+    """The reboot entry (:func:`heat_governor.recorder.report`'s shape) for the run before
+    this one, when it ended without a clean stop on an earlier boot; else None.
+
+    Reads only the newest ``files`` day files and stops at this run's own start row (same
+    pid and boot id). Lines without an ``"event"`` key are ticks: kept raw (the last 4000)
+    and parsed only at the end, so a 74 MB day file costs a substring scan, not a JSON
+    parse per line. When the previous run's start row is older than those files, its boot
+    is "unknown" and the kernel boot time decides whether a reboot came in between."""
+    boot: str | None = None
+    ticks: deque = deque(maxlen=4000)
+    events: list[dict] = []
+    clean = ours = False
+    for path in sorted(Path(directory).glob("*.jsonl"))[-files:]:
+        if ours:
+            break
+        try:
+            fh = open(path, encoding="utf-8")
+        except OSError:
+            continue
+        with fh:
+            for line in fh:
+                if '"event"' not in line:
+                    ticks.append(line)
+                    clean = False
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                kind = rec.get("event") if isinstance(rec, dict) else None
+                if kind == "start":
+                    if pid is not None and (rec.get("pid"), rec.get("boot_id")) == (pid, this_boot):
+                        ours = True  # this run's own start: everything after is ours
+                        break
+                    boot, events, clean = str(rec.get("boot_id") or "unknown"), [], False
+                    ticks.clear()
+                elif kind == "action" and str(rec.get("msg", "")).startswith("stop:"):
+                    clean = True
+                elif kind in MEMORY_EVENTS and isinstance(rec.get("t"), (int, float)):
+                    events = (events + [rec])[-500:]
+    if clean:
+        return None
+    tail = []
+    for line in ticks:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue  # a torn last line after a power loss
+        if isinstance(rec, dict) and "temp_c" in rec and isinstance(rec.get("t"), (int, float)):
+            tail.append(rec)
+    if not tail:
+        return None
+    boot = boot or "unknown"
+    if "unknown" not in (boot, this_boot):
+        rebooted = boot != this_boot
+    else:
+        rebooted = btime is not None and tail[-1]["t"] < btime
+    if not rebooted:
+        return None
+    return _reboot_entry(boot, this_boot, {"t": now}, tail, window_s, events)
 
 
 def _mhz(v: int | None) -> str:
