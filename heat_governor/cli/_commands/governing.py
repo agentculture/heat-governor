@@ -426,6 +426,26 @@ def cmd_wait(args: argparse.Namespace) -> int:
 # -- report / replay --------------------------------------------------------------
 
 
+def _mem_report_text(r: dict) -> str:
+    """``; memory: min avail 0 MiB, swap 4096 MiB, peak PSI full 98.0; events: 2 memory_kill``."""
+    mem = r.get("mem") or {}
+    parts = []
+    if mem.get("min_avail_mib") is not None:
+        parts.append(f"min avail {mem['min_avail_mib']:g} MiB")
+    if mem.get("max_swap_used_mib") is not None:
+        parts.append(f"swap {mem['max_swap_used_mib']:g} MiB")
+    if mem.get("peak_psi_memory_full") is not None:
+        parts.append(f"peak PSI full {mem['peak_psi_memory_full']:.1f}")
+    text = f"; memory: {', '.join(parts)}" if parts else ""
+    counts: dict[str, int] = {}
+    for e in r.get("events") or []:
+        name = str(e.get("event"))
+        counts[name] = counts.get(name, 0) + 1
+    if counts:
+        text += "; events: " + ", ".join(f"{n} {k}" for k, n in counts.items())
+    return text
+
+
 def cmd_report(args: argparse.Namespace) -> None:
     d = Path(args.data_dir) if args.data_dir else default_data_dir()
     rows = recorder.report(d / "records", window_s=args.window)
@@ -440,7 +460,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         out.append(
             f"reboot: last record {r['last_record_utc']}, restart {r['restart_utc']} "
             f"(gap {r['gap_s']} s); max {r['max_temp_c']} C in the last {r['window_s']:g} s; "
-            f"last level {r['last']['level']} duty {r['last']['duty']}"
+            f"last level {r['last']['level']} duty {r['last']['duty']}" + _mem_report_text(r)
         )
     emit_result("\n".join(out), json_mode=False)
 
@@ -512,6 +532,7 @@ After=docker.service
 
 [Service]
 ExecStart={exe} run {flags}
+MemoryMin=128M
 Restart=always
 RestartSec=2
 

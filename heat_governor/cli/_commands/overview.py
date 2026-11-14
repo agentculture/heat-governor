@@ -30,6 +30,8 @@ _VERBS = [
     "explain <path> — markdown docs for a topic",
     "overview — this descriptive snapshot",
     "doctor — check the agent-identity invariants",
+    "memory overview | status | top | replay — the memory guard and its trigger replay",
+    "ship overview | test | fetch — S3 shipping of events, postmortems and the black box",
     "mcp — read-only MCP server over stdio (mesh_status, machine_state, sense)",
     "mesh overview | status | serve — the fleet view (see 'heat-governor mesh overview')",
 ]

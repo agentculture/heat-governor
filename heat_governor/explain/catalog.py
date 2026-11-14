@@ -32,6 +32,9 @@ declared from their trip points, unmeasured), and a generic fallback.
 - `heat-governor gpu-clock ...` -- the GPU clock ceiling (root helper).
 - `heat-governor mcp` -- a read-only MCP server over stdio (fleet and sense tools).
 - `heat-governor mesh ...` -- the fleet view (`overview`, `status`, `serve`).
+- `heat-governor memory ...` -- the memory guard (`overview`, `status`, `top`, `replay`).
+- `heat-governor ship ...` -- S3 shipping of events and black boxes (`overview`, `test`,
+  `fetch`).
 
 ## Agent verbs
 
@@ -294,6 +297,65 @@ go to `run` (default `--apply`).
     heat-governor unit -- --apply --listen 127.0.0.1:9476
 """
 
+_MEMORY = """\
+# heat-governor memory
+
+The memory guard: the daemon watches MemAvailable and, when memory is about to
+run out (below `floor_pct` of RAM, or below `soft_pct` and projected to hit the
+floor within `horizon_s`), records the top processes and, with `action =
+"kill"`, ends the biggest eligible one. Configure it in `[memory]` of
+config.toml; with the section absent it never acts.
+
+- `memory overview` -- describe this noun.
+- `memory status [--source S]` -- the running daemon's `mem_guard`: action,
+  armed, MemAvailable, last kill, kills in the last hour. "memory guard not
+  configured ([memory] absent)" (exit 0) when there is none; exit 2 when no
+  daemon state is readable.
+- `memory top [--n N]` -- the N biggest processes by anonymous memory, now
+  (command lines are redacted).
+- `memory replay <records.jsonl|csv> [--total-mib N] [--floor-pct P]
+  [--horizon-s S] [--soft-pct P] [--window-s S]` -- run the trigger over a
+  recording and list each fire (UTC and local time, reason, avail, fill rate).
+  A CSV carries `# MemTotal_mib=` in its header; records do not, so give
+  `--total-mib` or the local /proc/meminfo is used (the output says which).
+  Use it for the quiet-days check on a tuning change.
+
+    heat-governor memory status --json
+    heat-governor memory top --n 5
+    heat-governor memory replay tests/data/memory-2026-11-14.csv
+    heat-governor memory replay ~/.local/share/heat-governor/records/x.jsonl --total-mib 122000
+
+Exit codes: 0 ok, 1 bad flag or unreadable file, 2 no daemon state or /proc.
+"""
+
+_SHIP = """\
+# heat-governor ship
+
+Ships each memory/OOM event, the postmortem and a rolling black box (the last
+`blackbox_minutes` of records) to S3-compatible storage, so the evidence
+survives a reset. Configure `[ship]` in config.toml; credentials come from
+AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY or the shared credentials file
+(`profile`), and are never printed.
+
+Layout: `<prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json`,
+`postmortem.json`, `blackbox.jsonl.gz`.
+
+- `ship overview` -- describe this noun.
+- `ship test [--config PATH]` -- PUT a probe object under
+  `<prefix>/<machine>/_probe/`, GET it back, compare; prints ok and the
+  latency. Missing endpoint, bucket, credentials or machine: exit 1 with a
+  hint. A network or S3 failure: exit 2 with the status and S3 code. The
+  machine is `[ship] machine`, else the transport = "local" entry of
+  fleet.toml; never the kernel hostname.
+- `ship fetch --machine M [--boot B] [--out DIR]` -- list the machine's boots,
+  take the newest (by its newest event) unless `--boot` is given, download its
+  events, postmortem and black box into DIR (default
+  `./heat-governor-fetch/<M>/<boot>/`) and summarise them.
+
+    heat-governor ship test
+    heat-governor ship fetch --machine spark --json
+"""
+
 _CONFIG = """\
 # heat-governor config
 
@@ -325,6 +387,16 @@ platform default: spark 8 / 4 / 2, declared, unmeasured; or `mode =
 off unless listed; contract: `docs/contracts/user-units.md`. `[pair]`
 (peer, containers, listen, stale_after_s, poll_s, cpu_cap) makes this box one
 half of a tensor-parallel pair; `listen` needs a restart.
+
+`[memory]` (the memory guard; absent = record only, never kill): `action` =
+record|kill (default record), `floor_pct` 5, `horizon_s` 10, `soft_pct` 20,
+`window_s` 10, `min_victim_mib` 2048, `max_kills_per_hour` 3, `protect` (extra
+process names never killed), `poll_s` 0.25, `top_n` 10, `top_every_s` 10.
+`[ship]` (off unless `enabled = true`): `endpoint`, `bucket` (both required
+when enabled), `region` us-east-1, `prefix` fleet, `profile` (AWS credentials
+profile), `machine` (default: the hostname), `blackbox_every_s` 60,
+`blackbox_minutes` 10, `spool_dir`. Plain HTTP is accepted only for loopback
+and tailnet endpoints. See `memory` and `ship`.
 """
 
 _GPU_CLOCK = """\
@@ -398,6 +470,15 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("mesh", "overview"): _MESH,
     ("mesh", "status"): _MESH,
     ("mesh", "serve"): _MESH,
+    ("memory",): _MEMORY,
+    ("memory", "overview"): _MEMORY,
+    ("memory", "status"): _MEMORY,
+    ("memory", "top"): _MEMORY,
+    ("memory", "replay"): _MEMORY,
+    ("ship",): _SHIP,
+    ("ship", "overview"): _SHIP,
+    ("ship", "test"): _SHIP,
+    ("ship", "fetch"): _SHIP,
     ("mcp",): _MCP,
     ("sense",): _SENSE,
     ("capabilities",): _CAPABILITIES,
