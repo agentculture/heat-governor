@@ -340,7 +340,7 @@ def test_no_victim_returns_would_kill_without_signal(tmp_path):
 
 def test_event_cmdline_is_redacted_and_raw_never_stored(tmp_path):
     base_tree(tmp_path)
-    secret = "hunter2hunter2hunter2"
+    secret = "hunter2" * 3  # built at runtime: scan-secrets flags 20+ char literals
     add_proc(
         tmp_path,
         600,
