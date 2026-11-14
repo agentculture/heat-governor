@@ -254,7 +254,7 @@ def _docker(args: argparse.Namespace, cfg):
 
 
 def _run_options(args: argparse.Namespace, cfg):
-    from heat_governor.daemon import Options
+    from heat_governor.daemon import Options, memory_rule, ship_rule
 
     dcfg = cfg.daemon
     pick = _Pick(args, dcfg)
@@ -282,6 +282,9 @@ def _run_options(args: argparse.Namespace, cfg):
         containers=tuple(cfg.containers),
         units=tuple(cfg.units),
         pair=cfg.pair,
+        # passed explicitly so [memory]/[ship] apply even with [daemon] reload = false
+        memory=memory_rule(cfg),
+        ship=ship_rule(cfg),
         gpu_clock=bool(gpu_clock),
         gpu_ceiling_mhz=dcfg.get("gpu_ceiling_mhz"),
         platform=getattr(args, "platform", None),
