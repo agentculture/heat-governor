@@ -48,7 +48,8 @@ def test_thor_runaway_still_fires_before_the_floor():
     for s in range(60):
         fire = fire or t.step(float(s), avail)
         avail -= 1144  # ~1.2 GB/s
-    assert fire is not None and fire.avail_mib >= 2048
+    assert fire is not None
+    assert fire.avail_mib >= 2048
 
 
 # --- config ----------------------------------------------------------------------------------
@@ -181,7 +182,9 @@ def test_status_prints_the_effective_limits(capsys, tmp_path, monkeypatch):
     src.write_text(json.dumps({"level": "cool", "at": time.time(), "mem_guard": guard}))
     rc, out, err = _cli(capsys, "memory", "status", "--source", str(src))
     assert (rc, err) == (0, "")
-    assert "floor 3072 MiB" in out and "soft 6144 MiB" in out and "platform" in out
+    assert "floor 3072 MiB" in out
+    assert "soft 6144 MiB" in out
+    assert "platform" in out
 
 
 def test_replay_accepts_absolute_limits(capsys):
@@ -195,11 +198,13 @@ def test_replay_accepts_absolute_limits(capsys):
         "--soft-mib",
         "6144",
     )
-    assert rc == 0 and "floor 3072 MiB soft 6144 MiB" in out
+    assert rc == 0
+    assert "floor 3072 MiB soft 6144 MiB" in out
 
 
 def test_replay_needs_both_absolute_limits(capsys):
     rc, _, err = _cli(
         capsys, "memory", "replay", "tests/data/memory-2026-11-14.csv", "--floor-mib", "3072"
     )
-    assert rc == 1 and "together" in err
+    assert rc == 1
+    assert "together" in err

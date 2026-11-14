@@ -30,7 +30,9 @@ def test_scan_fields(tmp_path):
         777,
         "/a.slice/b.scope",
     )
-    assert p.rss_anon_mib == 10 and p.rss_mib == 15 and p.cmdline == "py -c 1"
+    assert p.rss_anon_mib == 10
+    assert p.rss_mib == 15
+    assert p.cmdline == "py -c 1"
 
 
 def test_file_rss_flat_anon_zero_growth_and_growing_anon(tmp_path):
@@ -105,13 +107,15 @@ def test_top_entries(tmp_path):
         "start_t",
         "cgroup",
     }
-    assert rows[0]["start_t"] == 100 and rows[0]["cgroup"] == "/system.slice"
+    assert rows[0]["start_t"] == 100
+    assert rows[0]["cgroup"] == "/system.slice"
 
 
 def test_top_redacts_cmdline(tmp_path):
     add_proc(tmp_path, 9, anon_kib=MIB, cmdline=["svc", "--" + "token=" + "abc" + "123"])
     row = memprocs.top(memprocs.scan(tmp_path), None, 1)[0]
-    assert "abc123" not in row["cmdline"] and "--token=" in row["cmdline"]
+    assert "abc123" not in row["cmdline"]
+    assert "--token=" in row["cmdline"]
 
 
 def test_redact():
@@ -121,14 +125,17 @@ def test_redact():
     fake = "hun" + "ter2"
     tok_flag = "--" + "token="
     r = memprocs.redact
-    assert fake not in r(f"x {tok_flag}{fake}") and tok_flag in r(f"x {tok_flag}{fake}")
+    assert fake not in r(f"x {tok_flag}{fake}")
+    assert tok_flag in r(f"x {tok_flag}{fake}")
     assert "s3cr" not in r(["tool", "--api-key", "s3cr3t"])
     assert "--api-key" in r(["tool", "--api-key", "s3cr3t"])
     assert "pw1" not in r("run PASSWORD=pw1 go")
     assert "PASSWORD=" in r("run PASSWORD=pw1 go")
-    assert "HOME=" in r("env HOME=/home/x cmd") and "/home/x" not in r("env HOME=/home/x cmd")
+    assert "HOME=" in r("env HOME=/home/x cmd")
+    assert "/home/x" not in r("env HOME=/home/x cmd")
     for hdr in ("curl -H 'Authorization: Bearer abcdefgh' u", "curl -H Authorization:Basic zzz1 u"):
-        assert "abcdefgh" not in r(hdr) and "zzz1" not in r(hdr)
+        assert "abcdefgh" not in r(hdr)
+        assert "zzz1" not in r(hdr)
     assert akia not in r(f"aws {akia}")
     assert "--verbose" in r("x --token --verbose")
     assert len(r("a " * 1000)) == 512

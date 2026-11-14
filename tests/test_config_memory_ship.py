@@ -31,9 +31,12 @@ def test_memory_defaults():
 
 def test_ship_defaults():
     s = cfgmod.Config(data={}).ship
-    assert s.region == "us-east-1" and s.prefix == "fleet"
+    assert s.region == "us-east-1"
+    assert s.prefix == "fleet"
     assert (s.blackbox_every_s, s.blackbox_minutes) == (60.0, 10.0)
-    assert s.spool_dir is None and s.machine is None and s.profile is None
+    assert s.spool_dir is None
+    assert s.machine is None
+    assert s.profile is None
 
 
 def test_memory_values_parsed():
@@ -49,8 +52,12 @@ def test_memory_values_parsed():
     }
     assert _problems(data) == []
     m = cfgmod.Config(data=data).memory
-    assert m.action == "kill" and m.floor_pct == 8.0 and m.soft_pct == 25.5
-    assert m.protect == ("sshd", "x") and m.poll_s == 0.5 and m.top_n == 5
+    assert m.action == "kill"
+    assert m.floor_pct == 8.0
+    assert m.soft_pct == 25.5
+    assert m.protect == ("sshd", "x")
+    assert m.poll_s == 0.5
+    assert m.top_n == 5
 
 
 @pytest.mark.parametrize(
@@ -84,7 +91,8 @@ def test_memory_values_parsed():
 )
 def test_memory_bad_values(key, bad):
     probs = _problems({"memory": {key: bad}})
-    assert probs and any(f"memory.{key}" in p for p in probs)
+    assert probs
+    assert any(f"memory.{key}" in p for p in probs)
 
 
 def test_memory_soft_must_exceed_floor():
@@ -157,7 +165,8 @@ def test_top_keys_include_sections():
 )
 def test_ship_bad_values(key, bad):
     probs = _problems({"ship": {key: bad}})
-    assert probs and any(f"ship.{key}" in p for p in probs)
+    assert probs
+    assert any(f"ship.{key}" in p for p in probs)
 
 
 @pytest.mark.parametrize(
@@ -208,7 +217,9 @@ def test_ship_enabled_requires_endpoint_and_bucket():
     ok = {"enabled": True, "endpoint": "https://s3.example.org", "bucket": "fleet-1"}
     assert _problems({"ship": ok}) == []
     s = cfgmod.Config(data={"ship": ok}).ship
-    assert s.enabled and s.endpoint == "https://s3.example.org" and s.bucket == "fleet-1"
+    assert s.enabled
+    assert s.endpoint == "https://s3.example.org"
+    assert s.bucket == "fleet-1"
 
 
 def test_ship_values_parsed():
@@ -225,13 +236,18 @@ def test_ship_values_parsed():
     }
     assert _problems(data) == []
     s = cfgmod.Config(data=data).ship
-    assert s.region == "eu-west-1" and s.machine == "spark-1" and s.profile == "prof"
-    assert s.blackbox_every_s == 30.0 and s.blackbox_minutes == 5.0
+    assert s.region == "eu-west-1"
+    assert s.machine == "spark-1"
+    assert s.profile == "prof"
+    assert s.blackbox_every_s == 30.0
+    assert s.blackbox_minutes == 5.0
     assert s.spool_dir == "/var/spool/hg"
 
 
 def test_template_still_valid_and_mentions_sections():
     text = cfgmod.template(SPARK)
     assert _problems(tomllib.loads(text)) == []
-    assert "# [memory]" in text and "# [ship]" in text
-    assert "\n[memory]" not in text and "\n[ship]" not in text
+    assert "# [memory]" in text
+    assert "# [ship]" in text
+    assert "\n[memory]" not in text
+    assert "\n[ship]" not in text

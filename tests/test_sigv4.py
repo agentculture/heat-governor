@@ -105,7 +105,8 @@ def test_overrides_caller_content_hash():
 
 def test_secret_never_leaks():
     h = sigv4.sign("GET", f"https://{HOST}/t", {"Range": "bytes=0-1"}, EMPTY, AK, SK, "us-east-1")
-    assert SK not in repr(h) and SK not in "".join(h.values())
+    assert SK not in repr(h)
+    assert SK not in "".join(h.values())
     for bad in (
         dict(payload_sha256="short"),
         dict(url="/no-host"),
@@ -122,7 +123,8 @@ def test_secret_never_leaks():
         kw.update(bad)
         with pytest.raises(sigv4.SigV4Error) as ei:
             sigv4.sign(**kw)
-        assert SK not in str(ei.value) and SK not in repr(ei.value)
+        assert SK not in str(ei.value)
+        assert SK not in repr(ei.value)
     with pytest.raises(sigv4.SigV4Error) as ei:
         sigv4.sign("GET", f"https://{HOST}/t", {}, EMPTY, "", SK, "r")
     assert SK not in str(ei.value)

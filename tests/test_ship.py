@@ -90,7 +90,8 @@ def spool_files(tmp_path) -> list[Path]:
 def assert_no_secret(tmp_path, log: Log, *texts: str) -> None:
     for line in log.lines:
         assert FAKE_SECRET_KEY not in line
-        assert "Signature=" not in line and "Authorization" not in line
+        assert "Signature=" not in line
+        assert "Authorization" not in line
     for t in texts:
         assert FAKE_SECRET_KEY not in t
     for p in tmp_path.rglob("*"):
@@ -120,8 +121,10 @@ def test_credentials_env_first(tmp_path):
     write_credentials(home)
     env = {"AWS_ACCESS_KEY_ID": "ENVKEY", "AWS_SECRET_ACCESS_KEY": "env-" + "s" * 6}
     c = ship.resolve_credentials("ship", environ=env, home=home)
-    assert c.access_key == "ENVKEY" and c.source == "env"
-    assert "env-ssssss" not in repr(c) and "env-ssssss" not in str(c)
+    assert c.access_key == "ENVKEY"
+    assert c.source == "env"
+    assert "env-ssssss" not in repr(c)
+    assert "env-ssssss" not in str(c)
 
 
 def test_credentials_named_profile_then_default(tmp_path):
@@ -176,11 +179,13 @@ def test_client_get_missing_and_bad_secret(s3):
     c = client(s3)
     with pytest.raises(ship.ShipError) as err:
         c.get("fleet/none")
-    assert err.value.status == 404 and err.value.code == "NoSuchKey"
+    assert err.value.status == 404
+    assert err.value.code == "NoSuchKey"
     bad = ship.S3Client(s3.endpoint, REGION, BUCKET, ship.Credentials(FAKE_ACCESS_KEY, "wrong-k"))
     with pytest.raises(ship.ShipError) as err:
         bad.put("k", b"v")
-    assert err.value.status == 403 and err.value.code == "SignatureDoesNotMatch"
+    assert err.value.status == 403
+    assert err.value.code == "SignatureDoesNotMatch"
     assert "wrong-k" not in str(err.value) and "wrong-k" not in repr(err.value)
 
 
@@ -198,7 +203,8 @@ def test_client_timeout_raises_shiperror(s3):
     with pytest.raises(ship.ShipError) as err:
         c.put("k", b"v")
     assert time.monotonic() - t0 < 0.9
-    assert err.value.status is None and err.value.code == "Timeout"
+    assert err.value.status is None
+    assert err.value.code == "Timeout"
 
 
 def test_client_adopts_server_clock_after_skew(s3):
@@ -254,11 +260,13 @@ def test_events_land_with_layout_and_machine_name(s3, tmp_path):
         assert wait_for(lambda: {k1, k2, k3} <= set(s3.objects))
     finally:
         sh.stop()
-    assert EVENT_RE.match(k1) and EVENT_RE.match(k2), (k1, k2)
+    assert EVENT_RE.match(k1), (k1, k2)
+    assert EVENT_RE.match(k2), (k1, k2)
     assert k3 == f"fleet/{MACHINE}/{BOOT}/postmortem.json"
     assert json.loads(s3.objects[k1])["pid"] == 1
     for key in s3.objects:
-        assert f"/{MACHINE}/" in key and "real-hostname-leak" not in key
+        assert f"/{MACHINE}/" in key
+        assert "real-hostname-leak" not in key
     assert spool_files(tmp_path) == []
     assert_no_secret(tmp_path, log)
 
@@ -357,7 +365,8 @@ def test_spool_survives_restart(tmp_path):
     assert len(spool_files(tmp_path)) == 1
     raw = spool_files(tmp_path)[0].read_bytes()
     header, body = raw.split(b"\n", 1)
-    assert json.loads(header)["key"] == key and json.loads(body) == {"i": 1}
+    assert json.loads(header)["key"] == key
+    assert json.loads(body) == {"i": 1}
     with FakeS3(port=port) as up:
         sh2 = make_shipper(client(up), tmp_path)
         sh2.start()
@@ -415,7 +424,8 @@ def test_empty_secret_is_a_config_error_not_a_crash(s3):
     c = ship.S3Client(s3.endpoint, REGION, BUCKET, ship.Credentials(FAKE_ACCESS_KEY, ""))
     with pytest.raises(ship.ShipError) as err:
         c.put("k", b"v")
-    assert err.value.code == "InvalidRequest" and err.value.status is None
+    assert err.value.code == "InvalidRequest"
+    assert err.value.status is None
 
 
 def test_stalled_server_never_blocks_submit(s3, tmp_path):

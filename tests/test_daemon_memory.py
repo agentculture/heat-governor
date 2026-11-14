@@ -179,10 +179,13 @@ def test_kill_writes_a_memory_kill_row_and_ships_it(tmp_path):
     rig = Rig(tmp_path, MEMORY + SHIP_NAMED)
     rig.daemon.start()
     rig.wave()
-    assert rig.pidfd.opened == [777] and len(rig.pidfd.sent) == 1
+    assert rig.pidfd.opened == [777]
+    assert len(rig.pidfd.sent) == 1
     rows = rig.rows()
     kills = _events(rows, "memory_kill")
-    assert len(kills) == 1 and kills[0]["pid"] == 777 and kills[0]["comm"] == "hog"
+    assert len(kills) == 1
+    assert kills[0]["pid"] == 777
+    assert kills[0]["comm"] == "hog"
     assert not _events(rows, "memory_top"), "top snapshots are not rows"
     shipped = rig.shippers[-1].submitted
     assert [k for k, _ in shipped] == ["memory_kill"]
@@ -258,7 +261,8 @@ def test_level_admit_and_factor_identical_with_and_without_memory(tmp_path):
         db.concurrency_factor,
     )
     a, b = read_state(tmp_path / "a/state.json"), read_state(tmp_path / "b/state.json")
-    assert "mem_guard" in a and "mem_guard" not in b
+    assert "mem_guard" in a
+    assert "mem_guard" not in b
     for doc in (a, b):
         doc.pop("mem_guard", None)
         doc.pop("config")  # each rig's own config path
@@ -276,11 +280,13 @@ def test_state_doc_has_mem_guard_only_with_memory_and_clients_still_read_it(tmp_
     rig.daemon.tick()
     st = read_state(rig.daemon.opts.state_path)
     mg = st["mem_guard"]
-    assert mg["action"] == "kill" and mg["last_kill"]["pid"] == 777
+    assert mg["action"] == "kill"
+    assert mg["last_kill"]["pid"] == 777
     assert set(mg) >= {"action", "armed", "avail_mib", "last_kill", "kills_last_hour"}
     path = str(rig.daemon.opts.state_path)
     adm = client.read(path)
-    assert adm.level == st["level"] and adm.admit == st["admit"]
+    assert adm.level == st["level"]
+    assert adm.admit == st["admit"]
     assert client.wait(path, timeout=1, poll_s=0.05).admit == st["admit"]
     if st["admit"]:
         with client.Gate(2, path, poll_s=0.05).slot() as slot:
@@ -289,14 +295,16 @@ def test_state_doc_has_mem_guard_only_with_memory_and_clients_still_read_it(tmp_
     plain.daemon.start()
     plain.daemon.tick()
     assert "mem_guard" not in read_state(plain.daemon.opts.state_path)
-    assert plain.guards == [] and plain.shippers == []
+    assert plain.guards == []
+    assert plain.shippers == []
 
 
 def test_no_memory_section_means_no_guard_and_no_top(tmp_path):
     rig = Rig(tmp_path, SHIP_NAMED)
     rig.daemon.start()
     rig.daemon.tick()
-    assert rig.guards == [] and rig.daemon.guard is None
+    assert rig.guards == []
+    assert rig.daemon.guard is None
     assert all("top" not in r for r in rig.rows())
     assert len(rig.shippers) == 1, "shipping does not need the guard"
 
@@ -308,7 +316,8 @@ def test_guard_gets_the_daemons_own_cgroup_and_the_fake_roots(tmp_path):
     rig = Rig(tmp_path, MEMORY)
     rig.daemon.start()
     g = rig.guard
-    assert g.proc_root == rig.proc and g.sys_root == rig.cg_sys
+    assert g.proc_root == rig.proc
+    assert g.sys_root == rig.cg_sys
     assert SELF_CGROUP.strip("/") in g.cgroups
 
 
@@ -316,19 +325,23 @@ def test_reload_removing_memory_stops_the_guard_thread(tmp_path):
     rig = Rig(tmp_path, MEMORY, threads=True)
     rig.daemon.start()
     first = rig.guard
-    assert first._thread is not None and first._thread.is_alive()
+    assert first._thread is not None
+    assert first._thread.is_alive()
     thread = first._thread
     rig.rewrite('[memory]\naction = "record"\n')  # changed: rebuilt
-    assert len(rig.guards) == 2 and rig.daemon.guard is rig.guards[1]
+    assert len(rig.guards) == 2
+    assert rig.daemon.guard is rig.guards[1]
     assert not thread.is_alive()
     assert rig.daemon.guard.rule.action == "record"
     second = rig.guard._thread
     rig.rewrite("")  # removed: stopped, gone
-    assert rig.daemon.guard is None and not second.is_alive()
+    assert rig.daemon.guard is None
+    assert not second.is_alive()
     rig.daemon.tick()
     assert "mem_guard" not in read_state(rig.daemon.opts.state_path)
     rig.rewrite(MEMORY)  # added back live
-    assert rig.daemon.guard is rig.guards[-1] and rig.guard._thread.is_alive()
+    assert rig.daemon.guard is rig.guards[-1]
+    assert rig.guard._thread.is_alive()
     rig.daemon.shutdown()
     assert not rig.guard._thread or not rig.guard._thread.is_alive()
 
@@ -337,7 +350,8 @@ def test_unchanged_memory_on_reload_keeps_the_guard(tmp_path):
     rig = Rig(tmp_path, MEMORY + SHIP_NAMED)
     rig.daemon.start()
     rig.rewrite(MEMORY + SHIP_NAMED + "[daemon]\npoll_s = 2.0\n")
-    assert len(rig.guards) == 1 and len(rig.shippers) == 1
+    assert len(rig.guards) == 1
+    assert len(rig.shippers) == 1
 
 
 def test_reload_rebuilds_and_removes_the_shipper(tmp_path):
@@ -346,10 +360,13 @@ def test_reload_rebuilds_and_removes_the_shipper(tmp_path):
     first = rig.shippers[0]
     assert first.started
     rig.rewrite(SHIP_NAMED.replace("box1", "box2"))
-    assert first.stopped and len(rig.shippers) == 2 and rig.shippers[1].started
+    assert first.stopped
+    assert len(rig.shippers) == 2
+    assert rig.shippers[1].started
     assert rig.shippers[1].rule.machine == "box2"
     rig.rewrite(SHIP_NAMED.replace("enabled = true", "enabled = false"))
-    assert rig.shippers[1].stopped and rig.daemon.shipper is None
+    assert rig.shippers[1].stopped
+    assert rig.daemon.shipper is None
     rig.rewrite("")
     assert rig.daemon.shipper is None
 
@@ -359,7 +376,8 @@ def test_shutdown_stops_guard_and_shipper(tmp_path):
     rig.daemon.start()
     thread = rig.guard._thread
     rig.daemon.shutdown()
-    assert not thread.is_alive() and rig.shippers[0].stopped
+    assert not thread.is_alive()
+    assert rig.shippers[0].stopped
 
 
 def test_shipper_arguments(tmp_path):
@@ -399,7 +417,8 @@ def test_machine_defaults_to_the_local_fleet_entry(tmp_path):
 def test_no_machine_and_no_local_fleet_entry_disables_shipping(tmp_path):
     rig = Rig(tmp_path, MEMORY + SHIP)
     rig.daemon.start()
-    assert rig.shippers == [] and rig.daemon.shipper is None
+    assert rig.shippers == []
+    assert rig.daemon.shipper is None
     want = "set [ship] machine (no local fleet entry); shipping disabled"
     assert any(want in m for m in rig.logs)
     rig.wave()  # the guard still runs and records
@@ -446,11 +465,13 @@ def test_unclean_previous_boot_submits_a_postmortem_once(tmp_path):
     pms = rig.shippers[0].postmortems
     assert len(pms) == 1
     pm = pms[0]
-    assert pm["previous_boot"] == "boot-old" and pm["new_boot"] == THIS_BOOT
+    assert pm["previous_boot"] == "boot-old"
+    assert pm["new_boot"] == THIS_BOOT
     assert [e["event"] for e in pm["events"]] == ["memory_kill"]
     assert pm["max_temp_c"] == 99.0
     rig.rewrite(SHIP_NAMED.replace("box1", "box2"))  # a reload rebuilds the shipper
-    assert len(rig.shippers) == 2 and rig.shippers[1].postmortems == []
+    assert len(rig.shippers) == 2
+    assert rig.shippers[1].postmortems == []
 
 
 def test_clean_stop_or_same_boot_submits_no_postmortem(tmp_path):

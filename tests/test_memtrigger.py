@@ -23,7 +23,8 @@ def run(series, **kw):
 def test_floor_fires_below_five_percent():
     series = [(i, 2000) for i in range(5)]  # 2000 < 5% of 45939 (2296.95), flat
     fires = run(series)
-    assert len(fires) == 1 and fires[0].reason == "floor"
+    assert len(fires) == 1
+    assert fires[0].reason == "floor"
 
 
 def test_floor_does_not_fire_above():
@@ -34,7 +35,8 @@ def test_horizon_fires_when_runout_inside_horizon():
     # 8000 MiB falling 1000/s: 8 s left, below the 20% soft line (9187.8)
     series = [(i, 8800 - 1000 * i) for i in range(6)]
     fires = run(series)
-    assert fires and fires[0].reason == "horizon"
+    assert fires
+    assert fires[0].reason == "horizon"
     assert fires[0].rate_mib_s == pytest.approx(1000.0)
     assert isinstance(fires[0], Fire)
 
@@ -112,7 +114,8 @@ def test_fixture_holds_only_t_and_avail():
     assert lines[1] == "t,mem:avail_mib"
     assert all(len(ln.split(",")) == 2 for ln in lines[1:])
     rows = load()
-    assert local(rows[0][0]) >= "19:30:00" and local(rows[-1][0]) < "19:56:00"
+    assert local(rows[0][0]) >= "19:30:00"
+    assert local(rows[-1][0]) < "19:56:00"
 
 
 def crossings(rows):
@@ -150,7 +153,8 @@ def test_replay_lead_time_before_danger():
     # measured leads are 17.6/7/5/6/4 s with 5423-7097 MiB still available at the fire. The
     # original ">= 15 s" margin was unmeasured; the criterion is now ">= 4 s ahead of 2048 MiB
     # with >= 5 GB (5120 MiB) available at the fire" on every wave.
-    assert len(leads) == 5 and min(leads) >= 4, leads
+    assert len(leads) == 5, leads
+    assert min(leads) >= 4, leads
     assert min(f.avail_mib for f in fires) >= 5120, [f.avail_mib for f in fires]
 
 

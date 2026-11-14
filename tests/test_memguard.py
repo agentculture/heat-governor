@@ -138,9 +138,12 @@ def test_fires_and_kills_before_avail_reaches_2048_mib(tmp_path):
     kills = named(events, "memory_kill")
     assert len(kills) == 1
     k = kills[0]
-    assert k["pid"] == 777 and k["comm"] == "hog" and k["signal"] == "SIGKILL"
+    assert k["pid"] == 777
+    assert k["comm"] == "hog"
+    assert k["signal"] == "SIGKILL"
     assert k["t"] >= EPOCH  # re-stamped to wall clock, not memkill's monotonic clock
-    assert k["avail_mib"] >= 2048 and k["rate_mib_s"] > 1000
+    assert k["avail_mib"] >= 2048
+    assert k["rate_mib_s"] > 1000
 
 
 def test_record_mode_emits_would_kill_and_never_kills(tmp_path):
@@ -148,10 +151,12 @@ def test_record_mode_emits_would_kill_and_never_kills(tmp_path):
     falling_wave(guard, clock, proc, fake)
     would = named(events, "memory_would_kill")
     assert len(would) == 1
-    assert would[0]["pid"] == 777 and would[0]["why_not"] == "record-only"
+    assert would[0]["pid"] == 777
+    assert would[0]["why_not"] == "record-only"
     assert would[0]["t"] >= EPOCH
     assert not named(events, "memory_kill")
-    assert fake.opened == [] and fake.sent == []
+    assert fake.opened == []
+    assert fake.sent == []
     assert guard.doc()["last_kill"] is None
 
 
@@ -173,12 +178,14 @@ def test_doc_after_kill_matches_state_row(tmp_path):
     d = guard.doc()
     keys = {"action", "armed", "avail_mib", "last_kill", "kills_last_hour", "limits"}  # d3
     assert set(d) == keys
-    assert d["limits"]["source"] == "percent" and d["limits"]["soft_mib"] > d["limits"]["floor_mib"]
+    assert d["limits"]["source"] == "percent"
+    assert d["limits"]["soft_mib"] > d["limits"]["floor_mib"]
     assert d["action"] == "kill"
     assert d["armed"] is False
     assert isinstance(d["avail_mib"], int)
     assert set(d["last_kill"]) == {"t", "pid", "comm", "rss_mib", "repeat"}
-    assert d["last_kill"]["pid"] == 777 and d["last_kill"]["repeat"] == 1
+    assert d["last_kill"]["pid"] == 777
+    assert d["last_kill"]["repeat"] == 1
     assert d["last_kill"]["t"] >= EPOCH
     assert d["kills_last_hour"] == 1
     d["last_kill"]["pid"] = -1  # a copy: mutating it never touches the guard
@@ -201,7 +208,8 @@ def test_top_snapshot_every_top_every_s_when_calm(tmp_path, monkeypatch):
     assert len(scans) == 3  # no scan between routine snapshots while calm
     top = tops[0]
     assert set(top) >= {"t", "event", "avail_mib", "total_mib", "top"}
-    assert top["t"] >= EPOCH and top["top"][0]["pid"] == 777
+    assert top["t"] >= EPOCH
+    assert top["top"][0]["pid"] == 777
 
 
 def test_top_snapshot_every_poll_while_below_soft(tmp_path):
@@ -247,7 +255,8 @@ def test_oom_counter_deltas_emit_one_event_each(tmp_path):
     guard.step()
     ooms = named(events, "oom_kill")
     assert len(ooms) == 3
-    assert ooms[-1]["source"] == "vmstat" and ooms[-1]["delta"] == 3
+    assert ooms[-1]["source"] == "vmstat"
+    assert ooms[-1]["delta"] == 3
 
 
 def test_extra_cgroups_watched_and_missing_files_skipped(tmp_path):

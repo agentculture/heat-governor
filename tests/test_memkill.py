@@ -125,7 +125,8 @@ def test_biggest_own_uid_grower_over_minimum_is_chosen(tmp_path):
     add_proc(tmp_path, 600, ppid=SHELL, uid=UID, comm="slowbig", anon_kib=9000 * MIB)
     add_proc(tmp_path, 601, ppid=SHELL, uid=UID, comm="grower", anon_kib=3000 * MIB)
     c = choose(tmp_path, rates={600: 1.0, 601: 900.0})
-    assert c.proc.pid == 601 and c.how == "process"
+    assert c.proc.pid == 601
+    assert c.how == "process"
 
 
 def test_other_uid_protected_self_parent_chain_and_small_never_chosen(tmp_path):
@@ -186,7 +187,8 @@ def test_root_daemon_refuses_to_choose(tmp_path):
     add_proc(tmp_path, 600, ppid=1, uid=0, comm="job", anon_kib=9000 * MIB)
     k = memkill.MemKiller(MemoryRule(action="kill"), proc_root=tmp_path, uid=0, self_pid=ME)
     c = k.choose(memprocs.scan(tmp_path), FakeTracker({600: 10.0}))
-    assert c.proc is None and "root" in c.why_not
+    assert c.proc is None
+    assert "root" in c.why_not
 
 
 def test_group_fallback_picks_biggest_member_of_fastest_growing_group(tmp_path):
@@ -203,7 +205,8 @@ def test_group_fallback_picks_biggest_member_of_fastest_growing_group(tmp_path):
     add_proc(tmp_path, 902, ppid=900, uid=UID, comm="node", anon_kib=900 * MIB, cgroup=b)
     rates = {801: 1.0, 802: 1.0, 803: 1.0, 901: 50.0, 902: 80.0}
     c = choose(tmp_path, rates=rates)
-    assert c.how == "group" and c.proc.pid == 901
+    assert c.how == "group"
+    assert c.proc.pid == 901
     assert c.group["pid"] == 900
 
 
@@ -267,10 +270,15 @@ def test_kill_goes_through_injected_pidfd_send_signal_with_sigkill(tmp_path):
     assert fd.sent == [(9600, signal.SIGKILL)]
     assert fd.closed == [9600]
     (ev,) = events
-    assert ev["event"] == "memory_kill" and ev["pid"] == 600 and ev["signal"] == "SIGKILL"
-    assert ev["reason"] == "horizon" and ev["repeat"] == 1 and ev["kills_last_hour"] == 1
+    assert ev["event"] == "memory_kill"
+    assert ev["pid"] == 600
+    assert ev["signal"] == "SIGKILL"
+    assert ev["reason"] == "horizon"
+    assert ev["repeat"] == 1
+    assert ev["kills_last_hour"] == 1
     assert ev["parents"][0] == {"pid": SHELL, "comm": "bash"}
-    assert ev["growth_mib_s"] == 900.0 and ev["rss_anon_mib"] == 9000.0
+    assert ev["growth_mib_s"] == 900.0
+    assert ev["rss_anon_mib"] == 9000.0
 
 
 def test_pid_reused_between_scan_and_kill_is_not_signalled(tmp_path):
@@ -283,7 +291,8 @@ def test_pid_reused_between_scan_and_kill_is_not_signalled(tmp_path):
     (ev,) = k.act(procs, FakeTracker({600: 900.0}), reason="floor")
     assert fd.sent == []
     assert fd.closed == [9600]
-    assert ev["event"] == "memory_would_kill" and "start" in ev["why_not"]
+    assert ev["event"] == "memory_would_kill"
+    assert "start" in ev["why_not"]
     assert k.kills_last_hour() == 0
 
 
@@ -294,7 +303,8 @@ def test_uid_changed_between_scan_and_kill_is_not_signalled(tmp_path):
         tmp_path, 600, ppid=SHELL, uid=0, comm="runaway", anon_kib=9000 * MIB, start=4242
     )
     (ev,) = k.act(procs, FakeTracker({600: 900.0}), reason="floor")
-    assert fd.sent == [] and "uid" in ev["why_not"]
+    assert fd.sent == []
+    assert "uid" in ev["why_not"]
 
 
 def test_pid_gone_between_scan_and_kill_is_not_signalled(tmp_path):
@@ -302,7 +312,8 @@ def test_pid_gone_between_scan_and_kill_is_not_signalled(tmp_path):
     k, fd = make(tmp_path)
     fd.hook = lambda pid: shutil.rmtree(tmp_path / "600")
     (ev,) = k.act(procs, FakeTracker({600: 900.0}), reason="floor")
-    assert fd.sent == [] and ev["event"] == "memory_would_kill"
+    assert fd.sent == []
+    assert ev["event"] == "memory_would_kill"
 
 
 @pytest.mark.parametrize(
@@ -314,7 +325,8 @@ def test_oserror_in_kill_path_records_reason_and_no_kill(tmp_path, where):
     fd = FakePidfd(**{f"{where}_error": err})
     k, _ = make(tmp_path, pidfd=fd)
     (ev,) = k.act(procs, FakeTracker({600: 900.0}), reason="floor")
-    assert fd.sent == [] and ev["event"] == "memory_would_kill"
+    assert fd.sent == []
+    assert ev["event"] == "memory_would_kill"
     assert ev["why_not"].startswith("refused")
     assert k.kills_last_hour() == 0
     if where == "send":
@@ -325,8 +337,10 @@ def test_record_action_never_calls_kill(tmp_path):
     procs = _victim(tmp_path)
     k, fd = make(tmp_path, rule=MemoryRule(action="record"))
     (ev,) = k.act(procs, FakeTracker({600: 900.0}), reason="floor")
-    assert fd.opened == [] and fd.sent == []
-    assert ev["event"] == "memory_would_kill" and ev["why_not"] == "record-only"
+    assert fd.opened == []
+    assert fd.sent == []
+    assert ev["event"] == "memory_would_kill"
+    assert ev["why_not"] == "record-only"
     assert ev["pid"] == 600
 
 
@@ -334,7 +348,9 @@ def test_no_victim_returns_would_kill_without_signal(tmp_path):
     base_tree(tmp_path)
     k, fd = make(tmp_path)
     (ev,) = k.act(memprocs.scan(tmp_path), FakeTracker(), reason="floor")
-    assert fd.opened == [] and ev["event"] == "memory_would_kill" and ev["pid"] is None
+    assert fd.opened == []
+    assert ev["event"] == "memory_would_kill"
+    assert ev["pid"] is None
     assert ev["why_not"].startswith("no-victim")
 
 
@@ -394,12 +410,15 @@ def test_fourth_trigger_in_an_hour_is_budget_exhausted_and_sends_nothing(tmp_pat
     events = k.act(_respawn(tmp_path, 200), FakeTracker({600: 9.0}), reason="horizon")
     assert [e["event"] for e in events] == ["memory_would_kill", "memory_budget_exhausted"]
     assert events[0]["why_not"] == "budget"
-    assert events[1]["max_kills_per_hour"] == 3 and events[1]["kills_last_hour"] == 3
-    assert fd.sent == sent_before and len(fd.opened) == 3
+    assert events[1]["max_kills_per_hour"] == 3
+    assert events[1]["kills_last_hour"] == 3
+    assert fd.sent == sent_before
+    assert len(fd.opened) == 3
     # the window rolls: an hour after the first kill, one kill is allowed again
     clock.t = 10_000.0 + 3600.5
     (ev,) = k.act(_respawn(tmp_path, 300), FakeTracker({600: 9.0}), reason="horizon")
-    assert ev["event"] == "memory_kill" and ev["kills_last_hour"] == 3
+    assert ev["event"] == "memory_kill"
+    assert ev["kills_last_hour"] == 3
 
 
 def test_three_kills_of_same_cmdline_in_30_min_repeat_1_2_3_and_new_cmdline_resets(tmp_path):
@@ -449,7 +468,8 @@ def test_real_pidfd_kills_only_the_child(tmp_path):
             if p is not None and p.comm == "sleep":
                 break
             time.sleep(0.01)
-        assert p is not None and p.comm == "sleep"
+        assert p is not None
+        assert p.comm == "sleep"
         k = memkill.MemKiller(MemoryRule(action="kill"), proc_root=Path("/proc"))
         # a stale start time (as if the pid were recycled) is refused on the real path too
         stale = memprocs.Proc(**{**p.__dict__, "start_ticks": p.start_ticks - 1})

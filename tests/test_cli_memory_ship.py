@@ -68,13 +68,17 @@ def test_catalog_learn_overview_list_new_paths(capsys):
     for p in (["memory", "replay"], ["memory", "top"], ["ship", "test"], ["ship", "fetch"]):
         assert p in cmds
     _, lt, _ = run(capsys, "learn")
-    assert "memory replay" in lt and "ship fetch" in lt
+    assert "memory replay" in lt
+    assert "ship fetch" in lt
     _, ov, _ = run(capsys, "overview")
-    assert "memory" in ov and "ship" in ov
+    assert "memory" in ov
+    assert "ship" in ov
     rc, out, _ = run(capsys, "explain", "memory", "replay")
-    assert rc == 0 and "replay" in out
+    assert rc == 0
+    assert "replay" in out
     _, cfg, _ = run(capsys, "explain", "config")
-    assert "[memory]" in cfg and "[ship]" in cfg
+    assert "[memory]" in cfg
+    assert "[ship]" in cfg
 
 
 # -- memory status ----------------------------------------------------------------
@@ -106,7 +110,10 @@ def test_status_prints_mem_guard(capsys, tmp_path, json_mode):
     if json_mode:
         assert json.loads(out) == {"configured": True, "mem_guard": GUARD}
     else:
-        assert "kill" in out and "30000" in out and "python" in out and "pid 42" in out
+        assert "kill" in out
+        assert "30000" in out
+        assert "python" in out
+        assert "pid 42" in out
 
 
 def _j(json_mode):
@@ -157,7 +164,8 @@ def test_top(capsys, proc_root, json_mode):
         assert [r["comm"] for r in rows] == ["big", "mid"]
         assert rows[0]["rss_anon_mib"] == 3000
     else:
-        assert out.index("big") < out.index("mid") and "small" not in out
+        assert out.index("big") < out.index("mid")
+        assert "small" not in out
 
 
 def test_top_bad_n_and_missing_root(capsys, tmp_path, proc_root):
@@ -177,11 +185,13 @@ def test_replay_csv_lists_five_fires(capsys, json_mode):
     assert (rc, err) == (0, "")
     if json_mode:
         doc = json.loads(out)
-        assert doc["total_mib"] == 45939 and doc["total_source"] == "file header"
+        assert doc["total_mib"] == 45939
+        assert doc["total_source"] == "file header"
         assert len(doc["fires"]) == 5
         assert {"t", "utc", "local", "reason", "avail_mib", "rate_mib_s"} <= set(doc["fires"][0])
     else:
-        assert "5 fires" in out and "MemTotal 45939" in out
+        assert "5 fires" in out
+        assert "MemTotal 45939" in out
 
 
 def test_replay_params_change_result(capsys):
@@ -202,7 +212,8 @@ def test_replay_records_jsonl(capsys, tmp_path):
     rc, out, err = run(capsys, "memory", "replay", str(f), "--total-mib", "10000", "--json")
     assert (rc, err) == (0, "")
     doc = json.loads(out)
-    assert doc["total_source"] == "--total-mib" and len(doc["fires"]) == 1
+    assert doc["total_source"] == "--total-mib"
+    assert len(doc["fires"]) == 1
     assert doc["fires"][0]["reason"] == "floor"
 
 
@@ -222,7 +233,8 @@ def test_replay_errors(capsys, tmp_path):
     empty = tmp_path / "e.jsonl"
     empty.write_text("{}\n")
     rc, _, err = run(capsys, "memory", "replay", str(empty), "--total-mib", "100")
-    assert rc == 1 and "mem:avail_mib" in err
+    assert rc == 1
+    assert "mem:avail_mib" in err
     rc, _, _ = run(capsys, "memory", "replay", str(empty), "--total-mib", "0")
     assert rc == 1
 
@@ -256,11 +268,13 @@ def test_ship_test_ok(capsys, ship_env, json_mode):
     assert FAKE_SECRET_KEY not in out
     if json_mode:
         doc = json.loads(out)
-        assert doc["ok"] is True and doc["machine"] == "spark-a"
+        assert doc["ok"] is True
+        assert doc["machine"] == "spark-a"
         assert doc["key"].startswith("fleet/spark-a/_probe/")
         assert doc["latency_ms"] >= 0
     else:
-        assert "ok" in out and "ms" in out
+        assert "ok" in out
+        assert "ms" in out
 
 
 def test_ship_test_machine_from_fleet_local(capsys, ship_env, tmp_path, monkeypatch):
@@ -301,8 +315,10 @@ def test_ship_test_s3_failure_is_env_error(capsys, ship_env):
     ship_env.always = (403, "AccessDenied")
     rc, out, err = run(capsys, "ship", "test")
     assert (rc, out) == (2, "")
-    assert "403" in err and "AccessDenied" in err
-    assert FAKE_SECRET_KEY not in err and FAKE_ACCESS_KEY not in err
+    assert "403" in err
+    assert "AccessDenied" in err
+    assert FAKE_SECRET_KEY not in err
+    assert FAKE_ACCESS_KEY not in err
 
 
 def seed(s3, machine="spark-a", boot="boot-1", t=1794677400.0):
@@ -333,11 +349,16 @@ def test_ship_fetch(capsys, ship_env, tmp_path, json_mode):
     assert (out_dir / "blackbox.jsonl.gz").exists()
     if json_mode:
         doc = json.loads(out)
-        assert doc["boot"] == "boot-1" and doc["blackbox"]["rows"] == 3
-        assert doc["events"][0]["kind"] == "memory_kill" and doc["events"][0]["pid"] == 42
+        assert doc["boot"] == "boot-1"
+        assert doc["blackbox"]["rows"] == 3
+        assert doc["events"][0]["kind"] == "memory_kill"
+        assert doc["events"][0]["pid"] == 42
         assert doc["postmortem"]["reason"] == "oom"
     else:
-        assert "boot-1" in out and "memory_kill" in out and "python" in out and "3 rows" in out
+        assert "boot-1" in out
+        assert "memory_kill" in out
+        assert "python" in out
+        assert "3 rows" in out
 
 
 def test_ship_fetch_explicit_boot_and_default_dir(capsys, ship_env, tmp_path, monkeypatch):
@@ -357,7 +378,8 @@ def test_ship_fetch_nothing_found_and_missing_machine(capsys, ship_env, tmp_path
     assert (rc, out) == (1, "")
     assert "ghost" in err
     rc, out, err = run(capsys, "ship", "fetch")
-    assert rc == 1 and out == ""
+    assert rc == 1
+    assert out == ""
 
 
 def test_ship_fetch_partial_boot_still_works(capsys, ship_env, tmp_path):
@@ -370,7 +392,8 @@ def test_ship_fetch_partial_boot_still_works(capsys, ship_env, tmp_path):
     )
     assert (rc, err) == (0, "")
     doc = json.loads(out)
-    assert doc["events"] == [] and doc["blackbox"] is None
+    assert doc["events"] == []
+    assert doc["blackbox"] is None
 
 
 # -- report and unit --------------------------------------------------------------
@@ -390,8 +413,11 @@ def test_report_prints_mem_block(capsys, tmp_path, monkeypatch):
     monkeypatch.setattr(governing.recorder, "report", lambda *a, **k: [entry])
     rc, out, err = run(capsys, "report", "--data-dir", str(tmp_path))
     assert (rc, err) == (0, "")
-    assert "min avail 0 MiB" in out and "swap 4096 MiB" in out and "peak PSI full 98.0" in out
-    assert "2 memory_kill" in out and "1 oom_kill" in out
+    assert "min avail 0 MiB" in out
+    assert "swap 4096 MiB" in out
+    assert "peak PSI full 98.0" in out
+    assert "2 memory_kill" in out
+    assert "1 oom_kill" in out
     rc, out, _ = run(capsys, "report", "--data-dir", str(tmp_path), "--json")
     assert json.loads(out)["reboots"][0]["mem"]["min_avail_mib"] == 0
 
