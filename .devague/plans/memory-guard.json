@@ -1,0 +1,797 @@
+{
+  "slug": "memory-guard",
+  "title": "memory guard",
+  "frame_slug": "memory-guard",
+  "schema_version": 5,
+  "status": "exported",
+  "created": "2026-11-14T18:37:22Z",
+  "updated": "2026-11-15T06:12:36Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "heat-governor catches a runaway process before it takes the machine down: when memory is about to run out it kills the biggest own-user grower, records who used the memory and what started it, and keeps that record in S3 so a dead machine's last minutes survive off-box.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "All three parts ship together: kill, per-process records, and S3 upload; none of them depends on the thermal path.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "A memory guard runs in its own thread, reading /proc/meminfo every ~0.25 s, independent of the 1 s tick: the tick is single-threaded and its docker discover blocked (records 2026-11-14 18:48:30Z 'docker socket TimeoutError'; tick gaps of 133 s and 52 s while memory filled).",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "A blocked docker socket or slow tick never delays a guard poll by more than one poll interval.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "Trigger on the MemAvailable slope plus a floor, not on PSI: kill when available < floor (default 5% of MemTotal), or when projected exhaustion (available / fill rate) < horizon (default 10 s) and available < 20%. On 2026-11-14 memory PSI stayed ~0 until available fell below ~2 GB, while each wave took 36-62 s at up to ~1.2 GB/s.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "The trigger fires on all five 2026-11-14 waves with >= 15 s to spare and never on 2026-11-10..13.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "Victim: the own-uid process whose RSS grew most over the last ~10 s, with RSS >= min_victim_mib (default 2048), skipping a protect list (the governor and its parent chain, pid 1, systemd, sshd, gnome-shell, Xwayland, tailscaled, dockerd, containerd and any [memory] protect entries). Sent SIGKILL (no grace: at 1.2 GB/s a SIGTERM grace period costs GBs). os.kill and proc_root are injected for tests.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "The guard never signals a protected process, a process of another uid, its own process or its parent chain, or anything under min_victim_mib.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "Per-process tracking in the records: a 'top' snapshot (top-N by RSS: pid, ppid, uid, comm, cmdline redacted and truncated, rss_mib, growth MiB/s, start time, cgroup) every 10 s normally and every guard poll once available < 20%; a kill writes an event row with the victim, its parent chain to the session, the last 60 s of memory, and the top list at that moment.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "From the records alone, an operator can name the process that filled memory, its command line and what started it.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "OOM-kill events: read /proc/vmstat oom_kill and the delegated cgroups' memory.events each guard poll; a delta writes an event row (counter, cgroup if found), so kernel and memcg kills are on record even when the guard did not act.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "Every kernel or memcg OOM kill during the daemon's life appears as an oom_kill event row.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c8",
+      "kind": "boundary",
+      "text": "New record rows carry an 'event' key (memory_kill, memory_would_kill, oom_kill) and tick rows gain only an optional 'top' field, so the fleet view's history reader ignores them unchanged.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "history.py and report() read the new records unchanged.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c9",
+      "kind": "requirement",
+      "text": "Off-box shipping to S3 with a stdlib SigV4 signer (hmac, hashlib, urllib.request PUT; no boto3): on a kill or OOM event, PUT the event JSON immediately; every 60 s (every 10 s while available < 20%) PUT a rolling black box (last 10 min of records, gzipped) to `<prefix>/<host>/<boot_id>/blackbox.jsonl.gz`; on start after an unclean boot, PUT a postmortem. Runs in its own thread with a bounded queue; failures spool to disk and retry, never blocking the guard.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "An upload failure or a slow network never blocks the guard or the tick; events are uploaded at least once, retried after a restart.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "Credentials and target from config: [ship] bucket, region, prefix, optional profile (read from ~/.aws/credentials and ~/.aws/config via configparser) or AWS_* environment variables, optional endpoint for S3-compatible stores. Secrets are never written to records, logs or uploads.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h15",
+      "kind": "honesty",
+      "text": "Credentials never appear in records, logs, uploads or the state doc, and the SigV4 signature matches AWS's published test vectors.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "Config: new strict [memory] (action = record|kill, floor_pct, horizon_s, window_s, min_victim_mib, protect, poll_s, top_n) and [ship] sections, added to TOP_KEYS with validators and documented in config template and explain config; live-reloadable like the rest.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h16",
+      "kind": "honesty",
+      "text": "An invalid [memory] or [ship] section is rejected with a specific message, as every other section is.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "CLI: noun 'memory' (overview, status, top) and noun 'ship' (overview, test, fetch), each a module with register(sub) wired in _build_parser, listed in overview _VERBS, learn text and JSON, and explain catalog ENTRIES; tests copy tests/test_cli_mesh.py:266-301.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h17",
+      "kind": "honesty",
+      "text": "Every new path resolves in explain and teken cli doctor . --strict passes.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c13",
+      "kind": "requirement",
+      "text": "report gains memory: for each reboot, the last 60 s minimum available, swap used and peak memory PSI, plus any memory_kill/oom_kill events before it, so an OOM-driven reset reads as memory, not as 'max 20.0 C'.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h18",
+      "kind": "honesty",
+      "text": "report on the 2026-11-14 records says memory, not 'max 20.0 C' only.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "The governor stays responsive under memory pressure: best-effort mlockall(MCL_CURRENT|MCL_FUTURE) via ctypes when the [memory] guard is enabled (logged if refused), and the 'unit' verb emits MemoryMin= for the daemon's unit.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h19",
+      "kind": "honesty",
+      "text": "Under memory pressure the governor's own pages stay resident (mlockall accepted or MemoryMin set) and the result is logged at start.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c15",
+      "kind": "requirement",
+      "text": "The state doc gains an optional mem_guard object (action, armed, last_kill {t, pid, comm, rss_mib}); level, admit and concurrency_factor stay thermal-only.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h20",
+      "kind": "honesty",
+      "text": "Existing clients (client.read/wait/Gate) behave identically with mem_guard present.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c17",
+      "kind": "boundary",
+      "text": "The guard can only signal processes its own uid owns; root and container processes (other uids, e.g. uid 10001 containers here) are out of reach, and docker kill of opted-in containers is not part of this change.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h21",
+      "kind": "honesty",
+      "text": "The guard refuses, rather than tries and fails, to target processes of other uids.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c18",
+      "kind": "boundary",
+      "text": "Uploaded evidence must not leak secrets: cmdlines are truncated and redacted (token/key/secret/password-style arguments), environment variables are never captured, and the credentials never leave the signer.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h22",
+      "kind": "honesty",
+      "text": "No uploaded object contains a value matching the scan-secrets patterns.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c19",
+      "kind": "boundary",
+      "text": "CI constraints: no AKIA literals in tests, '# nosec B310' on urlopen, NOSONAR with a rule id on any hotspot (e.g. plain-HTTP custom endpoint), version bump + CHANGELOG, coverage >= 60%.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h23",
+      "kind": "honesty",
+      "text": "CI passes: lint, bandit, scan-secrets, teken doctor, version-check, sonar gate with zero unaccepted issues.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c22",
+      "kind": "audience",
+      "text": "The operator (Ori) and the agents that run heavy jobs on the fleet (Claude Code sessions, culture mesh agents, sparkrun/lobes clients); first the EliteMini, where a runaway test reset the box on 2026-11-14.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "The memory guard's state and evidence are reachable without a shell on the box (state doc mem_guard + S3).",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c23",
+      "kind": "before_state",
+      "text": "Before: heat-governor recorded mem:* and psi:* every second but acted on none of it and kept no per-process data. On 2026-11-14 a test grew to ~41 GB five times in 17 min, the kernel OOM killer fired late twice, the box thrashed 16 min and was reset, and the only evidence of what ran was the kernel's OOM tables. The governor's last record was 16 min before the reset, and it stayed on the box.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "The before-state numbers match the records: 5 waves, 36-62 s each, peak ~1.2 GB/s, gaps 133/52/942 s.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c24",
+      "kind": "why_it_matters",
+      "text": "A box that thrashes into a reset loses every agent session and service on it (mesh IRCd, tunnels, mongo, dashboards) and leaves nothing to learn from; killing one runaway costs one test run.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "Killing one own-user process is always cheaper than a reset of the whole box.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c25",
+      "kind": "after_state",
+      "text": "After: a runaway own-user process is SIGKILLed before available memory reaches zero; the box stays up and responsive; the records name the process, its growth, its parent chain and the moment of the kill; and the same evidence plus a rolling black box is in S3 within seconds, readable with 'heat-governor ship fetch' from any machine even if the box never comes back.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "The guard kills before the kernel OOM killer would and before the box thrashes, at the measured fill rates.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c26",
+      "kind": "success_signal",
+      "text": "In a controlled test on the EliteMini, a process allocating 1.2 GB/s is killed with available memory still >= 2 GB, the governor records no tick gap > 2 s during the run, and the memory_kill event is in S3 within 10 s of the kill.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "The controlled test is safe to run: it runs inside a MemoryMax scope so a guard failure is contained by the cgroup, not the box.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c27",
+      "kind": "success_signal",
+      "text": "Replaying the 2026-11-14 records through the trigger fires on every one of the five waves at least 15 s before available memory fell below 2 GB, and fires 0 times across the 2026-11-10..13 records (no false kills on a normal week).",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "The recorded 1 Hz mem:avail_mib series is a faithful input for the trigger (same /proc/meminfo field the guard reads).",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "The kill pins its target: open a pidfd (os.pidfd_open) for the chosen pid, re-read `/proc/<pid>/stat` start time and uid through it, and signal with signal.pidfd_send_signal, so a pid that exited and was reused between the scan and the kill is never signalled.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h24",
+      "kind": "honesty",
+      "text": "A pid recycled between selection and kill is never signalled.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "Victim growth and size use anonymous memory (RssAnon from `/proc/<pid>/status`), not total RSS, so mmap-heavy services whose file pages the kernel can drop (mongod, mongot) never look like runaways.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h25",
+      "kind": "honesty",
+      "text": "A process whose growth is file-backed pages is never chosen as the victim.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "Repeat offenders are named: the guard keys kills by (uid, exe, cmdline hash); a second kill of the same key within 30 min writes 'repeat': N on the event and on mem_guard.last_kill, so the relaunching agent or operator can see the loop rather than a series of unrelated kills.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h26",
+      "kind": "honesty",
+      "text": "A relaunch loop is visible as one repeating offender in the records, state doc and S3.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c33",
+      "kind": "requirement",
+      "text": "Kill budget: at most max_kills (default 3) per rolling hour; past the budget the guard drops to record-only, writes a memory_budget_exhausted event and ships it, so a wrong threshold cannot kill legitimate work indefinitely.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h27",
+      "kind": "honesty",
+      "text": "A misconfigured guard can kill at most max_kills processes per hour.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c34",
+      "kind": "requirement",
+      "text": "An http:// endpoint is allowed only for loopback or tailnet (100.64.0.0/10) hosts; any other plain-HTTP endpoint is rejected by config check. SigV4 protects integrity, not confidentiality; tailscale's WireGuard covers the MinIO-on-spark hop.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h28",
+      "kind": "honesty",
+      "text": "Records never travel in clear text over a network the fleet does not own.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c35",
+      "kind": "requirement",
+      "text": "Object keys use the configured machine name ([ship] machine, defaulting to the fleet name), never the kernel hostname: here the hostname is 'ori-EliteMini-Series', which carries the operator's name into any bucket (later R2).",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h29",
+      "kind": "honesty",
+      "text": "No object key contains the kernel hostname unless the operator configured it.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c36",
+      "kind": "requirement",
+      "text": "Uploads that fail with RequestTimeTooSkewed (or any 403 within the first minutes after boot), 5xx, timeouts or connection errors stay spooled and retry with backoff; only 4xx errors the config caused (NoSuchBucket, InvalidAccessKeyId) are logged once per hour, not retried in a tight loop.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h30",
+      "kind": "honesty",
+      "text": "The postmortem written at boot survives a not-yet-synced clock and lands once the clock is right.",
+      "deferred": false,
+      "deferred_reason": ""
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "memtrigger.py: pure trigger (floor + slope/horizon) and a replay over recorded series",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_memtrigger.py: floor fires when avail < 5% of total; horizon fires when avail/rate < 10 s and avail < 20%; a flat or rising series never fires; a single-sample dip does not fire",
+        "Replay of tests/data/memory-2026-11-14.csv fires once per wave on all five waves (starting 19:34, 19:36, 19:45, 19:49, 19:51 local), each at least 15 s before avail first drops below 2048 MiB",
+        "The fixture holds only t and mem:avail_mib (no other fields), and a test asserts the five waves' durations are 36-62 s and peak drop rate is >= 1100 MiB/s, matching the before-state numbers"
+      ],
+      "deps": [],
+      "covers": [
+        "c3",
+        "h9",
+        "c27",
+        "h7",
+        "c23",
+        "h3"
+      ],
+      "instruction": "New module heat_governor/memtrigger.py, no I/O: Trigger(total_mib, floor_pct=5, horizon_s=10, soft_pct=20, window_s=10).step(t, avail_mib) -> Fire|None with reason 'floor' or 'horizon' and the fill rate; replay(rows) yields fire times. Fill rate is a least-squares slope over the window, so one noisy sample cannot fire. Extract the fixture tests/data/memory-2026-11-14.csv from ~/.local/state/heat-governor/records/20261114.jsonl (19:30-19:56 local) keeping ONLY t and mem:avail_mib, plus MemTotal 45939. Write tests first."
+    },
+    {
+      "id": "t2",
+      "summary": "memprocs.py: /proc process scan (anon RSS, uid, parent chain, start time, cgroup), growth, grouping, top-N, redaction",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_memprocs.py: a process with large RssFile and flat RssAnon has ~0 growth; a growing RssAnon reports its MiB/s; a pid that disappears mid-scan is skipped without error",
+        "parent chain resolves to the session/scope ancestor; groups() sums anon memory per top-level ancestor; top(n) entries carry pid, ppid, uid, comm, cmdline (redacted), rss_mib, growth_mib_s, start_t and cgroup",
+        "redact() masks --token=X, --api-key X, PASSWORD=X, Authorization headers and AKIA-shaped strings (built at runtime in the test), never env, and output passes the scan-secrets token patterns"
+      ],
+      "deps": [],
+      "covers": [
+        "c6",
+        "h11",
+        "c31",
+        "h25",
+        "c18",
+        "h22"
+      ],
+      "instruction": "New module heat_governor/memprocs.py with an injected proc_root (pattern: SystemProbe in sense.py). scan() reads `/proc/<pid>/status` (Uid, PPid, RssAnon), `/proc/<pid>/stat` (start time), cmdline and cgroup, skipping vanished pids. Tracker keeps ~window_s of samples per (pid, start time) and returns anon growth MiB/s. groups() groups own-uid processes by top-level ancestor below the login session or systemd scope. top(n) builds the record snapshot. redact(cmdline) masks values after token/key/secret/password/auth-style flags and KEY=VALUE env-style args and truncates to 512 chars. Tests use a fake /proc tree under tmp_path (extend tests/fakes.py only in a new helper file tests/fakes_proc.py)."
+    },
+    {
+      "id": "t3",
+      "summary": "sigv4.py: stdlib AWS Signature V4 signer",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_sigv4.py: signatures match the AWS documented S3 examples byte for byte; canonical query strings sort and encode per spec; region 'auto' (R2) signs without error",
+        "the secret key never appears in returned headers, repr() or exceptions (asserted in test)"
+      ],
+      "deps": [],
+      "covers": [
+        "h15"
+      ],
+      "instruction": "New module heat_governor/sigv4.py: sign(method, url, headers, payload_sha256, access_key, secret_key, region, service='s3', now) -> headers, path-style, x-amz-content-sha256 always the real payload hash. hmac + hashlib only. Tests reproduce AWS's published SigV4 examples (the GET-object example from the S3 docs) with keys assembled at runtime so no AKIA literal is committed."
+    },
+    {
+      "id": "t4",
+      "summary": "config.py: strict [memory] and [ship] sections",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_config_memory_ship.py: each key's type and range is checked; unknown keys in either section are rejected with the known-key list; absent sections mean action=record and shipping off",
+        "endpoint http://127.0.0.1:9000 and http://100.101.102.103:9000 are accepted, http://example.org:9000 is rejected, https:// any host is accepted",
+        "config check over the template still passes; existing config tests pass unchanged"
+      ],
+      "deps": [],
+      "covers": [
+        "c11",
+        "h16",
+        "c34"
+      ],
+      "instruction": "Add MEMORY_KEYS and SHIP_KEYS beside DAEMON_KEYS, 'memory' and 'ship' to TOP_KEYS, validators in the _validate_daemon style, MemoryRule/ShipRule dataclasses with Config.memory/Config.ship accessors, and commented examples in template(). [memory]: action record|kill (default record), floor_pct, horizon_s, soft_pct, window_s, min_victim_mib, max_kills_per_hour (3), protect (list), poll_s (0.1-2), top_n, top_every_s. [ship]: enabled, endpoint, region, bucket, prefix, profile, machine, blackbox_every_s, blackbox_minutes, spool_dir. An http:// endpoint is valid only for loopback or 100.64.0.0/10 hosts. Only config.py and tests/test_config_memory_ship.py change."
+    },
+    {
+      "id": "t5",
+      "summary": "recorder.py: thread-safe writes and memory in the reboot report",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_recorder_memory.py: 8 threads x 500 writes produce 4000 intact JSON lines",
+        "a fixture shaped like 2026-11-14 (avail falling to 0, swap 4096, psi 98) yields a reboot entry whose mem block reports those values and lists the kill/oom events",
+        "report() and history-style readers over a file mixing old ticks, event rows (memory_kill, oom_kill) and ticks with a top field parse without error; existing recorder tests pass unchanged"
+      ],
+      "deps": [],
+      "covers": [
+        "c8",
+        "h13",
+        "c13",
+        "h18"
+      ],
+      "instruction": "Serialize Recorder.write with a lock (guard, shipper and tick now all write). Extend _reboot_entry with mem {min_avail_mib, max_swap_used_mib, peak_psi_memory_full} over the window and the memory_kill/oom_kill/memory_budget_exhausted events in the window before the reboot. Also add tail(minutes) -> rows for the black box. Only recorder.py and tests/test_recorder_memory.py change."
+    },
+    {
+      "id": "t6",
+      "summary": "memkill.py: victim choice, pidfd-pinned SIGKILL, protect list, kill budget, repeat offenders",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_memkill.py: other-uid, protected, self, parent-chain and under-minimum processes are never chosen; with no single eligible process, the biggest member of the fastest-growing group is chosen",
+        "a pid whose start time changed between scan and kill is not signalled; the kill goes through the injected pidfd_send_signal with SIGKILL",
+        "the 4th trigger within an hour returns would-kill plus memory_budget_exhausted and sends no signal; three kills of the same cmdline in 30 min carry repeat 1, 2, 3",
+        "one test spawns a real 'sleep 60' child of the test process (own uid) and confirms the real pidfd path kills only it"
+      ],
+      "deps": [
+        "t2"
+      ],
+      "covers": [
+        "c4",
+        "h10",
+        "c30",
+        "h24",
+        "c32",
+        "h26",
+        "c33",
+        "h27",
+        "c17",
+        "h21"
+      ],
+      "instruction": "New module heat_governor/memkill.py using memprocs. choose(): own uid only; the biggest anon grower >= min_victim_mib not protected (pid 1, the daemon and its parent chain, systemd, sshd, gnome-shell, Xwayland, tailscaled, dockerd, containerd, plus config protect); if none qualifies, the fastest-growing group's biggest member (decision c37). kill(): os.pidfd_open, re-check start time and uid via /proc, signal.pidfd_send_signal(SIGKILL); both callables injected. Budget: max_kills_per_hour rolling; past it -> would-kill + memory_budget_exhausted. Repeat key (uid, exe, sha256(cmdline)) within 30 min -> repeat N. Returns event dicts; writes nothing itself."
+    },
+    {
+      "id": "t7",
+      "summary": "ship.py: S3-compatible client, credentials, key layout, black box, spool and retry",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_ship.py against a ThreadingHTTPServer fake S3 on 127.0.0.1:0 that verifies SigV4 with the shared fake keys: put/get/list round-trip; keys follow the obligation o3 layout; machine name, not socket.gethostname(), is in every key",
+        "server returning 503 then 200, RequestTimeTooSkewed then 200, or down then up: the event lands exactly once after recovery and the spool drains; NoSuchBucket is logged once per hour and not retried in a tight loop",
+        "a stalled server (sleeps past the timeout) never blocks the caller of Shipper.submit(); the secret key never appears in logs, spool files or exceptions",
+        "credentials resolve from env first, then the named profile; a world-readable credentials file logs a warning"
+      ],
+      "deps": [
+        "t3",
+        "t4"
+      ],
+      "covers": [
+        "c9",
+        "h14",
+        "c10",
+        "h15",
+        "c34",
+        "h28",
+        "c35",
+        "h29",
+        "c36",
+        "h30"
+      ],
+      "instruction": "New module heat_governor/ship.py: Credentials from AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or [ship] profile in ~/.aws/credentials (configparser; home injectable). S3Client(endpoint, region, bucket).put/get/list via urllib.request with sigv4, path-style, timeouts, '# nosec B310' and, on the plain-HTTP branch, '# NOSONAR python:S5332 -- loopback/tailnet only'. Keys: `<prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json`, .../blackbox.jsonl.gz, .../postmortem.json; machine from config or fleet name, never the hostname. Shipper thread: bounded queue, events PUT immediately, black box every blackbox_every_s (10 s while memory is low), spool to spool_dir on failure, drain with backoff; RequestTimeTooSkewed/403-after-boot/5xx/timeout retry, config-caused 4xx logged once an hour."
+    },
+    {
+      "id": "t8",
+      "summary": "memguard.py: the guard thread (poll, trigger, kill, OOM counters, top snapshots, mlockall)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_memguard.py: with a fake meminfo falling at 1.2 GB/s the guard fires and the injected kill is called before avail < 2048 MiB; with action=record it emits memory_would_kill and never calls kill",
+        "while a fake tick thread sleeps 30 s holding no shared lock, guard polls continue every poll_s (measured with a fake clock / counter)",
+        "stepping fake oom_kill and memory.events counters emits exactly one oom_kill event per delta",
+        "mlockall refused (fake returns -1) is logged and the guard still runs; doc() shape matches the state.md mem_guard row"
+      ],
+      "deps": [
+        "t1",
+        "t2",
+        "t6"
+      ],
+      "covers": [
+        "c2",
+        "h8",
+        "c7",
+        "h12",
+        "c14",
+        "h19"
+      ],
+      "instruction": "New module heat_governor/memguard.py: MemGuard(rule, proc_root, sys_root, clock, kill, emit, mlockall).start() runs its own thread polling /proc/meminfo every rule.poll_s; Trigger (t1) decides; on fire, memkill (t6) chooses and kills (action=kill) or records memory_would_kill (action=record). Each poll reads /proc/vmstat oom_kill and memory.events of user.slice/user-1000.slice and the daemon's delegated cgroups; deltas emit oom_kill events. Emits top snapshots every top_every_s, every poll while avail < soft_pct. doc() returns the mem_guard state object {action, armed, avail_mib, last_kill{t,pid,comm,rss_mib,repeat}, kills_last_hour}. Best-effort mlockall(MCL_CURRENT|MCL_FUTURE) via ctypes when action=kill; result logged. emit() is the only output."
+    },
+    {
+      "id": "t9",
+      "summary": "daemon.py: start/stop guard and shipper, event rows, top field, mem_guard in the state doc",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_daemon_memory.py: a daemon with [memory] action=kill and fake proc/sys/kill emits a memory_kill row and submits it to a fake shipper; level, admit and concurrency_factor are identical with and without [memory]",
+        "the state doc has mem_guard when [memory] is set and not otherwise; tests/test_client_state.py passes against a doc with mem_guard",
+        "removing [memory] via live reload stops the guard thread; an unclean previous boot submits a postmortem once"
+      ],
+      "deps": [
+        "t4",
+        "t5",
+        "t7",
+        "t8"
+      ],
+      "covers": [
+        "c15",
+        "h20",
+        "h1",
+        "c6"
+      ],
+      "instruction": "Wire MemGuard and Shipper into Daemon.start/shutdown/apply_config (live reload of [memory]/[ship]) when the sections are present; MemGuard.emit -> recorder.write (event rows carry 'event') + Shipper.submit for memory_kill/memory_budget_exhausted/oom_kill; the latest top snapshot is added to the next tick row as 'top'; state_doc gains 'mem_guard' only when the guard exists; on start after an unclean boot (recorder.report's last entry is this boot), submit a postmortem. Nothing in the thermal path reads memory. Only daemon.py and tests/test_daemon_memory.py change."
+    },
+    {
+      "id": "t10",
+      "summary": "CLI: memory (overview, status, top, replay) and ship (overview, test, fetch); report and unit updates; explain/learn/overview",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_cli_memory_ship.py: every new verb works with --json, results on stdout, errors on stderr, exit codes 0/1/2; bare 'memory' and 'ship' print their overview",
+        "test_every_catalog_path_resolves passes with the new paths; teken cli doctor . --strict passes",
+        "ship fetch against the fake S3 writes the events, postmortem and black box and prints them; memory replay over tests/data/memory-2026-11-14.csv lists five fires",
+        "unit output contains MemoryMin=; report output shows min avail, swap and peak PSI for a memory-driven reboot"
+      ],
+      "deps": [
+        "t5",
+        "t7",
+        "t8"
+      ],
+      "covers": [
+        "c12",
+        "h17",
+        "c14"
+      ],
+      "instruction": "New cli/_commands/memory.py and ship.py with register(sub) in _build_parser, following mesh.py (bare noun prints overview, parser_class=type(p)). memory status reads mem_guard from the state doc; memory top prints a live top-N from memprocs; memory replay <records.jsonl|csv> prints when the trigger would have fired (for the quiet-days check). ship test PUTs and GETs a probe object; ship fetch --machine M [--boot B] downloads events, postmortem and black box to a directory and prints a summary. report prints the mem block. unit emits MemoryMin=128M. Add ENTRIES to explain/catalog.py, _VERBS in overview.py, learn text and JSON. Copy the test pattern of tests/test_cli_mesh.py:266-301."
+    },
+    {
+      "id": "t11",
+      "summary": "Docs, version 0.17.0, CHANGELOG and a green CI",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "the full CLAUDE.md lint set passes locally: black, isort, flake8, bandit, markdownlint, scan-secrets, teken cli doctor --strict, harness-smoke --stage config; pytest -n auto with coverage >= 60%",
+        "the PR's CI is green including version-check, and scripts/sonar-gate.py reports zero unaccepted issues or unreviewed hotspots",
+        "docs name the operator and agent clients as readers of mem_guard and the S3 evidence, and docs/contracts/memory.md lists the eight obligations"
+      ],
+      "deps": [
+        "t9",
+        "t10"
+      ],
+      "covers": [
+        "c19",
+        "h23",
+        "c22"
+      ],
+      "instruction": "Add docs/contracts/memory.md (trigger, victim rules, budget, event rows, S3 layout, the eight obligations); mem_guard row in docs/contracts/state.md; a memory-guard section in docs/integration.md and the README verb table; the state-table row in CLAUDE.md and the matching sentence in AGENTS.override.md, AGENTS.colleague.md, QWEN.md and the .pi/SYSTEM.md verb table; host recommendations (systemd-run -p MemoryMax for heavy tests, MemoryMax on user-1000.slice, oomd) as guidance. Bump to 0.17.0 via the version-bump skill (rebase on PR #13 if merged first)."
+    },
+    {
+      "id": "t12",
+      "summary": "Deploy: MinIO on spark, a scoped heat-governor key, EliteMini profile and config (user go-ahead)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "heat-governor ship test on the EliteMini PUTs and GETs a probe object in heat-governor on spark",
+        "MinIO answers only on spark's tailnet address (not 0.0.0.0) and the scoped key cannot list or write other buckets",
+        "heat-governor memory status on the EliteMini shows action=kill, armed, and config check passes"
+      ],
+      "deps": [
+        "t10"
+      ],
+      "covers": [
+        "c10"
+      ],
+      "instruction": "Live changes, each only with the user's explicit go-ahead: run MinIO in docker on spark bound to its tailnet address :9000, data under a spark directory, restart unless-stopped; create bucket heat-governor and a user with a policy limited to that bucket; store its keys on the EliteMini as a [heat-governor] profile in ~/.aws/credentials (mode 600); add [ship] (endpoint `http://<spark-tailnet-ip>:9000`, region us-east-1, bucket heat-governor, prefix fleet, profile heat-governor, machine elitemini) and [memory] action=kill to ~/.config/heat-governor/config.toml; install the 0.17.0 dev build; restart the user unit."
+    },
+    {
+      "id": "t13",
+      "summary": "Live validation on the EliteMini: controlled runaway, black box from another box, evidence doc (user go-ahead)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "the allocator is killed with min mem:avail_mib >= 2048 during the run and no tick gap > 2 s in the records",
+        "the memory_kill event object is in S3 within 10 s of the event t, and ship fetch from another box prints the victim, its parent chain and the black box",
+        "memory replay over the 2026-11-10..13 records reports 0 fires; the evidence doc records all three results, including any failure"
+      ],
+      "deps": [
+        "t11",
+        "t12"
+      ],
+      "covers": [
+        "c26",
+        "h6",
+        "c25",
+        "h5",
+        "c1",
+        "c24",
+        "h4",
+        "h2"
+      ],
+      "instruction": "With the user's go-ahead: run a python allocator growing ~1.2 GB/s inside 'systemd-run --user --scope -p MemoryMax=30G' (the cgroup is the safety net) while the governor runs with action=kill; then from another machine run 'heat-governor ship fetch --machine elitemini'. Also run 'heat-governor memory replay' over the local 2026-11-10..13 records (quiet days). Write docs/evidence/2026-11-XX-memory-guard-live.md with the numbers."
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "Thresholds are tuned only on the EliteMini's 2026-11-14 shape; other fill patterns (slow leaks, bursty allocators) are untested.",
+      "kind": "unknown_nonblocking",
+      "task_id": "t1",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r2",
+      "text": "Spark/GB10 boxes idle near 9% available memory; [memory] stays record-only there until measured.",
+      "kind": "unknown_nonblocking",
+      "task_id": null,
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r3",
+      "text": "Spark's own daemon needs a ship target other than spark (R2 or another box); not configured by this plan.",
+      "kind": "follow_up",
+      "task_id": null,
+      "resolved": true,
+      "resolution": "spark ships to a second MinIO on arduino (100.97.170.7:9000); every other box ships to spark; no box ships to itself (user, 2026-11-15)"
+    },
+    {
+      "id": "r4",
+      "text": "No notification on memory_kill (mesh/dashboard); follow-up after the fleet view change.",
+      "kind": "follow_up",
+      "task_id": null,
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r5",
+      "text": "S3 retention / lifecycle rules undecided; decide before moving beyond spark (R2 bills storage).",
+      "kind": "follow_up",
+      "task_id": null,
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r6",
+      "text": "PR #13 (0.16.2) is open; if it merges first, rebase and keep 0.17.0.",
+      "kind": "follow_up",
+      "task_id": "t11",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r7",
+      "text": "Sonar may flag os.kill / pidfd_send_signal or ctypes mlockall as hotspots; each needs a reviewed NOSONAR with a rule id.",
+      "kind": "unknown_nonblocking",
+      "task_id": "t11",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r8",
+      "text": "t9 agent saw exactly one uncaptured full-suite failure; not reproduced in 5 full runs + 20 runs of tests/test_daemon_memory.py after merge. Possible thread-timing flake; watch CI.",
+      "kind": "unknown_nonblocking",
+      "task_id": "t9",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r9",
+      "text": "tests/test_ship.py failed once locally (1 failed, 24 passed; test name not captured) right after the S9073 split, then passed 10 serial runs and 25 parallel stress runs; CI passed. The t7 agent flagged its 0.2-0.6 s timing windows as timing-based. Watch for flakes; widen the windows if it recurs.",
+      "kind": "unknown_nonblocking",
+      "task_id": "t7",
+      "resolved": true,
+      "resolution": "the flake was test_stalled_server_never_blocks_submit bounding 20 fsyncing submits at 0.25 s total (CI took 0.264 s); now bounds each call by the 0.3 s client timeout"
+    }
+  ],
+  "obligations": []
+}

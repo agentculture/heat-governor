@@ -1,0 +1,80 @@
+{
+  "plan_slug": "memory-guard",
+  "schema_version": 2,
+  "created": "2026-11-14T21:28:16Z",
+  "updated": "2026-11-15T05:52:56Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "t1 acceptance criterion 2: replace 'each fire at least 15 s before avail < 2048 MiB' with 'fires before avail < 2048 MiB on all five waves, each >= 4 s ahead, with >= 5 GB (5120 MiB) still available at the fire; 0 fires on the 2026-11-10..13 records'; trigger defaults stay horizon 10 s / soft 20%",
+      "task_ref": "t1",
+      "reason": "Measured on the 2026-11-14 fixture: default leads are 17.6/7/5/6/4 s with 5423-7097 MiB available at the fire; reaching 15 s on every wave needs horizon 25 s / soft 50%, which fires with 15-21 GB free and raises the risk of killing legitimate large allocations. The 15 s figure was an unmeasured margin; user chose defaults + relaxed criterion (2026-11-14).",
+      "affects": [
+        "c27",
+        "h9"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "t11 also fixes the CLI run path: _run_options passes memory=memory_rule(cfg) and ship=ship_rule(cfg) to the daemon Options so [memory]/[ship] apply when [daemon] reload = false (with a test)",
+      "task_ref": "t11",
+      "reason": "t9 found that with reload = false the CLI passes config=None, so the daemon never sees [memory]/[ship]; no task covered the CLI side (t9 was limited to daemon.py, t10 ran in parallel). User approved adding it to t11 (2026-11-15).",
+      "affects": [
+        "t9",
+        "t10",
+        "c11"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 2
+    },
+    {
+      "id": "d3",
+      "what": "Memory limits become absolute and per-platform: [memory] gains floor_mib/soft_mib (set together; override floor_pct/soft_pct); platform profiles declare memory defaults (spark and thor floor 3072 / soft 6144 MiB, orin 2048 / 4096, ventunoq 1024 / 2048, generic keeps 5% / 20%), marked declared/unmeasured; the guard and 'memory status' report the effective limits and their source. Deployment enables [memory] action = kill on all six boxes (elitemini, spark, spark2, thor, orin, arduino) with each box's limits stated in its config, instead of kill on the EliteMini only.",
+      "task_ref": "t4",
+      "reason": "User (2026-11-15): 'Limits need to be configured and enabled; some machines like Thor are full for AI load.' Measured free memory: thor 10.5 GB of 126 (8%), spark 12.2/125 (10%), spark2 9.8/125 (8%), orin 8.3/63 (13%, no swap), VENTUNO Q 6.9/15 (45%). The percentage defaults (5% floor / 20% soft) would fire or scan continuously on thor, the sparks and orin. User chose absolute MiB + per-platform defaults, and kill everywhere (vLLM containers run as other uids and are never eligible).",
+      "affects": [
+        "t1",
+        "t8",
+        "t9",
+        "t10",
+        "t12",
+        "c5",
+        "c11",
+        "c3"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "needs-follow-up",
+      "seq": 3
+    },
+    {
+      "id": "d4",
+      "what": "Add blame and per-process boundaries to the memory guard: (a) every fire records the top growers of ANY user (root, containers, vLLM) as 'blamed' (uid, cgroup/container, growth), while the kill still targets only eligible own-user processes; (b) [[memory.allow]] rules give processes 'acceptable boundaries' (match by process name, cmdline glob or cgroup/container glob; max_mib per process or in total across matches): within its boundary a process is never blamed or chosen; over it, it is blamed first and, if own-user, is the first kill candidate; a process far over its boundary (act_over_pct) is acted on even before system memory is low; a first crossing records memory_boundary_exceeded.",
+      "task_ref": "t6",
+      "reason": "User (2026-11-15) after the code review: 'We need to take into consideration growing processes so we can blame them. Alternatively, acceptable boundaries for a specific process (with multiple of them).' User chose 'blame any user, kill own only' and 'rank + protect within, act when over'. Growth-based victim choice (review #1) already landed.",
+      "affects": [
+        "t6",
+        "t8",
+        "t4",
+        "t10",
+        "c4",
+        "c6",
+        "c11",
+        "c17"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "needs-follow-up",
+      "seq": 4
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}

@@ -61,11 +61,13 @@ Layout::
 from __future__ import annotations
 
 import fnmatch
+import ipaddress
 import os
 import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from heat_governor.platforms import Profile
 
@@ -123,7 +125,54 @@ PAIR_KEYS = {
     "cpu_cap": bool,
 }
 PAIR_RESTART_ONLY = ("listen",)  # a bound socket: changed only by a restart
-TOP_KEYS = {"platform", "profile", "daemon", "containers", "units", "pair"}
+MEMORY_ACTIONS = ("record", "kill")
+MEMORY_KEYS = {
+    "action": str,
+    "floor_pct": (int, float),
+    "horizon_s": (int, float),
+    "soft_pct": (int, float),
+    "window_s": (int, float),
+    "min_victim_mib": int,
+    "max_kills_per_hour": int,
+    "protect": list,
+    "poll_s": (int, float),
+    "top_n": int,
+    "top_every_s": (int, float),
+    "floor_mib": int,
+    "soft_mib": int,
+    "allow": list,
+    "act_over_pct": (int, float),
+}
+# [[memory.allow]]: a per-process (or per-set) memory boundary
+ALLOW_KEYS = {
+    "name": str,
+    "comm": list,
+    "cmdline": str,
+    "cgroup": str,
+    "max_mib": int,
+    "scope": str,
+}
+ALLOW_SCOPES = ("process", "total")
+ALLOW_MATCHERS = ("comm", "cmdline", "cgroup")
+ALLOW_MIN_MIB = 64
+SHIP_KEYS = {
+    "enabled": bool,
+    "endpoint": str,
+    "region": str,
+    "bucket": str,
+    "prefix": str,
+    "profile": str,
+    "machine": str,
+    "blackbox_every_s": (int, float),
+    "blackbox_minutes": (int, float),
+    "spool_dir": str,
+}
+# S3 bucket naming: 3-63 chars of lowercase letters, digits, hyphens, dots; alnum at both ends
+BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]")
+# Tailscale / carrier-grade NAT range: the RFC 6598 shared address space the tailnet uses
+CGNAT = ipaddress.ip_network("100.64.0.0/10")  # NOSONAR python:S1313 -- RFC 6598 policy constant
+_SECONDS = " seconds"  # the unit suffix of range-check messages
+TOP_KEYS = {"platform", "profile", "daemon", "containers", "units", "pair", "memory", "ship"}
 
 
 class ConfigError(ValueError):
@@ -168,6 +217,77 @@ class PairRule:
 
     def matches(self, name: str) -> bool:
         return any(fnmatch.fnmatchcase(name, pat) for pat in self.containers)
+
+
+@dataclass(frozen=True)
+class AllowRule:
+    """``[[memory.allow]]``: an acceptable memory boundary for the processes it matches.
+
+    Every matcher given must match (AND): ``comm`` names (comm, argv0 or exe basename),
+    ``cmdline`` and ``cgroup`` fnmatch globs. ``scope = "process"`` judges each match on its
+    own; ``"total"`` judges the sum over all matches."""
+
+    name: str
+    max_mib: int
+    comm: tuple[str, ...] = ()
+    cmdline: str | None = None
+    cgroup: str | None = None
+    scope: str = "process"
+
+
+@dataclass(frozen=True)
+class MemoryRule:
+    """``[memory]``: the memory guard.
+
+    Absent section = no guard at all; present with the default action = record only.
+    """
+
+    action: str = "record"  # record | kill
+    floor_pct: float = 5.0  # MemAvailable below this share of RAM is the floor
+    horizon_s: float = 10.0  # act when the floor is projected to be hit within this
+    soft_pct: float = 20.0  # below this share the guard watches closely
+    window_s: float = 10.0  # span of the trend fit
+    min_victim_mib: int = 2048  # never kill a process smaller than this
+    max_kills_per_hour: int = 3
+    protect: tuple[str, ...] = ()  # extra comm names, on top of the built-in list
+    poll_s: float = 0.25
+    top_n: int = 10  # processes recorded per top snapshot
+    top_every_s: float = 10.0
+    # Absolute limits (MiB), set together; they override floor_pct/soft_pct. Unset: the
+    # platform profile's declared limits, else the percentages (deviation d3).
+    floor_mib: int | None = None
+    soft_mib: int | None = None
+    # Boundaries ([[memory.allow]]); the tightest matching rule applies to a process.
+    allow: tuple[AllowRule, ...] = ()
+    # Far over: usage above max_mib x (1 + act_over_pct / 100) is acted on without a fire.
+    act_over_pct: float = 50.0
+
+
+@dataclass(frozen=True)
+class ShipRule:
+    """``[ship]``: ship records and blackbox dumps to S3-compatible storage."""
+
+    enabled: bool = False
+    endpoint: str | None = None
+    region: str = "us-east-1"
+    bucket: str | None = None
+    prefix: str = "fleet"
+    profile: str | None = None  # AWS credentials profile
+    machine: str | None = None  # default: fleet.toml's transport = "local" entry, else shipping off
+    blackbox_every_s: float = 60.0
+    blackbox_minutes: float = 10.0
+    spool_dir: str | None = None  # default: under the daemon's data dir
+
+
+def _allow_rule(a: dict) -> AllowRule:
+    return AllowRule(
+        name=a["name"],
+        max_mib=int(a["max_mib"]),
+        comm=tuple(a.get("comm", ())),
+        cmdline=a.get("cmdline"),
+        cgroup=a.get("cgroup"),
+        scope=a.get("scope", "process"),
+    )
 
 
 @dataclass
@@ -223,6 +343,45 @@ class Config:
             float(p.get("stale_after_s", 10.0)),
             float(p.get("poll_s", 1.0)),
             bool(p.get("cpu_cap", True)),
+        )
+
+    @property
+    def memory(self) -> MemoryRule:
+        m = self.data.get("memory", {})
+        d = MemoryRule()
+        return MemoryRule(
+            m.get("action", d.action),
+            float(m.get("floor_pct", d.floor_pct)),
+            float(m.get("horizon_s", d.horizon_s)),
+            float(m.get("soft_pct", d.soft_pct)),
+            float(m.get("window_s", d.window_s)),
+            int(m.get("min_victim_mib", d.min_victim_mib)),
+            int(m.get("max_kills_per_hour", d.max_kills_per_hour)),
+            tuple(m.get("protect", d.protect)),
+            float(m.get("poll_s", d.poll_s)),
+            int(m.get("top_n", d.top_n)),
+            float(m.get("top_every_s", d.top_every_s)),
+            m.get("floor_mib", d.floor_mib),
+            m.get("soft_mib", d.soft_mib),
+            tuple(_allow_rule(a) for a in m.get("allow", d.allow)),
+            float(m.get("act_over_pct", d.act_over_pct)),
+        )
+
+    @property
+    def ship(self) -> ShipRule:
+        s = self.data.get("ship", {})
+        d = ShipRule()
+        return ShipRule(
+            bool(s.get("enabled", d.enabled)),
+            s.get("endpoint", d.endpoint),
+            s.get("region", d.region),
+            s.get("bucket", d.bucket),
+            s.get("prefix", d.prefix),
+            s.get("profile", d.profile),
+            s.get("machine", d.machine),
+            float(s.get("blackbox_every_s", d.blackbox_every_s)),
+            float(s.get("blackbox_minutes", d.blackbox_minutes)),
+            s.get("spool_dir", d.spool_dir),
         )
 
 
@@ -351,6 +510,155 @@ def _validate_daemon(dmn: dict, problems: list[str]) -> None:
     ceiling = dmn.get("gpu_ceiling_mhz")
     if _is_num(ceiling) and not 100 <= ceiling <= 5000:
         problems.append("daemon.gpu_ceiling_mhz must be > 0, a whole MHz within 100-5000")
+
+
+def _typed_keys(section: str, tbl: dict, keys: dict, problems: list[str]) -> set[str]:
+    """Flag unknown keys and wrong types; return the keys that are fine."""
+    ok: set[str] = set()
+    for k, v in tbl.items():
+        want = keys.get(k)
+        if want is None:
+            problems.append(f"unknown key {section}.{k!r} (known: {', '.join(sorted(keys))})")
+        elif not isinstance(v, want) or (want is not bool and isinstance(v, bool)):
+            problems.append(f"{section}.{k} has the wrong type")
+        else:
+            ok.add(k)
+    return ok
+
+
+def _in_range(
+    section: str, tbl: dict, ok: set[str], key: str, lo: float, hi: float, unit: str
+) -> list[str]:
+    if key in ok and not lo <= tbl[key] <= hi:
+        return [f"{section}.{key} must be between {lo:g} and {hi:g}{unit}"]
+    return []
+
+
+def _validate_memory(mem: dict, problems: list[str]) -> None:
+    ok = _typed_keys("memory", mem, MEMORY_KEYS, problems)
+    if "action" in ok and mem["action"] not in MEMORY_ACTIONS:
+        problems.append(f"memory.action must be one of {', '.join(MEMORY_ACTIONS)}")
+    ranges = (
+        ("floor_pct", 1, 50, "%"),
+        ("soft_pct", 1, 100, "%"),
+        ("horizon_s", 1, 120, _SECONDS),
+        ("window_s", 2, 120, _SECONDS),
+        ("poll_s", 0.1, 2, _SECONDS),
+        ("top_every_s", 1, 3600, _SECONDS),
+        ("max_kills_per_hour", 0, 60, ""),
+        ("top_n", 1, 100, ""),
+        ("act_over_pct", 1, 1000, "%"),
+    )
+    for key, lo, hi, unit in ranges:
+        problems.extend(_in_range("memory", mem, ok, key, lo, hi, unit))
+    if "min_victim_mib" in ok and mem["min_victim_mib"] < 64:
+        problems.append("memory.min_victim_mib must be at least 64")
+    if "protect" in ok and not all(isinstance(x, str) and x for x in mem["protect"]):
+        problems.append("memory.protect must be a list of non-empty process names")
+    floor = mem["floor_pct"] if "floor_pct" in ok else MemoryRule.floor_pct
+    soft = mem["soft_pct"] if "soft_pct" in ok else MemoryRule.soft_pct
+    if ("floor_pct" in ok or "soft_pct" in ok) and soft <= floor:
+        problems.append("memory.soft_pct must be greater than memory.floor_pct")
+    _validate_memory_mib(mem, ok, problems)
+    if "allow" in ok:
+        _validate_allow(mem["allow"], problems)
+
+
+def _validate_allow(items: list, problems: list[str]) -> None:
+    """[[memory.allow]]: each a table with a unique name, a matcher and max_mib."""
+    seen: set[str] = set()
+    for i, item in enumerate(items):
+        where = f"memory.allow[{i}]"
+        if not isinstance(item, dict):
+            problems.append(f"{where} must be a table")
+            continue
+        ok = _typed_keys(where, item, ALLOW_KEYS, problems)
+        _validate_allow_name(where, item, ok, seen, problems)
+        _validate_allow_fields(where, item, ok, problems)
+
+
+def _validate_allow_name(where: str, item: dict, ok: set, seen: set, problems: list[str]) -> None:
+    if "name" not in item:
+        problems.append(f"{where}.name is required")
+    elif "name" not in ok:
+        return
+    elif not item["name"]:
+        problems.append(f"{where}.name must be a non-empty string")
+    elif item["name"] in seen:
+        problems.append(f"{where}.name {item['name']!r} is a duplicate")
+    else:
+        seen.add(item["name"])
+
+
+def _validate_allow_fields(where: str, item: dict, ok: set, problems: list[str]) -> None:
+    if "max_mib" not in item:
+        problems.append(f"{where}.max_mib is required")
+    elif "max_mib" in ok and item["max_mib"] < ALLOW_MIN_MIB:
+        problems.append(f"{where}.max_mib must be at least {ALLOW_MIN_MIB}")
+    if "scope" in ok and item["scope"] not in ALLOW_SCOPES:
+        problems.append(f"{where}.scope must be one of {', '.join(ALLOW_SCOPES)}")
+    comm = item.get("comm")
+    if "comm" in ok and not (comm and all(isinstance(x, str) and x for x in comm)):
+        problems.append(f"{where}.comm must be a non-empty list of process names")
+    for key in ("cmdline", "cgroup"):
+        if key in ok and not item[key]:
+            problems.append(f"{where}.{key} must be a non-empty glob")
+    if not any(k in item for k in ALLOW_MATCHERS):
+        problems.append(f"{where} needs at least one of {', '.join(ALLOW_MATCHERS)}")
+
+
+def _validate_memory_mib(mem: dict, ok: set, problems: list[str]) -> None:
+    """floor_mib/soft_mib: absolute limits, set together, soft above floor."""
+    have = {k for k in ("floor_mib", "soft_mib") if k in mem}
+    if len(have) == 1:
+        problems.append("memory.floor_mib and memory.soft_mib must be set together")
+    if "floor_mib" in ok and mem["floor_mib"] < 256:
+        problems.append("memory.floor_mib must be at least 256")
+    if {"floor_mib", "soft_mib"} <= ok and mem["soft_mib"] <= mem["floor_mib"]:
+        problems.append("memory.soft_mib must be greater than memory.floor_mib")
+
+
+def endpoint_problem(url: str) -> str | None:
+    """Why ``url`` is not an acceptable ship endpoint, or None. https: any host;
+    http: only loopback or 100.64.0.0/10 (a private overlay), never the open internet."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+        _ = parts.port  # raises ValueError on a bad port
+    except ValueError:
+        return "is not a valid URL"
+    if parts.scheme not in ("http", "https") or not host:
+        return "must be an http:// or https:// URL with a host"
+    if parts.scheme == "https" or host == "localhost":
+        return None
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        addr = None
+    if addr is not None and (addr.is_loopback or addr in CGNAT):
+        return None
+    return "may use http:// only for a loopback or 100.64.0.0/10 host (use https://)"
+
+
+def _validate_ship(ship: dict, problems: list[str]) -> None:
+    ok = _typed_keys("ship", ship, SHIP_KEYS, problems)
+    for key in ("region", "machine", "spool_dir", "profile"):
+        if key in ok and not ship[key].strip():
+            problems.append(f"ship.{key} must not be empty")
+    problems.extend(_in_range("ship", ship, ok, "blackbox_every_s", 5, 3600, _SECONDS))
+    problems.extend(_in_range("ship", ship, ok, "blackbox_minutes", 1, 120, " minutes"))
+    if "endpoint" in ok:
+        why = endpoint_problem(ship["endpoint"])
+        if why:
+            problems.append(f"ship.endpoint {why}")
+    if "bucket" in ok and not BUCKET_NAME.fullmatch(ship["bucket"]):
+        problems.append(
+            "ship.bucket must be 3-63 characters: lowercase letters, digits, hyphens, dots"
+        )
+    if ship.get("enabled") is True:
+        for key in ("endpoint", "bucket"):
+            if key not in ship:
+                problems.append(f"ship.{key} is required when ship.enabled is true")
 
 
 def _validate_container(i: int, c: dict, seen: set[str], problems: list[str]) -> None:
@@ -564,6 +872,8 @@ def validate(data: dict) -> list[str]:
         problems.append("platform must be a string")
     _validate_profile(_table(data, "profile", problems, "[profile] must be a table"), problems)
     _validate_daemon(_table(data, "daemon", problems, "[daemon] must be a table"), problems)
+    _validate_memory(_table(data, "memory", problems, "[memory] must be a table"), problems)
+    _validate_ship(_table(data, "ship", problems, "[ship] must be a table"), problems)
     _validate_containers(data.get("containers", []), problems)
     _validate_units(data.get("units", []), problems)
     if "pair" in data:
@@ -732,6 +1042,49 @@ def template(profile: Profile) -> str:
         "# stale_after_s = 10           # peer silent this long -> one band hotter",
         "# poll_s = 1.0",
         "# cpu_cap = true               # cap the pair containers by the shared band",
+        "",
+        "# Memory guard: sees an out-of-memory stall coming, records what ate the RAM, and",
+        "# (action = kill) ends the biggest unprotected process. Off unless you uncomment it.",
+        "# [memory]",
+        '# action = "record"            # record (default, never kills) | kill',
+        "# floor_pct = 5                # MemAvailable floor, % of RAM (1-50)",
+        "# horizon_s = 10               # act when the floor is projected within this",
+        "# soft_pct = 20                # watch closely below this % (> floor_pct)",
+        "# floor_mib = 3072             # absolute limits, set together; they win over the %",
+        "# soft_mib = 6144              # (spark/thor/orin/ventunoq profiles declare their own)",
+        "# window_s = 10                # span of the trend fit (2-120)",
+        "# min_victim_mib = 2048        # never kill a process smaller than this",
+        "# max_kills_per_hour = 3       # 0-60",
+        '# protect = ["sshd"]           # extra process names, on top of the built-in list',
+        "# poll_s = 0.25                # 0.1-2",
+        "# top_n = 10                   # processes per top snapshot",
+        "# top_every_s = 10",
+        "# act_over_pct = 50            # far over a boundary: > max_mib x (1 + this/100), 1-1000",
+        "# Acceptable boundaries: a process within its boundary is never blamed or killed; over",
+        "# it, it is the first victim when memory runs low; far over it, it is killed (own user,",
+        "# same protections, min_victim_mib and budget) or recorded (root, containers, others)",
+        "# even while memory is fine. Several rules may match: the smallest max_mib applies.",
+        "# [[memory.allow]]",
+        '# name = "vllm"                # required, unique',
+        '# comm = ["vllm", "python3"]   # exact names (comm, argv0 or exe basename)',
+        '# cmdline = "*vllm*serve*"     # fnmatch glob over the command line',
+        '# cgroup = "*docker-*.scope"   # fnmatch glob over the cgroup path',
+        "# max_mib = 102400             # required, >= 64",
+        '# scope = "process"            # process (each match alone, default) | total (sum)',
+        "",
+        "# Ship records and blackbox dumps to S3-compatible storage (off unless enabled).",
+        "# http:// endpoints are accepted only for loopback or 100.64.0.0/10 hosts.",
+        "# [ship]",
+        "# enabled = false",
+        '# endpoint = "https://s3.example.org"',
+        '# region = "us-east-1"',
+        '# bucket = "my-fleet-bucket"   # 3-63 chars: lowercase, digits, hyphens, dots',
+        '# prefix = "fleet"',
+        '# profile = "default"          # credentials profile',
+        '# machine = "spark-1"          # default: fleet.toml transport = "local" entry; else off',
+        "# blackbox_every_s = 60        # 5-3600",
+        "# blackbox_minutes = 10        # 1-120",
+        '# spool_dir = "/var/lib/heat-governor/spool"  # default: under data_dir',
         "",
     ]
     return "\n".join(lines)

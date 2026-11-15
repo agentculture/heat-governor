@@ -84,6 +84,10 @@ class Profile:
     duty_decay_per_s: float = 0.1  # how fast the duty may fall (rises are immediate)
     # client concurrency factor per level: cool, warm, hot, critical (0 = hold new work)
     concurrency: tuple[float, float, float, float] = (1.0, 0.5, 0.0, 0.0)
+    # Memory guard limits (floor_mib, soft_mib) for boxes that run full of AI work, where
+    # percentages would fire constantly; None = the [memory] percentages. Declared, unmeasured
+    # (deviation d3); a config's floor_mib/soft_mib win.
+    memory_limits_mib: tuple[int, int] | None = None
     gpu: str = "none"  # "nvidia-smi" | "jetson" | "devfreq" | "none"
     provenance: str = "declared"
     notes: str = ""
@@ -103,6 +107,8 @@ SPARK = Profile(
     unit_bands=(("warm", 8.0), ("hot", 4.0), ("critical", 2.0)),
     lookahead_s=0.5,
     rate_window_s=2.0,
+    # 125 GB unified memory with vLLM resident: 9.8-12.2 GB free at idle serving (2026-11-15)
+    memory_limits_mib=(3072, 6144),
     gpu="nvidia-smi",
     provenance=(
         "measured 2026-10-23 (resets at ~94.5-95 C on acpitz zones 0/4); bands tuned by "
@@ -121,6 +127,8 @@ THOR = Profile(
     # decode loses 3-15% at 1300-900 MHz for only 1-5 W, so no default ceiling; these
     # heat steps stay declared
     gpu_clock_bands=((98.0, 1300), (101.0, 1000)),
+    # 126 GB unified memory full of vLLM workers: 10.5 GB free under AI load (2026-11-15)
+    memory_limits_mib=(3072, 6144),
     gpu="jetson",
     provenance="declared: passive trip 109 C minus margin; unmeasured",
     notes="gpu-thermal returns EAGAIN while the GPU is idle; that zone is skipped, not hot.",
@@ -143,6 +151,8 @@ ORIN = Profile(
     # decider at 2 concurrent, full 1300 MHz -> board 94.1 C max; 1122 MHz -> 83.6 C max for
     # -12% req/s and -25% GPU rail; 918 MHz -> 80.2 C for -27%. Steps are devfreq steps.
     gpu_clock_bands=((85.0, 1122), (88.0, 918)),
+    # 63 GB unified memory, no swap: 8.3 GB free with the decider + embedder (2026-11-15)
+    memory_limits_mib=(2048, 4096),
     gpu="jetson",
     provenance=(
         "declared limits: passive trip 99 C minus margin; GPU clock steps measured "
@@ -166,6 +176,8 @@ VENTUNOQ = Profile(
     limits=Limits(warm_c=94.0, hot_c=98.0, crit_c=102.0),
     duty_curve=((94.0, 0.0), (97.0, 0.2), (100.0, 0.5), (102.0, 1.0)),
     cpu_bands=((94.0, 6), (98.0, 3)),  # of 8 cores
+    # 15 GB, no swap: 6.9 GB free (2026-11-15)
+    memory_limits_mib=(1024, 2048),
     gpu="devfreq",  # Adreno GPU is a devfreq node (clock only) plus the ina232 board-power hwmon
     provenance=(
         "declared from trip points (GPU/NPU passive 115 C, CPU passive 126 C) minus margin; "
