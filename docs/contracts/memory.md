@@ -114,8 +114,10 @@ scope = "process"                  # "process" (default) or "total" across all m
   process is killed (same protections, budget and pidfd path; `reason: "boundary"`); one the
   guard may not kill gets a single `memory_would_kill` with `why_not: "boundary: not killable
   (uid N)"`. Either happens once per process.
-- `min_victim_mib` still applies: a rule whose `max_mib` is below it blames and records but
-  never kills.
+- `min_victim_mib` still applies, per process: a match using less anonymous memory than
+  `min_victim_mib` is blamed and recorded but never killed, whatever the rule's `max_mib`.
+  So a rule whose `max_mib` is below `min_victim_mib` only kills a match once that process
+  has grown past `min_victim_mib`.
 
 ## Blame
 

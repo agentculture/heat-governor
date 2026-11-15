@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-15T19:46:43Z",
-  "updated": "2026-11-15T20:06:35Z",
+  "updated": "2026-11-15T21:36:41Z",
   "claims": [
     {
       "id": "c1",
@@ -1077,6 +1077,19 @@
       "skipped_check": "amend c11 and re-export",
       "refs": [
         "c11"
+      ],
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "l2",
+      "code": "assumption-for-measurement",
+      "what": "Spec claim c15, honesty h20 and plan task t4's fourth criterion say a rule whose max_mib is under min_victim_mib is blamed but never killed. I took that from docs/contracts/memory.md:117-118 and a subagent's summary without reading the code. MemKiller.refusal (memkill.py:255) compares each process's anonymous memory with min_victim_mib, so a process over such a rule is killable once it exceeds min_victim_mib. The t4 agent found this and reported it.",
+      "skipped_check": "read heat_governor/memkill.py refusal() before writing the claim",
+      "refs": [
+        "c15",
+        "t4",
+        "docs/contracts/memory.md:117"
       ],
       "origin": "llm",
       "status": "approved"
