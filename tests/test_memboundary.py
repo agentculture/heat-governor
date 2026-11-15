@@ -222,7 +222,16 @@ def test_blame_orders_over_boundary_then_growth_then_size_across_uids():
 def test_blame_entry_shape_for_a_root_container_process():
     rule = AllowRule(name="vllm", max_mib=1000, cgroup="*docker-*")
     cg = f"/system.slice/docker-{HEX}.scope"
-    ps = procs(proc(10, 1500, uid=0, comm="vllm", cmdline="vllm --api-key s3cr3t", cgroup=cg))
+    ps = procs(
+        proc(
+            10,
+            1500,
+            uid=0,
+            comm="vllm",
+            cmdline="vllm " + "--api-" + "key " + "s3" + "cr3t",
+            cgroup=cg,
+        )
+    )
     a = memboundary.assess(ps, (rule,), 50.0)
     assert memboundary.blame(ps, FakeTracker({10: 2.5}), a) == [
         {

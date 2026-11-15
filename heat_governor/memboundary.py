@@ -93,7 +93,7 @@ class BoundSet:
     def key(self) -> tuple:
         """The instance a first crossing is reported once for."""
         if self.rule.scope == "total":
-            return (self.rule.name,)
+            return (self.rule.name, None, None)  # same shape as a per-process key
         p = self.members[0]
         return (self.rule.name, p.pid, p.start_ticks)
 
@@ -266,13 +266,16 @@ class Watch:
         self._crossed: set[tuple] = set()
         self._acted: set[tuple] = set()
 
+    @staticmethod
+    def _well_under(s: BoundSet | None) -> bool:
+        """Gone, or back under its max by RESET_PCT: the next crossing is reported again."""
+        return s is None or s.usage_mib < float(s.rule.max_mib) * (1.0 - RESET_PCT / 100.0)
+
     def crossings(self, bounds: Assessment) -> list[BoundSet]:
         """Sets over their boundary for the first time since they were last well under it."""
         live: dict[tuple, BoundSet] = {s.key(): s for s in bounds.sets}
-        for key in list(self._crossed):
-            s = live.get(key)
-            if s is None or s.usage_mib < float(s.rule.max_mib) * (1.0 - RESET_PCT / 100.0):
-                self._crossed.discard(key)
+        stale = {key for key in self._crossed if self._well_under(live.get(key))}
+        self._crossed -= stale
         new = [s for k, s in live.items() if s.state != WITHIN and k not in self._crossed]
         self._crossed.update(s.key() for s in new)
         return new

@@ -87,7 +87,7 @@ def tail(
 
 
 _TAIL_BLOCK = 64 * 1024
-_T_PREFIX = re.compile(rb'^\s*\{\s*"t"\s*:\s*(-?[0-9][0-9.eE+-]*)')
+_T_PREFIX = re.compile(rb'^\s*\{\s*"t"\s*:\s*(-?\d[\d.eE+-]*)')
 
 
 def _lines_backwards(fh, block: int = _TAIL_BLOCK) -> Iterator[bytes]:
@@ -115,27 +115,41 @@ def _rows_between(path: Path, since: float, now: float) -> list[dict]:
         return out
     with fh:
         for raw in _lines_backwards(fh):
-            m = _T_PREFIX.match(raw)
-            if m is not None:
-                try:
-                    lead = float(m.group(1))
-                except ValueError:
-                    lead = None
-                if lead is not None and lead < since:
-                    break
-                if lead is not None and lead > now:
-                    continue
-            elif not raw.strip():
+            verdict = _lead_verdict(raw, since, now)
+            if verdict == "stop":
+                break
+            if verdict == "skip":
                 continue
-            try:
-                rec = json.loads(raw)
-            except ValueError:
-                continue
-            t = rec.get("t") if isinstance(rec, dict) else None
-            if isinstance(t, (int, float)) and since <= t <= now:
+            rec = _row_in_window(raw, since, now)
+            if rec is not None:
                 out.append(rec)
     out.reverse()
     return out
+
+
+def _lead_verdict(raw: bytes, since: float, now: float) -> str:
+    """From the line's leading ``{"t":<number>`` alone: "stop" (older than the window: every
+    earlier line is older too), "skip" (newer than ``now``, or blank) or "parse"."""
+    m = _T_PREFIX.match(raw)
+    if m is None:
+        return "parse" if raw.strip() else "skip"
+    try:
+        lead = float(m.group(1))
+    except ValueError:
+        return "parse"
+    if lead < since:
+        return "stop"
+    return "skip" if lead > now else "parse"
+
+
+def _row_in_window(raw: bytes, since: float, now: float) -> dict | None:
+    """The parsed row when it is a dict whose ``t`` is in ``[since, now]``, else None."""
+    try:
+        rec = json.loads(raw)
+    except ValueError:
+        return None
+    t = rec.get("t") if isinstance(rec, dict) else None
+    return rec if isinstance(t, (int, float)) and since <= t <= now else None
 
 
 def iter_records(directory: Path) -> Iterator[dict]:
