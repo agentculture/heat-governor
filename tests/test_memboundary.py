@@ -216,7 +216,20 @@ def test_blame_orders_over_boundary_then_growth_then_size_across_uids():
     )
     a = memboundary.assess(ps, (rule,), 50.0)
     blamed = memboundary.blame(ps, FakeTracker({20: 50.0}), a)
-    assert [b["pid"] for b in blamed] == [10, 20, 30]
+    # over-boundary first, then growers; the big but flat process is not blamed
+    assert [b["pid"] for b in blamed] == [10, 20]
+
+
+def test_blame_names_only_growers_when_something_grows():
+    """Live 2026-11-15: a runaway next to idle processes (claude, the governor itself) must
+    blame the runaway alone, not pad the list with non-growing processes by size."""
+    ps = procs(
+        proc(1, 31_000, comm="python3"),
+        proc(2, 400, comm="claude"),
+        proc(3, 90, comm="heat-governor"),
+    )
+    blamed = memboundary.blame(ps, FakeTracker({1: 1228.5}), memboundary.assess(ps, (), 50.0))
+    assert [b["comm"] for b in blamed] == ["python3"]
 
 
 def test_blame_entry_shape_for_a_root_container_process():

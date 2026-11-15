@@ -228,20 +228,26 @@ def container_id(cgroup: str) -> str | None:
 def blame(
     procs: dict[int, Proc], tracker, bounds: Assessment | None, n: int = BLAME_N
 ) -> list[dict]:
-    """Up to ``n`` likely culprits across all uids. Processes within their boundary and
-    processes without anonymous memory are never blamed."""
+    """Up to ``n`` likely culprits across all uids: processes over their boundary, then
+    processes that are growing. Only when nothing is over or growing (a flat curve under the
+    floor) does it fall back to the biggest processes, so the evidence is never empty.
+    Processes within their boundary and processes without anonymous memory are never blamed.
+    """
 
     def growth(p: Proc) -> float:
         return tracker.growth(p.pid, p.start_ticks) if tracker is not None else 0.0
 
-    def rank(p: Proc) -> tuple:
+    def over(p: Proc) -> float:
         st = bounds.status(p.pid) if bounds is not None else None
-        over = st.over_mib if st is not None else 0.0
-        return (-over, -max(growth(p), 0.0), -p.rss_anon_mib, p.pid)
+        return st.over_mib if st is not None else 0.0
+
+    def rank(p: Proc) -> tuple:
+        return (-over(p), -max(growth(p), 0.0), -p.rss_anon_mib, p.pid)
 
     within = bounds.within if bounds is not None else frozenset()
     pool = [p for p in procs.values() if p.pid not in within and p.rss_anon_mib > 0]
-    return [_blamed(p, growth(p), bounds) for p in sorted(pool, key=rank)[: max(n, 0)]]
+    culprits = [p for p in pool if over(p) > 0 or growth(p) > 0] or pool
+    return [_blamed(p, growth(p), bounds) for p in sorted(culprits, key=rank)[: max(n, 0)]]
 
 
 def _blamed(p: Proc, growth: float, bounds: Assessment | None) -> dict:

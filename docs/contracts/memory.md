@@ -121,7 +121,9 @@ scope = "process"                  # "process" (default) or "total" across all m
 
 Every fire event (`memory_kill`, `memory_would_kill`) and every `memory_boundary_exceeded`
 carries `blamed`: up to three processes of **any** user (root, containers, vLLM included),
-over-boundary first, then by anonymous growth. Each entry has the pid, uid, process name,
+over their boundary first, then those that are growing (by anonymous growth). Processes that
+are neither are not listed; only when nothing is over or growing (a flat curve under the
+floor) does it name the biggest processes instead. Each entry has the pid, uid, process name,
 redacted command line, anonymous size, growth, cgroup, the container id when the cgroup names
 one (`docker-<id>`, 12 hex characters) and its boundary, if any. Blame is evidence only: the
 kill still targets eligible own-user processes.

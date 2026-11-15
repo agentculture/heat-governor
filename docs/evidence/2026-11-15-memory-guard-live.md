@@ -72,6 +72,20 @@ bucket and scoped policy), and everyone else ships to spark.
 Afterwards the fleet view reported all six `ok` and admitting work. Spark's store held black
 boxes from cultureos, elitemini, orin, spark2 and thor; arduino's held spark's.
 
+## After the code review (06:14-06:17 UTC)
+
+The review fixes and the blame/boundaries change (deviation d4) were redeployed to all six boxes:
+every box restarted on the PR head, logged `mlockall: ok (current pages)` and passed `ship test`.
+Locked address space fell from 420-590 MB to 264-432 MB per daemon (resident memory 74-112 MB).
+The real pinned RAM was always close to the resident size; the earlier figure counted reserved
+address space.
+
+The controlled runaway on the EliteMini, re-run on this build: killed on the horizon rule at
+8769 MiB available (min 1 Hz sample 9599 MiB), max tick gap 1.0 s, no kernel OOM, victim chosen
+by growth (`python3`, 1229 MiB/s). Its `blamed` list then also named two idle processes
+(`claude`, `heat-governor`) to fill three slots; blame now lists only processes that are over
+a boundary or growing.
+
 ## Not covered here
 
 - The runaway test ran on the EliteMini only. On the five AI boxes the platform limits (deviation
