@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-14T18:19:42Z",
-  "updated": "2026-11-14T21:42:06Z",
+  "updated": "2026-11-15T07:57:25Z",
   "claims": [
     {
       "id": "c1",
@@ -1063,7 +1063,7 @@
         "t8"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l2",
@@ -1074,7 +1074,7 @@
         "t3"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     }
   ],
   "obligations": [
@@ -1147,6 +1147,24 @@
       "seam": "uploaded evidence",
       "behavior": "no object contains environment variables, credentials, or cmdline values following token/key/secret/password-style flags; cmdlines are truncated to 512 chars.",
       "source_text": "Uploaded evidence must not leak secrets: cmdlines are truncated and redacted (token/key/secret/password-style arguments), environment variables are never captured, and the credentials never leave the signer.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o9",
+      "claim_id": "c26",
+      "seam": "live EliteMini runaway",
+      "behavior": "a ~1.2 GB/s own-user allocator is killed with >= 2 GB available, no governor tick gap > 2 s, and its memory_kill event is in S3 within 10 s",
+      "source_text": "In a controlled test on the EliteMini, a process allocating 1.2 GB/s is killed with available memory still >= 2 GB, the governor records no tick gap > 2 s during the run, and the memory_kill event is in S3 within 10 s of the kill.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o10",
+      "claim_id": "c27",
+      "seam": "trigger replay (as amended by d1)",
+      "behavior": "on the 2026-11-14 incident the trigger fires on all five waves >= 4 s before avail < 2048 MiB with >= 5 GB available, and 0 times over the 2026-11-10..13 records",
+      "source_text": "Replaying the 2026-11-14 records through the trigger fires on every one of the five waves at least 15 s before available memory fell below 2 GB, and fires 0 times across the 2026-11-10..13 records (no false kills on a normal week).",
       "origin": "llm",
       "status": "approved"
     }
