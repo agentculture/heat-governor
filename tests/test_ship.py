@@ -447,10 +447,15 @@ def test_stalled_server_never_blocks_submit(s3, tmp_path):
     sh = make_shipper(client(s3, timeout=0.3), tmp_path, log)
     sh.start()
     try:
-        t0 = time.monotonic()
+        # A submit that waited on the stalled server would take at least the client timeout
+        # (0.3 s) on its own; each submit only writes and fsyncs its spool file. Bound each
+        # call, not the batch: 20 fsyncs can exceed 0.25 s on a slow CI disk (risk r9).
+        slowest = 0.0
         for i in range(20):
+            t0 = time.monotonic()
             sh.submit("memory_kill", {"i": i})
-        assert time.monotonic() - t0 < 0.25
+            slowest = max(slowest, time.monotonic() - t0)
+        assert slowest < 0.3
     finally:
         t0 = time.monotonic()
         sh.stop(timeout=2.0)
