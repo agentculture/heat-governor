@@ -1350,9 +1350,10 @@ const ruleWord = s => (s === "far_over" ? "far over" : s);
 // bar geometry on a scale that ends 0.2 boundaries past the far-over line: the boundary mark sits
 // at 1x, the far-over mark at 1 + act_over_pct/100 (50 when the daemon does not say, for the bar only)
 function barMarks(pct) {
-  const p = fin(pct) && pct > 0 ? pct : 50;
+  const known = fin(pct) && pct > 0;
+  const p = known ? pct : 50;
   const end = 1 + p / 100 + 0.2;
-  return { pct: p, end, max: 100 / end, far: (1 + p / 100) * 100 / end };
+  return { pct: p, known, end, max: 100 / end, far: (1 + p / 100) * 100 / end };
 }
 // usage as a share of the bar, 0 when there is nothing to draw
 function barFill(r, marks) {
@@ -1392,26 +1393,34 @@ function killsText(g) {
   return g.kills_last_hour + " in the last hour" + cap;
 }
 // the guard badge: from mem_guard.action and armed (armed is false after a fire until memory recovers)
-function guardLabel(g) {
+// live is false for a stale or unreachable machine: its guard fields are the last ones read and
+// the daemon (so the guard) may not be running, so the badge says so and is never the healthy colour
+function guardLabel(g, live = true) {
   if (!g) return "no memory guard";
-  return (g.armed ? "armed" : "not armed") + " · " + (g.action || "unknown");
+  return (live ? "" : "last seen: ") + (g.armed ? "armed" : "not armed") + " · " + (g.action || "unknown");
 }
-function guardClass(g) {
-  if (!g || g.action !== "kill") return "idle";
+function guardClass(g, live = true) {
+  if (!g || !live || g.action !== "kill") return "idle";
   return g.armed ? "cool" : "warm";
 }
 // the killer skips a process whose anonymous memory is under min_victim_mib, so a rule below it
 // only ever blames; with action = record nothing is killed at all (said once for the machine)
+// A total-scope rule can be over while every match is under min_victim_mib, so it gets the note too.
 function killNote(g, r) {
-  if (g.action === "record" || !fin(g.min_victim_mib) || !fin(r.max_mib) || r.max_mib >= g.min_victim_mib) return "";
+  if (g.action === "record" || !fin(g.min_victim_mib) || !fin(r.max_mib)) return "";
+  if (r.scope !== "total" && r.max_mib >= g.min_victim_mib) return "";
   return "under " + mibText(g.min_victim_mib) + " (min_victim_mib) a match is blamed, never killed";
 }
 // one /api/fleet machine -> what its Boundaries card needs
+function guardRules(g) {
+  return g && Array.isArray(g.boundaries) ? g.boundaries.filter(r => r && typeof r === "object") : [];
+}
 function toGuardRow(m) {
   const b = toBox(m), g = guardOf(m.thermal);
-  const rules = g && Array.isArray(g.boundaries) ? g.boundaries.filter(r => r && typeof r === "object") : [];
-  return { b, g, rules, marks: barMarks(g && g.act_over_pct) };
+  return { b, g, rules: guardRules(g), marks: barMarks(g && g.act_over_pct) };
 }
+// the nav's rule count, without building a card row per machine
+const fleetRuleTotal = doc => ((doc && doc.machines) || []).reduce((n, m) => n + guardRules(guardOf(m && m.thermal)).length, 0);
 function ruleCounts(rows) {
   const c = { within: 0, over: 0, far_over: 0, idle: 0 };
   for (const row of rows) {
@@ -1439,7 +1448,7 @@ function filterRows(rows, states, q) {
 const freeLine = ({ b, g }) => mibText(fin(g.avail_mib) ? g.avail_mib : b.mem && b.mem.avail_mib) + " free · " + limitsText(g.limits);
 
 function UsageBar({ r, marks }) {
-  const label = usageText(r) + "; boundary " + mibText(r.max_mib) + ", far over beyond " + fmt(marks.pct, 0) + "% more";
+  const label = usageText(r) + "; boundary " + mibText(r.max_mib) + ", far over beyond " + fmt(marks.pct, 0) + "% more" + (marks.known ? "" : " (assumed: the daemon does not report act_over_pct)");
   return html`<div class="ubar" role="img" aria-label=${label}>
       <span class="fill" style=${{ width: barFill(r, marks).toFixed(2) + "%" }}></span>
       <span class="mx" style=${{ left: marks.max.toFixed(2) + "%" }}></span>
@@ -1468,21 +1477,23 @@ function RulesTable({ row }) {
     </table></div>`;
 }
 // what sits under a machine's head: its rules, or why there are none to show
-function guardBody({ b, g, rules }, row) {
+function guardBody(row) {
+  const { b, g, rules } = row;
   if (b.state === "unsupported") return html`<p class="srcnote">${whyText(b)}.</p>`;
   if (!b.hasReading) return html`<p class="srcnote">No reading yet: the guard shows after the first good read.</p>`;
   if (!g) return html`<p class="srcnote">No memory guard reported: the daemon is older than 0.17 or [memory] is off.</p>`;
   const record = g.action === "record" && html`<p class="srcnote">Action is record: the guard records, it never kills here.</p>`;
+  const guessed = rules.length > 0 && !row.marks.known && html`<p class="srcnote">This daemon does not report act_over_pct: the far-over mark is drawn at the default, 50% over.</p>`;
   const list = rules.length ? html`<${RulesTable} row=${row} />` : html`<p class="srcnote">No boundaries. Every process here is judged by growth alone.</p>`;
-  return html`<${React.Fragment}>${record}${list}</${React.Fragment}>`;
+  return html`<${React.Fragment}>${record}${guessed}${list}</${React.Fragment}>`;
 }
 function BoundaryCard({ row }) {
   const { b, g } = row;
   const live = b.state !== "unreachable" && b.state !== "stale" && b.state !== "unsupported";
   const plat = b.state !== "unsupported" && b.hasReading && html`<span class="tag">${platLabel(b.pkey)}</span>`;
-  const badge = b.hasReading && b.state !== "unsupported" && html`<span class=${"status " + guardClass(g)}>${guardLabel(g)}</span>`;
+  const badge = b.hasReading && b.state !== "unsupported" && html`<span class=${"status " + guardClass(g, live)}>${guardLabel(g, live)}</span>`;
   const status = !live && html`<span class="status">${statusText(b)}</span>`;
-  const why = !live && b.hasReading && html`<span class="sub faint">${whyText(b)}</span>`;
+  const why = !live && b.hasReading && html`<span class="sub faint">${whyText(b)}${g ? " · the guard may not be running" : ""}</span>`;
   const facts = g && html`<dl class="facts"><dt>Kills</dt><dd>${killsText(g)}</dd><dt>Last kill</dt><dd>${lastKillText(g.last_kill)}</dd></dl>`;
   return html`<section class=${"card bcard " + b.state} aria-label=${b.name}>
     <div class="drow">
@@ -1493,7 +1504,7 @@ function BoundaryCard({ row }) {
       </div>
       ${facts}
     </div>
-    ${guardBody(row, row)}
+    ${guardBody(row)}
   </section>`;
 }
 function boundaryList(rows, shown, doc) {
@@ -1541,8 +1552,9 @@ function App() {
   useEffect(() => { document.documentElement.dataset.mode = mode; }, [mode]);
   const [tab, setTab] = useState(() => readTab(location.hash));
   useEffect(() => { const on = () => setTab(readTab(location.hash)); addEventListener("hashchange", on); return () => removeEventListener("hashchange", on); }, []);
-  const go = t => { setTab(t); try { history.replaceState(null, "", "#" + t); } catch (e) { location.hash = t; } };
-  const rules = useMemo(() => ruleTotal(((doc && doc.machines) || []).map(toGuardRow)), [doc]);
+  // setting the hash adds a history entry (Back returns to the previous tab) and fires hashchange
+  const go = t => { setTab(t); if (location.hash !== "#" + t) location.hash = t; };
+  const rules = useMemo(() => fleetRuleTotal(doc), [doc]);
   const ruleCount = doc && html`<span class="n">${rules}</span>`;
   const tabs = TABS.map(([k, l]) => html`<button key=${k} aria-current=${tab === k ? "page" : undefined} onClick=${() => go(k)}>${l}${k === "boundaries" && ruleCount}</button>`);
   return html`<${React.Fragment}>
@@ -1555,7 +1567,10 @@ function App() {
         ${[["system", "Auto"], ["light", "Light"], ["dark", "Dark"]].map(([k, l]) => html`<button key=${k} aria-pressed=${pref === k} onClick=${() => setPref(k)}>${l}</button>`)}
       </div>
     </header>
-    <main>${tab === "boundaries" ? html`<${Boundaries} doc=${doc} err=${err} />` : html`<${Machines} doc=${doc} err=${err} />`}</main>
+    <main>
+      <div hidden=${tab !== "machines"}><${Machines} doc=${doc} err=${err} /></div>
+      <div hidden=${tab !== "boundaries"}><${Boundaries} doc=${doc} err=${err} /></div>
+    </main>
   </${React.Fragment}>`;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);

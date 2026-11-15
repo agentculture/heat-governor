@@ -411,6 +411,7 @@ def test_status_json_carries_mem_guard_summary():
         "armed": True,
         "kills_last_hour": 2,
         "boundary_count": 3,
+        "stale": False,
     }
     assert rows["m1"]["mem_guard"] is None
     assert rows["m0"]["name"] == "m0"  # existing keys are kept
@@ -434,3 +435,43 @@ def test_status_text_has_one_guard_column_dash_when_absent():
     assert l0.index("guard") == l1.index("guard")  # column stays aligned
     assert l0.index("v") > 0
     assert l0.index("guard") < l0.rindex(" v")
+
+
+def test_status_guard_of_a_machine_that_is_not_ok_is_marked_as_last_read():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    snap = _guard_snap(GUARD, GUARD)
+    snap["machines"][1]["state"] = "unreachable"
+    st = build_status(snap, "x", None)
+    rows = {r["name"]: r for r in st["machines"]}
+    assert rows["m0"]["mem_guard"]["stale"] is False
+    assert rows["m1"]["mem_guard"]["stale"] is True
+    lines = {ln.split()[0]: ln for ln in render_status(st).splitlines()[:2]}
+    assert "guard (last) kill armed 2k 3b" in lines["m1"]
+    assert "(last)" not in lines["m0"]
+
+
+def test_status_guard_is_unknown_when_the_snapshot_has_no_mem_guard_key():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    snap = _guard_snap(None, None)
+    del snap["machines"][0]["thermal"]["mem_guard"]  # a mesh serve older than 0.18 drops the key
+    st = build_status(snap, "x", None)
+    rows = {r["name"]: r for r in st["machines"]}
+    assert rows["m0"]["mem_guard_known"] is False
+    assert rows["m1"]["mem_guard_known"] is True
+    lines = {ln.split()[0]: ln for ln in render_status(st).splitlines()[:2]}
+    assert "guard ?" in lines["m0"]
+    assert "guard -" in lines["m1"]
+
+
+def test_status_version_column_stays_aligned_for_a_long_guard_value():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    long = {"action": "record", "armed": False, "kills_last_hour": 3, "boundaries": [{}] * 12}
+    snap = _guard_snap(long, None)
+    for m in snap["machines"]:
+        m["thermal"]["version"] = "0.18.0"
+    l0, l1 = render_status(build_status(snap, "x", None)).splitlines()[:2]
+    assert "guard record unarmed 3k 12b" in l0
+    assert l0.index(" v0.18.0") == l1.index(" v0.18.0")

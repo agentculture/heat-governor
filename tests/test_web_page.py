@@ -678,3 +678,47 @@ def test_server_serves_the_boundaries_page_and_mem_guard():
         assert guard["boundaries"][0]["cmdline"] == "*vllm*worker*"
     finally:
         srv.stop()
+
+
+def test_guard_badge_of_a_machine_that_is_not_live_is_last_seen_and_neutral(tmp_path):
+    got = _node(
+        tmp_path,
+        "[guardLabel({ action: 'kill', armed: true }, false),"
+        " guardClass({ action: 'kill', armed: true }, false),"
+        " guardClass({ action: 'kill', armed: true }, true)]",
+    )
+    assert got == ["last seen: armed · kill", "idle", "cool"]
+    assert "the guard may not be running" in PAGE
+
+
+def test_kill_note_covers_total_scope_rules(tmp_path):
+    g = "{ action: 'kill', min_victim_mib: 2048 }"
+    got = _node(
+        tmp_path,
+        f"[killNote({g}, {{ max_mib: 8192, scope: 'total' }}) !== '',"
+        f" killNote({g}, {{ max_mib: 8192, scope: 'process' }}),"
+        f" killNote({g}, {{ max_mib: 1024, scope: 'process' }}) !== '',"
+        " killNote({ action: 'record', min_victim_mib: 2048 }, { max_mib: 8192, scope: 'total' })]",
+    )
+    assert got == [True, "", True, ""]
+
+
+def test_bar_marks_say_when_act_over_pct_is_assumed(tmp_path):
+    got = _node(tmp_path, "[barMarks(100).known, barMarks(null).known, barMarks(null).pct]")
+    assert got == [True, False, 50]
+    assert "does not report act_over_pct" in PAGE
+
+
+def test_nav_rule_count_and_tabs_keep_their_state(tmp_path):
+    data = [
+        {"thermal": {"mem_guard": {"boundaries": [{"name": "a"}, None, {"name": "b"}]}}},
+        {"thermal": None},
+        {"thermal": {"mem_guard": None}},
+    ]
+    assert _node(tmp_path, "fleetRuleTotal({ machines: data })", data) == 2
+    # both views stay mounted (hidden, not unmounted), so filters and picks survive a tab switch
+    assert 'hidden=${tab !== "machines"}' in PAGE
+    assert 'hidden=${tab !== "boundaries"}' in PAGE
+    # the tab change goes through the hash, so Back returns to the previous tab
+    assert "location.hash = t" in PAGE
+    assert "replaceState" not in PAGE

@@ -73,6 +73,13 @@ def _libc_mlockall(flags: int) -> int:
     return int(libc.mlockall(flags))
 
 
+def _num(value: object, kind: type) -> int | float | None:
+    """``value`` as ``kind`` for the state doc, or None when the rule does not carry it."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return kind(value)
+
+
 def _noop(*_args, **_kwargs) -> None:
     return None
 
@@ -238,9 +245,9 @@ class MemGuard:
             "kills_last_hour": int(kills),
             "limits": self._limits_doc(),
             "boundaries": [dict(b, comm=list(b["comm"])) for b in self._bounds_doc],
-            "act_over_pct": float(self.rule.act_over_pct),
-            "max_kills_per_hour": int(self.rule.max_kills_per_hour),
-            "min_victim_mib": int(self.rule.min_victim_mib),
+            "act_over_pct": _num(getattr(self.rule, "act_over_pct", None), float),
+            "max_kills_per_hour": _num(getattr(self.rule, "max_kills_per_hour", None), int),
+            "min_victim_mib": _num(getattr(self.rule, "min_victim_mib", None), int),
         }
 
     def _limits_doc(self) -> dict:

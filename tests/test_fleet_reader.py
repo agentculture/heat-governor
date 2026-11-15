@@ -749,3 +749,10 @@ def test_snapshot_carries_mem_guard_config_and_config_error():
     assert th["mem_guard"] == guard
     assert th["config"] == "/etc/hg.toml"
     assert th["config_error"] == "bad key [memory]"
+
+
+@pytest.mark.parametrize("bad", [3, ["x"], {"a": 1}, True])
+def test_extract_drops_a_config_or_config_error_that_is_not_a_string(bad):
+    out = extract(doc(1.0, config=bad, config_error=bad))
+    assert out["config"] is None
+    assert out["config_error"] is None

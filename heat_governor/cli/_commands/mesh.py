@@ -175,8 +175,12 @@ def _now() -> float:
     return time.monotonic()
 
 
-def _guard_summary(g: object) -> dict | None:
-    """The memory guard in four fields; None when the daemon reports no guard."""
+def _guard_summary(g: object, state: object = "ok") -> dict | None:
+    """The memory guard in a few fields; None when the daemon reports no guard.
+
+    ``stale`` is true when the machine is not ``ok``: the fields are then the last ones read, and
+    the guard may not be running at all.
+    """
     if not isinstance(g, dict):
         return None
     bounds = g.get("boundaries")
@@ -185,6 +189,7 @@ def _guard_summary(g: object) -> dict | None:
         "armed": g.get("armed"),
         "kills_last_hour": g.get("kills_last_hour"),
         "boundary_count": len(bounds) if isinstance(bounds, list) else 0,
+        "stale": state != "ok",
     }
 
 
@@ -205,7 +210,10 @@ def _row(m: dict) -> dict:
         "level": th.get("level"),
         "admit": th.get("admit") if m.get("state") == "ok" else None,
         "version": th.get("version"),
-        "mem_guard": _guard_summary(th.get("mem_guard")),
+        "mem_guard": _guard_summary(th.get("mem_guard"), m.get("state")),
+        # false when the snapshot has a reading but no mem_guard key at all: it came from a
+        # `mesh serve` older than 0.18, which drops the field, so "no guard" is not known
+        "mem_guard_known": "mem_guard" in th or not th,
         "last_error": health.get("last_error"),
         "failing": bool(health.get("failing")),
     }
@@ -246,16 +254,21 @@ def _mem_text(r: dict) -> str:
     return f"{text:<16} {ddr:<7}"
 
 
-def _guard_text(g: dict | None) -> str:
-    """``guard kill armed 2k 3b`` (action, armed or not, kills in the last hour, boundaries)."""
+def _guard_text(r: dict) -> str:
+    """``guard kill armed 2k 3b`` (action, armed or not, kills in the last hour, boundaries).
+
+    ``guard -`` when the daemon reports none, ``guard ?`` when the snapshot's reader is too old to
+    say, and ``guard (last) ...`` when the machine is not ok and these are the last values read.
+    """
+    g = r.get("mem_guard")
     if not g:
-        return f"{'guard -':<24}"
+        return "guard -" if r.get("mem_guard_known", True) else "guard ?"
     armed = "armed" if g.get("armed") else "unarmed"
-    text = (
-        f"guard {_fmt(g.get('action'))} {armed} "
+    last = "(last) " if g.get("stale") else ""
+    return (
+        f"guard {last}{_fmt(g.get('action'))} {armed} "
         f"{_fmt(g.get('kills_last_hour'))}k {_fmt(g.get('boundary_count'))}b"
     )
-    return f"{text:<24}"
 
 
 def _admit_text(admit: object) -> str:
@@ -267,13 +280,15 @@ def _admit_text(admit: object) -> str:
 def render_status(st: dict) -> str:
     rows = st["machines"]
     w = max([len(str(r["name"])) for r in rows] + [4])
+    guards = [_guard_text(r) for r in rows]
+    gw = max([len(g) for g in guards] + [7])
     lines = []
-    for r in rows:
+    for r, guard in zip(rows, guards):
         admit = _admit_text(r["admit"])
         lines.append(
             f"{str(r['name']):<{w}}  {str(r['state']):<11} age {_fmt(r['age_s'], '.1f'):>6}s  "
             f"{_fmt(r['temp_c'], '.1f'):>5}C  {_mem_text(r)}  {_fmt(r['level']):<8} {admit:<5} "
-            f"{_guard_text(r.get('mem_guard'))} v{_fmt(r['version'])}"
+            f"{guard:<{gw}} v{_fmt(r['version'])}"
             + (f"  ({r['last_error']})" if r["last_error"] and _show_error(r) else "")
         )
     rd = st.get("reader") or {}

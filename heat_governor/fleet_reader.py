@@ -240,6 +240,9 @@ def extract(doc: dict) -> dict:
         out["limits"] = None
     if not isinstance(out["mem_guard"], dict):
         out["mem_guard"] = None
+    for key in ("config", "config_error"):
+        if not isinstance(out[key], str):
+            out[key] = None
     out["memory"] = _memory(doc)
     out.update(_gpu_power(doc))
     out.update(_fan_zones(doc))

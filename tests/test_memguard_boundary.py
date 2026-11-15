@@ -300,3 +300,13 @@ def test_fire_and_far_over_on_the_same_poll_record_one_row(tmp_path):
     (would,) = named(events, "memory_would_kill")
     assert would["reason"] == "floor"
     assert would["pid"] == 777
+
+
+def test_doc_thresholds_are_none_when_the_rule_does_not_carry_them():
+    from heat_governor.memguard import _num
+
+    assert _num(None, float) is None
+    assert _num("50", float) is None
+    assert _num(True, int) is None
+    assert _num(33, float) == 33.0
+    assert _num(2048.0, int) == 2048
