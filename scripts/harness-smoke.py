@@ -130,6 +130,24 @@ STEWARD_WAIVED_PORTABILITY_PATHS = frozenset(
         ".devague/deliveries/fleet-view-ventuno-q-fit.json",
         "docs/specs/2026-11-08-fleet-view-ventuno-q-fit.md",
         "docs/plans/2026-11-08-fleet-view-ventuno-q-fit-split.md",
+        # Generated devague records of the 2026-11-14 memory-guard frame and their exports:
+        # claims, scope findings and task instructions quote the AWS shared credentials path
+        # as recorded text. Same class, same no-hand-edit rule.
+        ".devague/frames/memory-guard.json",
+        ".devague/plans/memory-guard.json",
+        "docs/specs/2026-11-14-memory-guard.md",
+        "docs/plans/2026-11-14-memory-guard.md",
+        "docs/plans/2026-11-14-memory-guard-split.md",
+        # Generated devague records of the 2026-11-15 boundaries-tab frame and their exports:
+        # a challenge-pass probe, the claim it seeded and the tasks built on it name the
+        # per-user binary directory, and one claim names the config directory tests must
+        # not write to. Written against the note above; the resolution and obligation
+        # snapshots that carry the text have no amend move. Same class, same rule.
+        ".devague/frames/boundaries-tab.json",
+        ".devague/plans/boundaries-tab.json",
+        "docs/specs/2026-11-15-boundaries-tab.md",
+        "docs/plans/2026-11-15-boundaries-tab.md",
+        "docs/plans/2026-11-15-boundaries-tab-split.md",
     }
 )
 

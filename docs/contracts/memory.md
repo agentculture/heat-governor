@@ -169,7 +169,7 @@ MinIO), signing requests itself (SigV4, no third-party library):
 - `machine` is `[ship] machine`, else the `transport = "local"` entry of `fleet.toml`. It is
   never the kernel hostname. Without either, shipping is disabled.
 - Credentials come from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, else the `profile` in
-  `~/.aws/credentials` (keep it mode 600). They are never written to records, logs or uploads.
+  the AWS shared credentials file (`.aws/credentials` in the home directory; keep it mode 600). They are never written to records, logs or uploads.
 - `http://` endpoints are accepted only for loopback and tailnet (100.64.0.0/10) hosts; use
   `https://` for anything else.
 - Nothing on the guard's thread waits on disk or the network: its events are handed to a
@@ -212,7 +212,7 @@ action = "kill"          # default "record": never kills
 enabled = true
 endpoint = "http://<spark-tailnet-ip>:9000"   # MinIO on the tailnet; https for R2/AWS
 bucket = "heat-governor"
-profile = "heat-governor"                     # a [heat-governor] profile in ~/.aws/credentials
+profile = "heat-governor"                     # a [heat-governor] profile in the AWS credentials file
 machine = "elitemini"
 ```
 
