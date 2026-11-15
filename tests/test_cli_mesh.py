@@ -432,4 +432,5 @@ def test_status_text_has_one_guard_column_dash_when_absent():
     assert "guard kill armed 2k 3b" in l0
     assert "guard -" in l1
     assert l0.index("guard") == l1.index("guard")  # column stays aligned
-    assert l0.index("v") > 0 and l0.index("guard") < l0.rindex(" v")
+    assert l0.index("v") > 0
+    assert l0.index("guard") < l0.rindex(" v")

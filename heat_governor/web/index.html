@@ -1499,7 +1499,8 @@ function BoundaryCard({ row }) {
 function boundaryList(rows, shown, doc) {
   if (!rows.length) return html`<div class="empty">${doc ? "No machines in the fleet file." : "Waiting for the fleet reader…"}</div>`;
   if (!shown.length) return html`<div class="empty">No machine or rule matches these filters.</div>`;
-  return html`<div class="lanes">${shown.map(row => html`<${BoundaryCard} key=${row.b.name} row=${row} />`)}</div>`;
+  const cards = shown.map(row => html`<${BoundaryCard} key=${row.b.name} row=${row} />`);
+  return html`<div class="lanes">${cards}</div>`;
 }
 
 function Boundaries({ doc, err }) {
@@ -1542,7 +1543,8 @@ function App() {
   useEffect(() => { const on = () => setTab(readTab(location.hash)); addEventListener("hashchange", on); return () => removeEventListener("hashchange", on); }, []);
   const go = t => { setTab(t); try { history.replaceState(null, "", "#" + t); } catch (e) { location.hash = t; } };
   const rules = useMemo(() => ruleTotal(((doc && doc.machines) || []).map(toGuardRow)), [doc]);
-  const tabs = TABS.map(([k, l]) => html`<button key=${k} aria-current=${tab === k ? "page" : undefined} onClick=${() => go(k)}>${l}${k === "boundaries" && doc && html`<span class="n">${rules}</span>`}</button>`);
+  const ruleCount = doc && html`<span class="n">${rules}</span>`;
+  const tabs = TABS.map(([k, l]) => html`<button key=${k} aria-current=${tab === k ? "page" : undefined} onClick=${() => go(k)}>${l}${k === "boundaries" && ruleCount}</button>`);
   return html`<${React.Fragment}>
     <header class="app-header">
       <div style=${{ display: "flex", alignItems: "center", gap: "12px 18px", flexWrap: "wrap", minWidth: 0 }}>

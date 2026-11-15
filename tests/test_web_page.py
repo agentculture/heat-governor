@@ -523,7 +523,8 @@ def test_bar_marks_follow_act_over_pct(tmp_path):
     )
     assert got[0] == [58.8, 88.2]  # the design's marks, at act_over_pct 50
     assert got[1] == [45.5, 90.9]
-    assert got[2] == got[0] and got[3] == got[0]  # absent -> 50, for the bar only
+    assert got[2] == got[0]  # absent -> 50, for the bar only
+    assert got[3] == got[0]
 
 
 def test_bar_fill_and_rule_classes(tmp_path):
@@ -596,8 +597,10 @@ def _card_text(tmp_path, key):
 def test_fixture_states_render_distinctly(tmp_path):
     texts = {k: _card_text(tmp_path, k) for k in FIXTURES}
     assert len(set(texts.values())) == len(texts)
-    assert "unreachable" in texts["unreachable"] and "no reading" in texts["unreachable"].lower()
-    assert "stale" in texts["stale"] and "last reading shown" in texts["stale"]
+    assert "unreachable" in texts["unreachable"]
+    assert "no reading" in texts["unreachable"].lower()
+    assert "stale" in texts["stale"]
+    assert "last reading shown" in texts["stale"]
     assert "No memory guard" in texts["no_guard"]
     assert "older than 0.17" in texts["no_guard"]
     assert "armed · record" in texts["record"]
