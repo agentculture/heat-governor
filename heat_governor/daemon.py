@@ -66,6 +66,7 @@ from heat_governor.gpuclock import GpuClock
 from heat_governor.gpuclock import unsupported_reason as gpuclock_unsupported
 from heat_governor.gpulaw import GpuGovernor, Plan
 from heat_governor.memguard import EV_TOP, MemGuard
+from heat_governor.memsink import MemorySink
 from heat_governor.operator_ceiling import OperatorCeiling, hold_path
 from heat_governor.pair import PairDecision, PeerLink, PeerStatus
 from heat_governor.pair import decide as pair_decide
@@ -237,6 +238,8 @@ class Daemon:
         self._top: list | None = None
         self._mem_total: float | None = None
         self._postmortem_done = False
+        # recorder/spool writes of guard events happen here, never on the guard thread
+        self.memsink = MemorySink(self._route_memory_event, log=self._log)
         if opts.config is not None:
             if opts.memory is None:
                 opts.memory = memory_rule(opts.config)
@@ -797,6 +800,7 @@ class Daemon:
                 cgroups=self._own_cgroup(),
                 platform_limits=self.profile.memory_limits_mib,
             )
+            self.memsink.start()
             guard.start()
         except Exception as exc:  # noqa: BLE001 - running without a guard is today's behaviour
             self._log(f"memory guard: cannot start ({exc!r}); running without it")
@@ -815,6 +819,7 @@ class Daemon:
         guard, self.guard = self.guard, None
         if guard is not None:
             self._fenced("memory guard stop", guard.stop)
+        self._fenced("memory sink stop", self.memsink.stop)  # drains queued events first
         with self._mem_lock:
             self._top, self._mem_total = None, None
 
@@ -912,8 +917,9 @@ class Daemon:
         return avail is not None and soft is not None and avail < soft
 
     def _on_memory_event(self, ev: dict) -> None:
-        """The guard's sink, called ON THE GUARD THREAD. Never raises: the recorder write and
-        the ship submit are each fenced by ``_quiet``."""
+        """The guard's sink, called ON THE GUARD THREAD. Never blocks on disk: the top snapshot
+        is handed over under a lock, everything else is queued on :attr:`memsink`, whose own
+        thread does the recorder write and the ship submit (review #5)."""
         kind = ev.get("event") if isinstance(ev, dict) else None
         if kind == EV_TOP:
             with self._mem_lock:
@@ -921,6 +927,12 @@ class Daemon:
             return
         if kind is None:
             return
+        self.memsink.submit(ev)
+
+    def _route_memory_event(self, ev: dict) -> None:
+        """Record and ship one guard event (on the sink thread). Never raises: the recorder
+        write and the ship submit are each fenced by ``_quiet``."""
+        kind = ev.get("event")
         if self.recorder:
             self._quiet(f"record {kind}", lambda: self.recorder.write(ev))
         shipper = self.shipper

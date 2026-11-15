@@ -154,8 +154,10 @@ class Rig:
             self.guard.step()
             self.clock.mono += self.guard.rule.poll_s
             avail -= RATE_MIB_S * self.guard.rule.poll_s
+        self.daemon.memsink.flush()  # guard events are written on the sink thread (review #5)
 
     def rows(self) -> list[dict]:
+        self.daemon.memsink.flush()
         out: list[dict] = []
         for path in sorted((self.data / "records").glob("*.jsonl")):
             out += [json.loads(line) for line in path.read_text().splitlines()]
@@ -517,3 +519,24 @@ def test_ticks_after_this_boot_without_start_row_are_not_a_reboot(tmp_path):
     _write_records(rig.data / "records", rows)  # a crash of this boot's daemon, not a reboot
     rig.daemon.start()
     assert rig.shippers[0].postmortems == []
+
+
+def test_a_stuck_recorder_never_blocks_the_guard_thread(tmp_path):
+    """Review #5: the emit sink hands events to the sink thread; a recorder write stuck in
+    fsync (writeback under memory pressure) must not hold up the guard's next poll."""
+    import threading
+    import time
+
+    rig = Rig(tmp_path, MEMORY)
+    rig.daemon.start()
+    release = threading.Event()
+    real_write = rig.daemon.recorder.write
+    rig.daemon.recorder.write = lambda rec: (release.wait(5), real_write(rec))
+    try:
+        t0 = time.monotonic()
+        rig.daemon._on_memory_event({"t": NOW, "event": "oom_kill", "source": "vmstat"})
+        assert time.monotonic() - t0 < 0.5
+    finally:
+        release.set()
+    rig.daemon.memsink.flush()
+    assert any(r.get("event") == "oom_kill" for r in rig.rows())
