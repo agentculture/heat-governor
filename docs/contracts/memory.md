@@ -21,7 +21,11 @@ fires when available memory is:
   fill rate (a least-squares slope over `window_s`, 10 s).
 
 A condition must hold on two consecutive samples. After a fire the trigger disarms until
-available memory is back above the soft limit, so one wave gives one fire.
+available memory is back above the soft limit, so one wave gives one fire. The exception is a
+fire that killed nothing because no victim was eligible or the kill was refused: the guard
+re-arms and tries again, 1 s later, then 2, 4, 8 ... up to 60 s between tries. A kill or a
+recovery resets that backoff, so memory eaten by something it may not kill (a root container)
+gives about ten `memory_would_kill` rows in five minutes, not one per poll.
 
 Memory pressure (PSI) is not used: on 2026-11-14 it stayed near 0 until less than 2 GB was
 left, while the fill rate gave warning tens of seconds earlier.
@@ -62,16 +66,65 @@ and never signals anything.
   `containerd`, plus `protect` from the config.
 - Sizes and growth use anonymous memory (`RssAnon`), so services with large file-backed
   mappings never look like runaways.
-- The victim is the fastest-growing eligible process with at least `min_victim_mib` (2048 MiB)
-  of anonymous memory. If none qualifies (many small workers), the guard picks the
-  fastest-growing process group below the session or systemd scope and kills that group's
-  biggest member.
+- The victim is chosen by growth, in this order:
+  1. an eligible process **over its boundary** (see [Boundaries](#boundaries)), most MiB over
+     first;
+  2. otherwise the faster of the fastest-growing eligible process with at least
+     `min_victim_mib` (2048 MiB) of anonymous memory and the fastest-growing process group
+     below the session or systemd scope (many small workers), killing that group's biggest
+     growing member;
+  3. only when nothing is growing (a flat curve under the floor), the biggest eligible process
+     of at least `min_victim_mib`.
+
+  A big process that is not growing is never chosen while something else grows, and a process
+  within its boundary is never chosen at all.
 - The kill is pinned: the guard opens a pidfd, re-checks the start time and owner, and sends
   SIGKILL through the pidfd, so a recycled pid is never hit.
 - At most `max_kills_per_hour` (3) kills per rolling hour. Past that it records
   `memory_would_kill` plus `memory_budget_exhausted` and does not kill.
 - A second kill of the same program (owner, executable, command-line hash) within 30 minutes
   carries `repeat: N`, so a relaunch loop shows up as one repeating offender.
+
+## Boundaries
+
+`[[memory.allow]]` rules give known processes an acceptable size, so the guard blames the
+process that is *out of bounds* rather than the one that is merely big:
+
+```toml
+[memory]
+act_over_pct = 50                  # "far over" = more than max_mib x 1.5
+
+[[memory.allow]]
+name = "vllm"                      # unique label
+cgroup = "*docker-*.scope"         # any of comm / cmdline / cgroup; all given must match
+cmdline = "*vllm*serve*"
+max_mib = 102400                   # >= 64
+scope = "process"                  # "process" (default) or "total" across all matches
+```
+
+- `comm` is a list of exact process names (also matched against the argv[0] and executable
+  basenames); `cmdline` and `cgroup` are shell-style globs. A process matching several rules
+  falls under the tightest one (smallest `max_mib`).
+- **Within** its boundary a process is never blamed and never chosen as a victim.
+- **Over** it: it is blamed first and, if it is an eligible own-user process, it is the first
+  victim when the trigger fires. The first crossing records `memory_boundary_exceeded` (once
+  per process, reset after it falls 5% back under).
+- **Far over** (`act_over_pct`): the guard acts even before system memory is low, on its
+  routine process scan (every `top_every_s`, every poll while low). An eligible own-user
+  process is killed (same protections, budget and pidfd path; `reason: "boundary"`); one the
+  guard may not kill gets a single `memory_would_kill` with `why_not: "boundary: not killable
+  (uid N)"`. Either happens once per process.
+- `min_victim_mib` still applies: a rule whose `max_mib` is below it blames and records but
+  never kills.
+
+## Blame
+
+Every fire event (`memory_kill`, `memory_would_kill`) and every `memory_boundary_exceeded`
+carries `blamed`: up to three processes of **any** user (root, containers, vLLM included),
+over-boundary first, then by anonymous growth. Each entry has the pid, uid, process name,
+redacted command line, anonymous size, growth, cgroup, the container id when the cgroup names
+one (`docker-<id>`, 12 hex characters) and its boundary, if any. Blame is evidence only: the
+kill still targets eligible own-user processes.
 
 ## What it records
 
@@ -82,6 +135,7 @@ Rows in the daemon's records (`<data_dir>/records/YYYYMMDD.jsonl`), each with an
 | `memory_kill` | A process was killed: pid, parent chain, command line (redacted), anonymous size, growth, cgroup, `repeat`, `kills_last_hour` |
 | `memory_would_kill` | The guard fired but did not kill (record-only, budget, or refused), with `why_not` |
 | `memory_budget_exhausted` | The hourly kill budget is used up |
+| `memory_boundary_exceeded` | A process (or a rule's total) first went over its `[[memory.allow]]` boundary: rule, usage, max, `blamed` |
 | `oom_kill` | The kernel or a cgroup OOM-killed something (from `/proc/vmstat` and `memory.events`), even when the guard did not act |
 
 Tick rows gain an optional `top` list (the biggest processes by anonymous memory), every
@@ -104,9 +158,9 @@ MinIO), signing requests itself (SigV4, no third-party library):
 
 | Object | When |
 |---|---|
-| `<prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json` | Each `memory_kill`, `memory_budget_exhausted` and `oom_kill`, immediately |
+| `<prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json` | Each `memory_kill`, `memory_budget_exhausted`, `memory_boundary_exceeded` and `oom_kill`, immediately |
 | `<prefix>/<machine>/<boot_id>/blackbox.jsonl.gz` | The last `blackbox_minutes` (10) of records, every `blackbox_every_s` (60 s), every 10 s while memory is low |
-| `<prefix>/<machine>/<boot_id>/postmortem.json` | Once, on start after an unclean shutdown |
+| `<prefix>/<machine>/<boot_id>/postmortem.json` | Once, on start after an unclean shutdown, under the **crashed** boot's id (next to that boot's events) |
 
 - `machine` is `[ship] machine`, else the `transport = "local"` entry of `fleet.toml`. It is
   never the kernel hostname. Without either, shipping is disabled.
@@ -114,6 +168,8 @@ MinIO), signing requests itself (SigV4, no third-party library):
   `~/.aws/credentials` (keep it mode 600). They are never written to records, logs or uploads.
 - `http://` endpoints are accepted only for loopback and tailnet (100.64.0.0/10) hosts; use
   `https://` for anything else.
+- Nothing on the guard's thread waits on disk or the network: its events are handed to a
+  writer thread (records, then the S3 spool) through a bounded queue.
 - Uploads never block the guard: objects go to a spool directory first and are retried with
   backoff (timeouts, 5xx, clock skew after boot). Configuration errors (missing bucket, bad key)
   are logged once an hour.
@@ -157,6 +213,13 @@ machine = "elitemini"
 ```
 
 `heat-governor ship test` checks the bucket and credentials with a probe object.
+
+## Keeping the guard itself alive
+
+The daemon locks the memory it has resident at start (`mlockall(MCL_CURRENT)`: the interpreter,
+its modules, the guard's code) and the systemd unit sets `MemoryMin=128M`, so the guard keeps
+running under memory pressure. It does not lock later allocations (thread stacks, upload
+buffers), which would pin RAM the guard is trying to free.
 
 ## Host containment
 

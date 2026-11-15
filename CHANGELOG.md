@@ -15,11 +15,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Off-machine evidence ([ship]): stdlib SigV4 client for any S3-compatible store (AWS, R2, MinIO), kill and OOM events uploaded immediately, a rolling black box, a postmortem after an unclean boot, spool and retry; keys use the fleet machine name, never the hostname (sigv4.py, ship.py)
 - CLI: memory overview|status|top|replay and ship overview|test|fetch; report shows memory; unit emits MemoryMin=128M
 - state.md: optional mem_guard object; docs/contracts/memory.md; spec, plan and split for the memory guard (docs/specs, docs/plans)
+- Blame: every fire and boundary event carries `blamed`, the top growers of any user (root, containers, vLLM) with uid, cgroup, container id and growth; kills still target own-user processes only (deviation d4)
+- Acceptable boundaries: `[[memory.allow]]` rules (match by comm, cmdline glob or cgroup glob; max_mib per process or total) and `act_over_pct`; within its boundary a process is never blamed or chosen, over it it is blamed and chosen first, far over it is acted on before memory runs low; new `memory_boundary_exceeded` event, shipped; `mem_guard.boundaries` (deviation d4)
+- Live evidence: docs/evidence/2026-11-15-memory-guard-live.md (EliteMini runaway killed with 8.7 GB free; fleet rollout to all six boxes, MinIO on spark and arduino)
 
 ### Changed
 
 - Recorder writes are serialized (the guard and shipper write from their own threads); recorder.tail() feeds the black box
 - run passes [memory]/[ship] to the daemon even with [daemon] reload = false (deviation d2)
+- Code review fixes: the victim is chosen by growth (a big idle process is never chosen over a growing group); a fire that found no victim or a refused kill re-arms with backoff (1 s doubling to 60 s); mlockall locks current pages only (was 420-590 MB locked per daemon); guard events are written on a sink thread, never the guard thread; a config reload keeps the kill budget and repeat history; recorder.tail() reads backwards from the end; the postmortem is keyed under the crashed boot; two false config comments corrected
 
 ## [0.16.1] - 2026-11-10
 
