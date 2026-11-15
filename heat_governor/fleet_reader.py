@@ -95,6 +95,9 @@ THERMAL_FIELDS = (
     "rate_c_s",
     "hottest_zone",
     "gpu_clock",  # the clock-ceiling helper status, e.g. "ok (helper status: 1575)"
+    "mem_guard",  # the memory guard's state dict; absent from daemons older than 0.17
+    "config",  # the daemon's config path (or null)
+    "config_error",  # why the last config reload failed (or null)
 )
 
 
@@ -235,6 +238,8 @@ def extract(doc: dict) -> dict:
     out["containers"] = out["containers"] if isinstance(out["containers"], list) else []
     if not isinstance(out["limits"], dict):
         out["limits"] = None
+    if not isinstance(out["mem_guard"], dict):
+        out["mem_guard"] = None
     out["memory"] = _memory(doc)
     out.update(_gpu_power(doc))
     out.update(_fan_zones(doc))
