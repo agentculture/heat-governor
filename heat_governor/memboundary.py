@@ -169,6 +169,10 @@ def _entry(rule, usage: float, state: str) -> dict:
         "scope": rule.scope,
         "usage_mib": round(usage, 1),
         "state": state,
+        "comm": list(rule.comm),
+        "cmdline": rule.cmdline,
+        "cgroup": rule.cgroup,
+        "source": rule.source,
     }
 
 
