@@ -23,7 +23,14 @@ Each ``step()``:
    than ``max(REFIRE_POLLS x poll_s, REFIRE_MIN_S)`` (1 s by default), doubling on each
    consecutive retry up to ``REFIRE_MAX_S`` (60 s). ``record-only`` and
    ``budget`` fires do not re-arm, so they stay one per wave;
-5. reads ``/proc/vmstat`` ``oom_kill`` and the ``oom_kill`` line of each watched cgroup's
+   Every kill / would-kill row carries ``blamed`` (``memboundary.blame``: up to three
+   processes of any uid);
+5. on every scan, with ``[[memory.allow]]`` rules: emits ``memory_boundary_exceeded`` the
+   first time a process (or a ``scope = "total"`` set) goes over its boundary, and acts once
+   per process instance per rule on a far-over one, fire or no fire
+   (``MemKiller.act_on`` with reason ``"boundary"``: same protections and budget). The
+   boundaries add no scans: they reuse the scan of step 2;
+6. reads ``/proc/vmstat`` ``oom_kill`` and the ``oom_kill`` line of each watched cgroup's
    ``memory.events``. The first read is the baseline; each later increase emits one
    ``oom_kill`` event per counter.
 
@@ -39,13 +46,15 @@ import threading
 import time
 from pathlib import Path
 
-from heat_governor import memprocs
+from heat_governor import memboundary, memprocs
 from heat_governor.memkill import EV_KILL, EV_WOULD, MemKiller
 from heat_governor.memtrigger import Trigger
 
 MCL_CURRENT = 1
 EV_TOP = "memory_top"
 EV_OOM = "oom_kill"
+EV_BOUNDARY = "memory_boundary_exceeded"
+BOUNDARY_REASON = "boundary"
 # A fire that found no victim or whose kill was refused re-arms the trigger, but the next
 # fire waits at least max(REFIRE_POLLS x poll_s, REFIRE_MIN_S): 1 s at the 0.25 s default.
 # That leaves a refused kill a retry every second (a pid reused mid-kill, a victim that
@@ -153,6 +162,8 @@ class MemGuard:
         self._retries = 0  # consecutive no-victim/refused retries in this wave
         self._last_top: float | None = None
         self._last_kill: dict | None = None
+        self._watch = memboundary.Watch()
+        self._bounds_doc = memboundary.idle_doc(self._rules())
         self._counters: dict[str, int] = {}
         self._errors: set[str] = set()
         self.polls = 0
@@ -211,6 +222,7 @@ class MemGuard:
             d = dict(self._doc)
         if d["last_kill"] is not None:
             d["last_kill"] = dict(d["last_kill"])
+        d["boundaries"] = [dict(b) for b in d["boundaries"]]
         return d
 
     def _build_doc(self, avail_mib: float | None, now: float | None = None) -> dict:
@@ -225,6 +237,7 @@ class MemGuard:
             "last_kill": None if self._last_kill is None else dict(self._last_kill),
             "kills_last_hour": int(kills),
             "limits": self._limits_doc(),
+            "boundaries": [dict(b) for b in self._bounds_doc],
         }
 
     def _limits_doc(self) -> dict:
@@ -291,10 +304,11 @@ class MemGuard:
         self._armed = self._trigger.armed
         low = avail < soft_mib
         routine = self._last_top is None or mono - self._last_top >= float(r.top_every_s)
-        procs = None
-        if low or routine or fire is not None:
-            procs = memprocs.scan(self.proc_root)
-            self.tracker.update(procs, mono)
+        if not (low or routine or fire is not None):
+            return
+        procs = memprocs.scan(self.proc_root)
+        self.tracker.update(procs, mono)
+        bounds = self._safe("boundaries", None, self._assess, procs)
         if low or routine:
             self._last_top = mono
             self._send(
@@ -306,30 +320,139 @@ class MemGuard:
                     "top": memprocs.top(procs, self.tracker, int(r.top_n)),
                 }
             )
-        if fire is not None:
-            events = self.killer.act(procs, self.tracker, fire.reason, mono)
-            if self._should_retry(events):
-                base = max(REFIRE_POLLS * float(r.poll_s), REFIRE_MIN_S)
-                gap = min(base * 2.0**self._retries, REFIRE_MAX_S)
-                self._retries += 1
-                self._trigger.rearm(not_before=mono + gap)
-                self._armed = self._trigger.armed
-            elif any(ev.get("event") == EV_KILL for ev in events):
-                self._retries = 0
-            for ev in events:
-                ev = dict(ev)
-                ev["t"] = wall  # memkill stamps its monotonic clock; records use epoch
-                ev.setdefault("avail_mib", round(fire.avail_mib, 1))
-                ev.setdefault("rate_mib_s", round(fire.rate_mib_s, 1))
-                if ev.get("event") == EV_KILL:
-                    self._last_kill = {
-                        "t": wall,
-                        "pid": ev.get("pid"),
-                        "comm": ev.get("comm"),
-                        "rss_mib": ev.get("rss_mib"),
-                        "repeat": ev.get("repeat"),
-                    }
-                self._send(ev)
+        blamed = []
+        if bounds is not None or fire is not None:
+            blamed = self._safe("blame", [], memboundary.blame, procs, self.tracker, bounds)
+        self._safe("boundary crossings", None, self._crossings, bounds, wall, avail, blamed)
+        acted = self._on_fire(fire, procs, bounds, mono, wall, blamed) if fire else set()
+        self._safe(
+            "boundary action",
+            None,
+            self._far_over,
+            procs,
+            bounds,
+            mono,
+            wall,
+            avail,
+            blamed,
+            acted,
+        )
+
+    def _safe(self, what: str, default, fn, *args):
+        """``fn(*args)``, or ``default`` when it raises (logged once per distinct message): a
+        fault in the boundary or blame code must never cost the trigger its kill."""
+        try:
+            return fn(*args)
+        except Exception as e:  # noqa: BLE001 - the trigger path must survive it
+            msg = f"{what}: {type(e).__name__}: {e}"
+            if msg not in self._errors:
+                self._errors.add(msg)
+                self._log(f"memguard: {msg}, continuing")
+            return default
+
+    # --- boundaries ------------------------------------------------------------------------
+
+    def _rules(self) -> tuple:
+        return tuple(getattr(self.rule, "allow", ()) or ())
+
+    def _assess(self, procs: dict) -> memboundary.Assessment | None:
+        """Classify the scan against ``[[memory.allow]]`` (None without rules)."""
+        rules = self._rules()
+        if not rules:
+            return None
+        names = getattr(self.killer, "names", None)
+        pct = float(getattr(self.rule, "act_over_pct", 50.0))
+        bounds = memboundary.assess(procs, rules, pct, names)
+        self._bounds_doc = bounds.doc()
+        return bounds
+
+    def _crossings(self, bounds, wall: float, avail: float, blamed: list) -> None:
+        """One ``memory_boundary_exceeded`` per set the first time it goes over."""
+        if bounds is None:
+            return
+        for s in self._watch.crossings(bounds):
+            ev = {
+                "t": wall,
+                "event": EV_BOUNDARY,
+                "rule": s.rule.name,
+                "scope": s.rule.scope,
+                "usage_mib": round(s.usage_mib, 1),
+                "max_mib": int(s.rule.max_mib),
+                "avail_mib": round(avail, 1),
+                "blamed": blamed,
+            }
+            if s.rule.scope == "total":
+                ev["pids"] = [p.pid for p in s.members]
+            else:
+                p = s.members[0]
+                ev.update({"pid": p.pid, "uid": p.uid, "comm": p.comm})
+            self._send(ev)
+
+    def _far_over(self, procs, bounds, mono, wall, avail, blamed, acted: set) -> None:
+        """Act once per process instance per rule on a far-over set, fire or no fire."""
+        if bounds is None:
+            return
+        for s, victim in self._watch.due(bounds, lambda s: self._victim_of(procs, s)):
+            if victim.pid in acted:
+                continue  # this poll's fire already acted on (or recorded) it
+            events = self.killer.act_on(
+                procs, self.tracker, victim, BOUNDARY_REASON, mono, boundary=s.info()
+            )
+            acted |= self._publish(events, wall, blamed, avail_mib=round(avail, 1))
+
+    def _victim_of(self, procs: dict, s) -> memprocs.Proc:
+        """The process to act on for a far-over set: its only member (scope process), else
+        the biggest killable member, else the biggest member (recorded as not killable)."""
+        if len(s.members) == 1:
+            return s.members[0]
+        ranked = sorted(s.members, key=lambda p: (-p.rss_anon_mib, p.pid))
+        killable = [p for p in ranked if self.killer.refusal(procs, p) is None]
+        return (killable or ranked)[0]
+
+    # --- trigger fires ---------------------------------------------------------------------
+
+    def _on_fire(self, fire, procs, bounds, mono: float, wall: float, blamed: list) -> set:
+        """Hand one fire to the killer; re-arm on a no-victim/refused fire. Returns the pids
+        its events named."""
+        r = self.rule
+        events = self.killer.act(procs, self.tracker, fire.reason, mono, bounds=bounds)
+        if self._should_retry(events):
+            base = max(REFIRE_POLLS * float(r.poll_s), REFIRE_MIN_S)
+            gap = min(base * 2.0**self._retries, REFIRE_MAX_S)
+            self._retries += 1
+            self._trigger.rearm(not_before=mono + gap)
+            self._armed = self._trigger.armed
+        elif any(ev.get("event") == EV_KILL for ev in events):
+            self._retries = 0
+        return self._publish(
+            events,
+            wall,
+            blamed,
+            avail_mib=round(fire.avail_mib, 1),
+            rate_mib_s=round(fire.rate_mib_s, 1),
+        )
+
+    def _publish(self, events: list[dict], wall: float, blamed: list, **extra) -> set:
+        """Re-stamp and emit killer events; returns the pids they named (killed or not)."""
+        acted: set = set()
+        for ev in events:
+            ev = dict(ev)
+            ev["t"] = wall  # memkill stamps its monotonic clock; records use epoch
+            for key, value in extra.items():
+                ev.setdefault(key, value)
+            if ev.get("event") in (EV_KILL, EV_WOULD):
+                ev.setdefault("blamed", blamed)
+                acted.add(ev.get("pid"))
+            if ev.get("event") == EV_KILL:
+                self._last_kill = {
+                    "t": wall,
+                    "pid": ev.get("pid"),
+                    "comm": ev.get("comm"),
+                    "rss_mib": ev.get("rss_mib"),
+                    "repeat": ev.get("repeat"),
+                }
+            self._send(ev)
+        return acted
 
     @staticmethod
     def _should_retry(events: list[dict]) -> bool:

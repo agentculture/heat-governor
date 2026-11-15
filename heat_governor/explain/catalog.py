@@ -311,9 +311,22 @@ platform's declared limits (spark and thor 3072/6144 MiB, orin 2048/4096,
 ventunoq 1024/2048 -- boxes that run full of AI work); else `floor_pct`/`soft_pct`
 of RAM. `memory status` shows the effective limits and their source.
 
+Every kill and would-kill row carries `blamed`: up to three processes of any
+user (root and containers included) -- over their boundary first, then the
+fastest anonymous growth, then the biggest -- with uid, redacted command line,
+cgroup and container id. Boundaries (`[[memory.allow]]`: a `name`, matchers
+`comm` / `cmdline` / `cgroup` (all given must match), `max_mib`, `scope` =
+process|total; the smallest matching `max_mib` applies) say how much a process
+may use. Within it, a process is never blamed or killed. Over it, it is the
+first victim when memory runs low, and a `memory_boundary_exceeded` row is
+written once. Far over it (above `max_mib` x (1 + `act_over_pct`/100), default
+50) it is killed even while memory is fine -- own user only, same protections,
+`min_victim_mib` and hourly budget -- or recorded once as not killable.
+
 - `memory overview` -- describe this noun.
 - `memory status [--source S]` -- the running daemon's `mem_guard`: action,
-  armed, MemAvailable, last kill, kills in the last hour. "memory guard not
+  armed, MemAvailable, last kill, kills in the last hour, and one line per
+  boundary (state within|over|far_over|idle, usage of max_mib). "memory guard not
   configured ([memory] absent)" (exit 0) when there is none; exit 2 when no
   daemon state is readable.
 - `memory top [--n N]` -- the N biggest processes by anonymous memory, now
@@ -399,7 +412,10 @@ record|kill (default record), `floor_pct` 5, `horizon_s` 10, `soft_pct` 20,
 `floor_mib`/`soft_mib` (absolute MiB, set together, win over the percentages and
 the platform's limits), `window_s` 10, `min_victim_mib` 2048,
 `max_kills_per_hour` 3, `protect` (extra process names never killed), `poll_s`
-0.25, `top_n` 10, `top_every_s` 10.
+0.25, `top_n` 10, `top_every_s` 10, `act_over_pct` 50 (1-1000), and
+`[[memory.allow]]` boundaries: `name` (required, unique), at least one of
+`comm` (names), `cmdline` / `cgroup` (fnmatch globs), `max_mib` (required,
+>= 64), `scope` = process (default) | total.
 `[ship]` (off unless `enabled = true`): `endpoint`, `bucket` (both required
 when enabled), `region` us-east-1, `prefix` fleet, `profile` (AWS credentials
 profile), `machine` (default: the

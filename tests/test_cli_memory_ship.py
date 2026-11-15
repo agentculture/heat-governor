@@ -120,6 +120,28 @@ def _j(json_mode):
     return ["--json"] if json_mode else []
 
 
+def test_status_prints_one_line_per_boundary(capsys, tmp_path):
+    guard = dict(GUARD)
+    guard["boundaries"] = [
+        {"name": "vllm", "max_mib": 102400, "scope": "total", "usage_mib": 110000.0,
+         "state": "over"},
+        {"name": "idle-one", "max_mib": 64, "scope": "process", "usage_mib": 0.0,
+         "state": "idle"},
+    ]  # fmt: skip
+    src = write_state(tmp_path, guard)
+    rc, out, err = run(capsys, "memory", "status", "--source", str(src))
+    assert (rc, err) == (0, "")
+    assert "boundary vllm: over, 110000 of 102400 MiB (total)" in out
+    assert "boundary idle-one: idle, 0 of 64 MiB (process)" in out
+
+
+def test_status_without_boundaries_prints_none(capsys, tmp_path):
+    src = write_state(tmp_path, dict(GUARD, boundaries=[]))
+    rc, out, err = run(capsys, "memory", "status", "--source", str(src))
+    assert (rc, err) == (0, "")
+    assert "boundaries: none" in out
+
+
 @pytest.mark.parametrize("json_mode", [False, True])
 def test_status_not_configured(capsys, tmp_path, json_mode):
     src = write_state(tmp_path)

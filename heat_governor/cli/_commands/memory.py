@@ -52,7 +52,27 @@ def _guard_text(g: dict) -> str:
         )
     else:
         lines.append("last kill: none")
+    lines.extend(_boundary_lines(g.get("boundaries")))
     return "\n".join(lines)
+
+
+def _boundary_lines(bounds: object) -> list[str]:
+    """One line per ``[[memory.allow]]`` boundary; nothing from a daemon that has none."""
+    if not isinstance(bounds, list):
+        return []
+    if not bounds:
+        return ["boundaries: none"]
+    out = []
+    for b in bounds:
+        if not isinstance(b, dict):
+            continue
+        usage = b.get("usage_mib")
+        usage = f"{usage:.0f}" if isinstance(usage, (int, float)) else "?"
+        out.append(
+            f"boundary {b.get('name')}: {b.get('state')}, {usage} of {b.get('max_mib')} MiB "
+            f"({b.get('scope')})"
+        )
+    return out
 
 
 def _fmt_time(t: object) -> str:
@@ -342,7 +362,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     ov.add_argument("--json", action="store_true", help=_JSON_HELP)
     ov.set_defaults(func=cmd_overview)
 
-    st = noun.add_parser("status", help="The running daemon's memory guard state.")
+    st = noun.add_parser(
+        "status", help="The running daemon's memory guard state, boundaries included."
+    )
     st.add_argument(
         "--source", help="State file path or http://host:port/state (default: the local file)."
     )

@@ -2,6 +2,10 @@
 
 ``MemKiller.act(procs, tracker, reason)`` is called once per trigger fire. It:
 
+0. with boundaries (``bounds``, a ``memboundary.Assessment``): processes within their
+   ``[[memory.allow]]`` boundary are never candidates, and the eligible process most MiB over
+   its boundary (>= ``min_victim_mib``) is chosen first (``victim = "boundary"``); only when
+   there is none does the growth choice below run;
 1. chooses a victim (``choose``) by anon growth (MiB/s). Candidates are (a) the fastest-growing
    eligible single: an own-uid, non-protected process with anonymous RSS >= ``min_victim_mib``
    whose growth is > 0, and (b) the fastest-growing own-uid group (``memprocs.groups``,
@@ -19,6 +23,11 @@
    time and ``/proc/<pid>/status`` uid and only if both still match the scanned process sends
    SIGKILL through ``pidfd_send_signal``. A recycled pid is therefore never signalled. Any
    mismatch or OSError means no kill, and the event says why.
+
+``act_on(procs, tracker, proc, reason)`` acts on one named process (a far-over boundary)
+through the same record-only / budget / pinned-kill path; a process it may not kill
+(``refusal``: another uid, a protected name, the daemon's chain, below ``min_victim_mib``, or
+a root daemon) yields ``memory_would_kill`` with ``why_not = "boundary: not killable (...)"``.
 
 Never chosen: other uids, pid <= 2, the daemon itself and its parent chain, any process
 whose comm / argv[0] basename / exe basename is in ``PROTECTED`` or the ``[memory] protect``
@@ -70,6 +79,10 @@ def read_proc(proc_root: Path, pid: int) -> Proc | None:
     return memprocs._read_proc(Path(proc_root), pid)  # noqa: SLF001 - same package
 
 
+def _growth(tracker, p: Proc) -> float:
+    return tracker.growth(p.pid, p.start_ticks) if tracker is not None else 0.0
+
+
 def _default_pidfd_open(pid: int, flags: int = 0) -> int:
     return os.pidfd_open(pid, flags)
 
@@ -85,6 +98,7 @@ class Choice:
     why_not: str = ""  # set when proc is None
     group: dict | None = None
     growth_mib_s: float = 0.0
+    boundary: dict | None = None  # memboundary.BoundSet.info() when chosen for a boundary
 
 
 @dataclass
@@ -108,6 +122,10 @@ class MemKiller:
             self.self_pid = os.getpid()
 
     # --- protection ------------------------------------------------------------------------
+
+    def names(self, p: Proc) -> set[str]:
+        """comm, argv[0] basename and exe basename: the names protection and boundaries match."""
+        return self._names(p)
 
     def _names(self, p: Proc) -> set[str]:
         names = {p.comm}
@@ -137,16 +155,38 @@ class MemKiller:
 
     # --- choice ----------------------------------------------------------------------------
 
-    def choose(self, procs: dict[int, Proc], tracker) -> Choice:
+    def choose(self, procs: dict[int, Proc], tracker, bounds=None) -> Choice:
+        """The victim of one trigger fire. ``bounds`` (a ``memboundary.Assessment``) removes
+        processes within their boundary from every tier and puts eligible processes over
+        their boundary first (most MiB over); without it the choice is growth only."""
         if self.uid == 0:
             return Choice(None, why_not="no-victim: daemon runs as root; refusing to choose")
         min_mib = float(self.rule.min_victim_mib)
         shielded = self._shielded(procs)
+        within = bounds.within if bounds is not None else frozenset()
+        eligible = [
+            p for p in procs.values() if p.pid not in within and self._refusal(p, shielded) is None
+        ]
+        first = self._over_boundary(eligible, bounds, min_mib)
+        if first is not None:
+            return first
+        return self._by_growth(procs, tracker, eligible, min_mib)
 
+    @staticmethod
+    def _over_boundary(eligible: list[Proc], bounds, min_mib: float) -> Choice | None:
+        """Tier 0: the eligible process most over its boundary (``bounds.over()`` order)."""
+        if bounds is None:
+            return None
+        ok = {p.pid for p in eligible if p.rss_anon_mib >= min_mib}
+        for st in bounds.over():
+            if st.proc.pid in ok:
+                return Choice(st.proc, how="boundary", boundary=st.bset.info())
+        return None
+
+    def _by_growth(self, procs, tracker, eligible: list[Proc], min_mib: float) -> Choice:
         def growth(p: Proc) -> float:
-            return tracker.growth(p.pid, p.start_ticks) if tracker is not None else 0.0
+            return _growth(tracker, p)
 
-        eligible = [p for p in procs.values() if self._refusal(p, shielded) is None]
         singles = [p for p in eligible if p.rss_anon_mib >= min_mib]
 
         # 1. the fastest-growing single (it must actually be growing)
@@ -155,6 +195,34 @@ class MemKiller:
         single_g = growth(single) if single is not None else 0.0
 
         # 2. the fastest-growing group, scored by the growth the single does not explain
+        group, group_g, group_best = self._best_group(
+            procs, tracker, eligible, min_mib, single, single_g
+        )
+
+        # 3. act on whichever grows faster (a tie goes to the single: the precise target)
+        if group is not None and group_g > single_g:
+            return Choice(
+                group_best, how="group", group=dict(group), growth_mib_s=growth(group_best)
+            )
+        if single is not None:
+            return Choice(single, how="process", growth_mib_s=single_g)
+
+        # 4. nothing is growing (a floor fire on a flat curve): the biggest eligible single
+        if singles:
+            best = max(singles, key=lambda p: (p.rss_anon_mib, -p.pid))
+            return Choice(best, how="process", growth_mib_s=max(growth(best), 0.0))
+        return Choice(
+            None,
+            why_not=f"no-victim: no eligible own-uid process >= {int(min_mib)} MiB "
+            "and no growing group over it",
+        )
+
+    def _best_group(self, procs, tracker, eligible, min_mib, single, single_g):
+        """(group, score, victim) of the fastest-growing own-uid group, or (None, 0.0, None)."""
+
+        def growth(p: Proc) -> float:
+            return _growth(tracker, p)
+
         group, group_g, group_best = None, 0.0, None
         ok = {p.pid for p in eligible}
         for g in memprocs.groups(procs, self.uid, tracker):
@@ -174,24 +242,19 @@ class MemKiller:
             best = max(moving, key=lambda p: (p.rss_anon_mib, growth(p), -p.pid))
             if group is None or (score, g["rss_anon_mib"]) > (group_g, group["rss_anon_mib"]):
                 group, group_g, group_best = g, score, best
+        return group, group_g, group_best
 
-        # 3. act on whichever grows faster (a tie goes to the single: the precise target)
-        if group is not None and group_g > single_g:
-            return Choice(
-                group_best, how="group", group=dict(group), growth_mib_s=growth(group_best)
-            )
-        if single is not None:
-            return Choice(single, how="process", growth_mib_s=single_g)
-
-        # 4. nothing is growing (a floor fire on a flat curve): the biggest eligible single
-        if singles:
-            best = max(singles, key=lambda p: (p.rss_anon_mib, -p.pid))
-            return Choice(best, how="process", growth_mib_s=max(growth(best), 0.0))
-        return Choice(
-            None,
-            why_not=f"no-victim: no eligible own-uid process >= {int(min_mib)} MiB "
-            "and no growing group over it",
-        )
+    def refusal(self, procs: dict[int, Proc], p: Proc) -> str | None:
+        """Why ``p`` may not be killed on a boundary (None when it may): a root daemon, another
+        uid, pid <= 2, the daemon or its parents, a protected name, or below min_victim_mib."""
+        if self.uid == 0:
+            return "daemon runs as root"
+        why = self._refusal(p, self._shielded(procs))
+        if why == "other-uid":
+            return f"uid {p.uid}"
+        if why is None and p.rss_anon_mib < float(self.rule.min_victim_mib):
+            return f"below min_victim_mib {int(self.rule.min_victim_mib)}"
+        return why
 
     # --- kill ------------------------------------------------------------------------------
 
@@ -267,13 +330,40 @@ class MemKiller:
 
     # --- the entry point -------------------------------------------------------------------
 
-    def act(self, procs: dict[int, Proc], tracker, reason: str, now: float | None = None):
+    def act(
+        self, procs: dict[int, Proc], tracker, reason: str, now: float | None = None, bounds=None
+    ):
         """One trigger fire -> list of event dicts (never empty)."""
         now = self.clock() if now is None else now
         self._prune(now)
-        c = self.choose(procs, tracker)
+        c = self.choose(procs, tracker, bounds)
         if c.proc is None:
             return [self._event(EV_WOULD, now, reason, None, procs, c, 0, why_not=c.why_not)]
+        return self._execute(procs, c, reason, now)
+
+    def act_on(
+        self,
+        procs: dict[int, Proc],
+        tracker,
+        proc: Proc,
+        reason: str,
+        now: float | None = None,
+        boundary: dict | None = None,
+    ):
+        """Kill one named process (a far-over boundary) under the same protections, budget,
+        record-only rule and pidfd kill as a trigger fire -> list of event dicts."""
+        now = self.clock() if now is None else now
+        self._prune(now)
+        c = Choice(proc, how="boundary", growth_mib_s=_growth(tracker, proc), boundary=boundary)
+        why = self.refusal(procs, proc)
+        if why is not None:
+            repeat = self._repeat_count(self.repeat_key(proc), now) + 1
+            why_not = f"boundary: not killable ({why})"
+            return [self._event(EV_WOULD, now, reason, proc, procs, c, repeat, why_not)]
+        return self._execute(procs, c, reason, now)
+
+    def _execute(self, procs: dict[int, Proc], c: Choice, reason: str, now: float) -> list:
+        """Record-only, budget or the pinned kill of ``c.proc``."""
         key = self.repeat_key(c.proc)
         repeat = self._repeat_count(key, now) + 1
         if self.rule.action != "kill":
@@ -319,6 +409,7 @@ class MemKiller:
                     ],
                     "victim": c.how,
                     "group": c.group,
+                    "boundary": c.boundary,
                     "repeat": repeat,
                 }
             )
