@@ -265,7 +265,7 @@ def test_doc_after_kill_matches_state_row(tmp_path):
     guard, clock, fake, events, _, proc, _ = make(tmp_path)
     falling_wave(guard, clock, proc, fake, stop_mib=3000)
     d = guard.doc()
-    keys = {"action", "armed", "avail_mib", "last_kill", "kills_last_hour", "limits"}  # d3
+    keys = {"action", "armed", "avail_mib", "last_kill", "kills_last_hour", "limits", "boundaries"}
     assert set(d) == keys
     assert d["limits"]["source"] == "percent"
     assert d["limits"]["soft_mib"] > d["limits"]["floor_mib"]
@@ -430,7 +430,7 @@ def test_mlockall_refused_is_logged_and_guard_runs(tmp_path):
     assert any(m.startswith("mlockall: refused errno=") and "continuing" in m for m in logs)
     assert guard.polls >= 3
     d = guard.doc()
-    keys = {"action", "armed", "avail_mib", "last_kill", "kills_last_hour", "limits"}  # d3
+    keys = {"action", "armed", "avail_mib", "last_kill", "kills_last_hour", "limits", "boundaries"}
     assert set(d) == keys
     assert d.pop("limits")["source"] == "percent"
     assert d == {
@@ -439,6 +439,7 @@ def test_mlockall_refused_is_logged_and_guard_runs(tmp_path):
         "avail_mib": 60_000,
         "last_kill": None,
         "kills_last_hour": 0,
+        "boundaries": [],
     }
 
 

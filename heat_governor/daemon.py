@@ -114,7 +114,7 @@ def utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-SHIP_EVENTS = MEMORY_EVENTS  # memory_kill, oom_kill, memory_budget_exhausted (not would_kill)
+SHIP_EVENTS = MEMORY_EVENTS  # kill, oom_kill, budget_exhausted, boundary_exceeded (not would_kill)
 POSTMORTEM_FILES = 2  # the newest day files read for the postmortem (never the whole archive)
 
 

@@ -140,7 +140,21 @@ MEMORY_KEYS = {
     "top_every_s": (int, float),
     "floor_mib": int,
     "soft_mib": int,
+    "allow": list,
+    "act_over_pct": (int, float),
 }
+# [[memory.allow]]: a per-process (or per-set) memory boundary
+ALLOW_KEYS = {
+    "name": str,
+    "comm": list,
+    "cmdline": str,
+    "cgroup": str,
+    "max_mib": int,
+    "scope": str,
+}
+ALLOW_SCOPES = ("process", "total")
+ALLOW_MATCHERS = ("comm", "cmdline", "cgroup")
+ALLOW_MIN_MIB = 64
 SHIP_KEYS = {
     "enabled": bool,
     "endpoint": str,
@@ -206,6 +220,22 @@ class PairRule:
 
 
 @dataclass(frozen=True)
+class AllowRule:
+    """``[[memory.allow]]``: an acceptable memory boundary for the processes it matches.
+
+    Every matcher given must match (AND): ``comm`` names (comm, argv0 or exe basename),
+    ``cmdline`` and ``cgroup`` fnmatch globs. ``scope = "process"`` judges each match on its
+    own; ``"total"`` judges the sum over all matches."""
+
+    name: str
+    max_mib: int
+    comm: tuple[str, ...] = ()
+    cmdline: str | None = None
+    cgroup: str | None = None
+    scope: str = "process"
+
+
+@dataclass(frozen=True)
 class MemoryRule:
     """``[memory]``: the memory guard.
 
@@ -227,6 +257,10 @@ class MemoryRule:
     # platform profile's declared limits, else the percentages (deviation d3).
     floor_mib: int | None = None
     soft_mib: int | None = None
+    # Boundaries ([[memory.allow]]); the tightest matching rule applies to a process.
+    allow: tuple[AllowRule, ...] = ()
+    # Far over: usage above max_mib x (1 + act_over_pct / 100) is acted on without a fire.
+    act_over_pct: float = 50.0
 
 
 @dataclass(frozen=True)
@@ -243,6 +277,17 @@ class ShipRule:
     blackbox_every_s: float = 60.0
     blackbox_minutes: float = 10.0
     spool_dir: str | None = None  # default: under the daemon's data dir
+
+
+def _allow_rule(a: dict) -> AllowRule:
+    return AllowRule(
+        name=a["name"],
+        max_mib=int(a["max_mib"]),
+        comm=tuple(a.get("comm", ())),
+        cmdline=a.get("cmdline"),
+        cgroup=a.get("cgroup"),
+        scope=a.get("scope", "process"),
+    )
 
 
 @dataclass
@@ -318,6 +363,8 @@ class Config:
             float(m.get("top_every_s", d.top_every_s)),
             m.get("floor_mib", d.floor_mib),
             m.get("soft_mib", d.soft_mib),
+            tuple(_allow_rule(a) for a in m.get("allow", d.allow)),
+            float(m.get("act_over_pct", d.act_over_pct)),
         )
 
     @property
@@ -500,6 +547,7 @@ def _validate_memory(mem: dict, problems: list[str]) -> None:
         ("top_every_s", 1, 3600, _SECONDS),
         ("max_kills_per_hour", 0, 60, ""),
         ("top_n", 1, 100, ""),
+        ("act_over_pct", 1, 1000, "%"),
     )
     for key, lo, hi, unit in ranges:
         problems.extend(_in_range("memory", mem, ok, key, lo, hi, unit))
@@ -512,6 +560,51 @@ def _validate_memory(mem: dict, problems: list[str]) -> None:
     if ("floor_pct" in ok or "soft_pct" in ok) and soft <= floor:
         problems.append("memory.soft_pct must be greater than memory.floor_pct")
     _validate_memory_mib(mem, ok, problems)
+    if "allow" in ok:
+        _validate_allow(mem["allow"], problems)
+
+
+def _validate_allow(items: list, problems: list[str]) -> None:
+    """[[memory.allow]]: each a table with a unique name, a matcher and max_mib."""
+    seen: set[str] = set()
+    for i, item in enumerate(items):
+        where = f"memory.allow[{i}]"
+        if not isinstance(item, dict):
+            problems.append(f"{where} must be a table")
+            continue
+        ok = _typed_keys(where, item, ALLOW_KEYS, problems)
+        _validate_allow_name(where, item, ok, seen, problems)
+        _validate_allow_fields(where, item, ok, problems)
+
+
+def _validate_allow_name(where: str, item: dict, ok: set, seen: set, problems: list[str]) -> None:
+    if "name" not in item:
+        problems.append(f"{where}.name is required")
+    elif "name" not in ok:
+        return
+    elif not item["name"]:
+        problems.append(f"{where}.name must be a non-empty string")
+    elif item["name"] in seen:
+        problems.append(f"{where}.name {item['name']!r} is a duplicate")
+    else:
+        seen.add(item["name"])
+
+
+def _validate_allow_fields(where: str, item: dict, ok: set, problems: list[str]) -> None:
+    if "max_mib" not in item:
+        problems.append(f"{where}.max_mib is required")
+    elif "max_mib" in ok and item["max_mib"] < ALLOW_MIN_MIB:
+        problems.append(f"{where}.max_mib must be at least {ALLOW_MIN_MIB}")
+    if "scope" in ok and item["scope"] not in ALLOW_SCOPES:
+        problems.append(f"{where}.scope must be one of {', '.join(ALLOW_SCOPES)}")
+    comm = item.get("comm")
+    if "comm" in ok and not (comm and all(isinstance(x, str) and x for x in comm)):
+        problems.append(f"{where}.comm must be a non-empty list of process names")
+    for key in ("cmdline", "cgroup"):
+        if key in ok and not item[key]:
+            problems.append(f"{where}.{key} must be a non-empty glob")
+    if not any(k in item for k in ALLOW_MATCHERS):
+        problems.append(f"{where} needs at least one of {', '.join(ALLOW_MATCHERS)}")
 
 
 def _validate_memory_mib(mem: dict, ok: set, problems: list[str]) -> None:
@@ -966,6 +1059,18 @@ def template(profile: Profile) -> str:
         "# poll_s = 0.25                # 0.1-2",
         "# top_n = 10                   # processes per top snapshot",
         "# top_every_s = 10",
+        "# act_over_pct = 50            # far over a boundary: > max_mib x (1 + this/100), 1-1000",
+        "# Acceptable boundaries: a process within its boundary is never blamed or killed; over",
+        "# it, it is the first victim when memory runs low; far over it, it is killed (own user,",
+        "# same protections, min_victim_mib and budget) or recorded (root, containers, others)",
+        "# even while memory is fine. Several rules may match: the smallest max_mib applies.",
+        "# [[memory.allow]]",
+        '# name = "vllm"                # required, unique',
+        '# comm = ["vllm", "python3"]   # exact names (comm, argv0 or exe basename)',
+        '# cmdline = "*vllm*serve*"     # fnmatch glob over the command line',
+        '# cgroup = "*docker-*.scope"   # fnmatch glob over the cgroup path',
+        "# max_mib = 102400             # required, >= 64",
+        '# scope = "process"            # process (each match alone, default) | total (sum)',
         "",
         "# Ship records and blackbox dumps to S3-compatible storage (off unless enabled).",
         "# http:// endpoints are accepted only for loopback or 100.64.0.0/10 hosts.",
