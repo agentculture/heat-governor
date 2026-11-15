@@ -259,3 +259,419 @@ def test_fact_values_never_split_from_their_units():
     assert '" MHz"' not in gpu_block
     assert '" W"' not in gpu_block
     assert '" °C"' not in gpu_block
+
+
+# -- Boundaries tab (issue #18, PR 1: read-only) -------------------------------------
+
+_TOKENS_SHA256 = "3fe97537de28755170a2c02a37da0be660c8f9d436a4cc505fb2bc521958b5b3"
+
+
+def _script() -> str:
+    return "\n".join(re.findall(r"<script>(.*?)</script>", PAGE, re.S))
+
+
+def test_sections_nav_is_driven_by_the_hash():
+    script = _script()
+    assert 'aria-label="Sections"' in PAGE
+    assert re.search(
+        r'const TABS = \[\["machines", "Machines"\], \["boundaries", "Boundaries"\]\];', script
+    )
+    assert "location.hash" in script
+    assert '"hashchange"' in script
+    assert 'aria-current=${tab === k ? "page" : undefined}' in script
+    # an empty or unknown hash shows Machines
+    assert re.search(r'function readTab\(hash\) \{[^}]*: "machines"', script)
+    # the Machines view is mounted exactly as before, from the one useFleet()
+    assert "<${Machines} doc=${doc} err=${err} />" in script
+    assert script.count("= useFleet()") == 1
+    # the Boundaries button carries the rule count in the existing .pills .n style
+    assert '<span class="n">${' in script
+
+
+def test_boundaries_view_lists_guard_and_rules():
+    script = _script()
+    for text in ("Kills", "Last kill", "limits ", "free", "Rule", "Matches", "Boundary", "State"):
+        assert text in script, text
+    assert "Find a machine or rule" in script
+    assert "mem_guard" in script
+    assert "act_over_pct" in script
+    assert "min_victim_mib" in script
+    assert re.search(r'\banon:\s*"Anonymous memory', script)  # usage labelled as RssAnon
+
+
+def test_usage_bar_marks_come_from_act_over_pct():
+    script = _script()
+    # the design's fixed 58.8% / 88.2% marks are computed, not copied
+    assert "58.8" not in script
+    assert "88.2" not in script
+    assert re.search(r"function barMarks\(", script)
+    assert re.search(r"function guardLabel\(", script)
+
+
+def test_boundaries_styles_are_limited_and_tokens_unchanged():
+    style = _style()
+    root = re.search(r":root \{.*?\}", style, re.S).group(0)
+    dark = re.search(r'html\[data-mode="dark"\] \{.*?\}', style, re.S).group(0)
+    assert hashlib.sha256((root + "\n" + dark).encode()).hexdigest() == _TOKENS_SHA256
+    assert ".ubar" in style
+    assert "table.rules" in style
+    # the design's own tokens, theme class and restyled duplicates are not copied
+    for banned in (
+        "#2f7fa6",
+        "#a8661a",
+        "#c4371f",
+        "#c75a1f",
+        "#8a8477",
+        ".app.dark",
+        ".badge",
+        ".code",
+    ):
+        assert banned not in PAGE, banned
+    assert "fonts.googleapis" not in PAGE
+
+
+def test_boundaries_tab_is_read_only():
+    script = _script()
+    for banned in ("Add boundary", "Writes enabled", "token", "Delete", "Edit ", "POST", "method:"):
+        assert banned not in script, banned
+
+
+def test_csp_and_dependencies_unchanged():
+    import tomllib
+
+    from heat_governor import mesh_server
+
+    assert mesh_server._CSP == (
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'"
+    )
+    root = Path(__file__).resolve().parent.parent
+    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    assert project["dependencies"] == []
+
+
+def test_rune_for_e():
+    assert 'e:"ᛖ"' in _script()
+
+
+_GUARD = {
+    "action": "kill",
+    "armed": True,
+    "avail_mib": 41574,
+    "last_kill": {"t": 1763187360, "pid": 4242, "comm": "python3", "rss_mib": 32460, "repeat": 1},
+    "kills_last_hour": 1,
+    "limits": {"floor_mib": 3072, "soft_mib": 6144, "source": "platform"},
+    "act_over_pct": 50.0,
+    "max_kills_per_hour": 3,
+    "min_victim_mib": 2048,
+    "boundaries": [
+        {
+            "name": "vllm-worker",
+            "max_mib": 92160,
+            "scope": "process",
+            "usage_mib": 101800.0,
+            "state": "over",
+            "comm": [],
+            "cmdline": "*vllm*worker*",
+            "cgroup": "*docker-*.scope",
+            "source": "config.toml",
+        },
+        {
+            "name": "tiny",
+            "max_mib": 1024,
+            "scope": "total",
+            "usage_mib": 0.0,
+            "state": "idle",
+            "comm": ["cc1plus", "ld"],
+            "cmdline": None,
+            "cgroup": None,
+            "source": "config.toml",
+        },
+    ],
+}
+
+
+def _machine(name, state="ok", guard=_GUARD, thermal=True):
+    t = None
+    if thermal:
+        t = {
+            "level": "cool",
+            "temp_c": 51.0,
+            "platform": "spark",
+            "version": "0.17.1",
+            "memory": {"used_pct": 60.0, "avail_mib": 40000, "total_mib": 122000},
+            "config_error": None,
+            "mem_guard": guard,
+        }
+    return {
+        "name": name,
+        "transport": "ssh",
+        "host": name,
+        "state": state,
+        "age_s": 200.0,
+        "stale_after_s": 30,
+        "health": {},
+        "thermal": t,
+    }
+
+
+def _record(guard):
+    return dict(guard, action="record")
+
+
+def _older(guard):
+    """A daemon one version older: boundaries without matchers/source, no thresholds."""
+    keep = ("name", "max_mib", "scope", "usage_mib", "state")
+    g = {
+        k: v
+        for k, v in guard.items()
+        if k not in ("act_over_pct", "max_kills_per_hour", "min_victim_mib")
+    }
+    g["boundaries"] = [{k: b[k] for k in keep} for b in guard["boundaries"]]
+    return g
+
+
+FIXTURES = {
+    "unreachable": _machine("thor", state="unreachable", thermal=False),
+    "stale": _machine("orin", state="stale"),
+    "no_guard": _machine("spark2", guard=None),
+    "record": _machine("cultureos", guard=_record(_GUARD)),
+    "no_rules": _machine("spark", guard=dict(_GUARD, boundaries=[])),
+    "min_victim": _machine("elitemini"),
+    "older": _machine("arduino", guard=_older(_GUARD)),
+}
+
+_NODE = r"""
+const fs = require("fs"), vm = require("vm");
+const [page, vendor, input] = process.argv.slice(2);
+const { hash, expr, data } = JSON.parse(fs.readFileSync(input, "utf8"));
+const src = fs.readFileSync(page, "utf8");
+const script = [...src.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).join("\n");
+const noop = () => {};
+const ctx = { console, setTimeout, clearTimeout, location: { hash },
+  history: { replaceState: noop },
+  addEventListener: noop, removeEventListener: noop, fetch: () => new Promise(noop),
+  localStorage: { getItem: () => null, setItem: noop },
+  document: { getElementById: () => ({}), documentElement: { dataset: {} } },
+  ReactDOM: { createRoot: () => ({ render: noop }) } };
+ctx.self = ctx; ctx.window = ctx;
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(vendor + "/react.production.min.js", "utf8"), ctx);
+vm.runInContext(fs.readFileSync(vendor + "/htm.js", "utf8"), ctx);
+vm.runInContext(script, ctx);
+// a minimal static renderer: enough for hook-free components
+vm.runInContext(`
+  const __esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  function renderHTML(n) {
+    if (n == null || n === false || n === true) return "";
+    if (Array.isArray(n)) return n.map(renderHTML).join("");
+    if (typeof n !== "object") return __esc(n);
+    const p = n.props || {};
+    if (n.type === React.Fragment) return renderHTML(p.children);
+    if (typeof n.type === "function") return renderHTML(n.type(p));
+    let a = "";
+    for (const [k, v] of Object.entries(p)) {
+      if (k === "children" || k.startsWith("on") || v == null || v === false) continue;
+      const val = k === "style" ? Object.entries(v).map(([x, y]) => x + ":" + y).join(";") : v;
+      a += " " + (k === "className" ? "class" : k) + '="' + __esc(val) + '"';
+    }
+    return "<" + n.type + a + ">" + renderHTML(p.children) + "</" + n.type + ">";
+  }
+  // collapse ordinary whitespace only, so the page's no-break spaces survive
+  const textOf = s => s.replace(/<[^>]*>/g, " ").replace(/[ \\n\\t]+/g, " ").trim();
+`, ctx);
+ctx.__data = data;
+const out = vm.runInContext("(() => { const data = __data; return (" + expr + "); })()", ctx);
+process.stdout.write(JSON.stringify(out === undefined ? null : out));
+"""
+
+
+def _node(tmp_path, expr, data=None, hash_=""):
+    import json
+    import shutil
+    import subprocess  # nosec B404 - runs the local node binary on the repo's own page
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    harness = tmp_path / "harness.js"
+    harness.write_text(_NODE)
+    inp = tmp_path / "input.json"
+    inp.write_text(json.dumps({"hash": hash_, "expr": expr, "data": data}))
+    res = subprocess.run(  # nosec B603 - fixed argv, local files
+        [node, str(harness), str(WEB / "index.html"), str(VENDOR), str(inp)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert res.returncode == 0, res.stderr
+    return json.loads(res.stdout)
+
+
+@pytest.mark.parametrize("hash_", ["", "#", "#machines", "#bogus", "#boundaries"])
+def test_read_tab_defaults_to_machines(tmp_path, hash_):
+    want = "boundaries" if hash_ == "#boundaries" else "machines"
+    assert _node(tmp_path, "readTab(location.hash)", hash_=hash_) == want
+
+
+def test_bar_marks_follow_act_over_pct(tmp_path):
+    got = _node(
+        tmp_path,
+        "[barMarks(50), barMarks(100), barMarks(undefined), barMarks(null)]"
+        ".map(m => [Math.round(m.max * 10) / 10, Math.round(m.far * 10) / 10])",
+    )
+    assert got[0] == [58.8, 88.2]  # the design's marks, at act_over_pct 50
+    assert got[1] == [45.5, 90.9]
+    assert got[2] == got[0] and got[3] == got[0]  # absent -> 50, for the bar only
+
+
+def test_bar_fill_and_rule_classes(tmp_path):
+    got = _node(
+        tmp_path,
+        "({ fill: [barFill({ usage_mib: 0, max_mib: 1024 }, barMarks(50)),"
+        " Math.round(barFill({ usage_mib: 1024, max_mib: 1024 }, barMarks(50)) * 10) / 10,"
+        " barFill({ usage_mib: 99999, max_mib: 1024 }, barMarks(50)),"
+        " barFill({ usage_mib: 5, max_mib: 0 }, barMarks(50)), barFill({}, barMarks(50))],"
+        " cls: ['within', 'over', 'far_over', 'idle', 'nonsense']"
+        ".map(s => ruleClass(ruleState({ state: s }))),"
+        " word: ['within', 'over', 'far_over', 'idle'].map(ruleWord) })",
+    )
+    assert got["fill"] == [0, 58.8, 100, 0, 0]
+    assert got["cls"] == ["cool", "warm", "hot", "idle", "idle"]
+    assert got["word"] == ["within", "over", "far over", "idle"]
+
+
+def test_guard_label_from_action_and_armed(tmp_path):
+    got = _node(
+        tmp_path,
+        "[guardLabel({ action: 'kill', armed: true }),"
+        " guardLabel({ action: 'kill', armed: false }),"
+        " guardLabel({ action: 'record', armed: true }), guardLabel(null)]",
+    )
+    assert got == ["armed · kill", "not armed · kill", "armed · record", "no memory guard"]
+
+
+def test_counts_sizes_and_texts(tmp_path):
+    got = _node(
+        tmp_path,
+        "({ counts: ruleCounts(data.map(toGuardRow)), total: ruleTotal(data.map(toGuardRow)),"
+        " gib: [mibText(1024), mibText(92160), mibText(null)],"
+        " kills: killsText(data[0].thermal.mem_guard), last: lastKillText(null),"
+        " limits: limitsText({ floor_mib: null, soft_mib: null, source: 'percent' }) })",
+        data=[FIXTURES["min_victim"], FIXTURES["record"], FIXTURES["no_guard"]],
+    )
+    assert got["counts"] == {"within": 0, "over": 2, "far_over": 0, "idle": 2}
+    assert got["total"] == 4
+    assert got["gib"] == ["1.0 GiB", "90.0 GiB", "—"]
+    assert got["kills"] == "1 in the last hour, of 3 allowed"
+    assert got["last"] == "none"
+    assert "percent" in got["limits"]
+
+
+def test_filter_by_state_and_search(tmp_path):
+    got = _node(
+        tmp_path,
+        "(() => { const rows = data.map(toGuardRow);"
+        " const n = r => r.map(x => x.b.name + ':' + x.rules.map(y => y.name).join(','));"
+        " return { all: n(filterRows(rows, [], '')), over: n(filterRows(rows, ['over'], '')),"
+        " byRule: n(filterRows(rows, [], 'TINY')),"
+        " byMachine: n(filterRows(rows, [], 'spark2')) }; })()",
+        data=[FIXTURES["min_victim"], FIXTURES["no_guard"]],
+    )
+    assert got["all"] == ["elitemini:vllm-worker,tiny", "spark2:"]
+    assert got["over"] == ["elitemini:vllm-worker"]
+    assert got["byRule"] == ["elitemini:tiny"]
+    assert got["byMachine"] == ["spark2:"]
+
+
+def _card_text(tmp_path, key):
+    return _node(
+        tmp_path,
+        "textOf(renderHTML(html`<${BoundaryCard} row=${toGuardRow(data)} />`))",
+        data=FIXTURES[key],
+    )
+
+
+def test_fixture_states_render_distinctly(tmp_path):
+    texts = {k: _card_text(tmp_path, k) for k in FIXTURES}
+    assert len(set(texts.values())) == len(texts)
+    assert "unreachable" in texts["unreachable"] and "no reading" in texts["unreachable"].lower()
+    assert "stale" in texts["stale"] and "last reading shown" in texts["stale"]
+    assert "No memory guard" in texts["no_guard"]
+    assert "older than 0.17" in texts["no_guard"]
+    assert "armed · record" in texts["record"]
+    assert "never kills" in texts["record"]
+    assert "No boundaries" in texts["no_rules"]
+    assert "judged by growth alone" in texts["no_rules"]
+    # tiny (max 1 GiB) is under min_victim_mib (2 GiB): blamed, never killed
+    assert "blamed, never killed" in texts["min_victim"]
+    assert "blamed, never killed" not in texts["record"]  # record never kills anyway
+    # the guard facts and each rule's parts
+    full = texts["min_victim"]
+    for part in (
+        "armed · kill",
+        "40.6 GiB free",
+        "3.0 GiB",
+        "6.0 GiB",
+        "platform",
+        "1 in the last hour",
+        "python3",
+        "vllm-worker",
+        "cmdline *vllm*worker*",
+        "cgroup *docker-*.scope",
+        "comm cc1plus",
+        "90.0 GiB",
+        "per process",
+        "total of all matches",
+        "anonymous",
+        "over",
+        "idle",
+        "config.toml",
+    ):
+        assert part in full, part
+
+
+def test_older_daemon_renders_without_matchers_or_thresholds(tmp_path):
+    text = _card_text(tmp_path, "older")
+    assert "vllm-worker" in text
+    assert "not reported" in text
+    assert "blamed, never killed" not in text  # no min_victim_mib: nothing invented
+    assert "config.toml" not in text  # no source: no tag
+
+
+def test_bar_marks_rendered_from_the_machines_act_over_pct(tmp_path):
+    g100 = dict(_GUARD, act_over_pct=100.0)
+    out = _node(
+        tmp_path,
+        "renderHTML(html`<${BoundaryCard} row=${toGuardRow(data)} />`)",
+        data=_machine("spark", guard=g100),
+    )
+    assert "left:45.45" in out
+    assert "left:90.91" in out
+    assert "58.8" not in out
+
+
+class _GuardReader(_Reader):
+    def snapshot(self) -> dict:
+        return {"schema": 1, "reader": {}, "machines": [FIXTURES["min_victim"]]}
+
+
+def test_server_serves_the_boundaries_page_and_mem_guard():
+    import json
+
+    srv = MeshServer(_GuardReader(), port=0)
+    srv.start()
+    try:
+        host, port = srv.address[:2]
+        base = f"http://{host}:{port}"
+        with urllib.request.urlopen(base + "/", timeout=5) as r:  # nosec B310 - loopback test
+            page = r.read().decode()
+        assert 'aria-label="Sections"' in page
+        assert "function BoundaryCard(" in page
+        with urllib.request.urlopen(base + "/api/fleet", timeout=5) as r:  # nosec B310
+            doc = json.loads(r.read())
+        guard = doc["machines"][0]["thermal"]["mem_guard"]
+        assert guard["boundaries"][0]["cmdline"] == "*vllm*worker*"
+    finally:
+        srv.stop()
