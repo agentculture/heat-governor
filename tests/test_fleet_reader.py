@@ -709,3 +709,43 @@ def test_extract_carries_the_gpu_clock_ceiling_status():
     it into "ceiling 1575 MHz", so the reader must carry it."""
     doc = {"level": "cool", "at": 1.0, "temp_c": 50.0, "gpu_clock": "ok (helper status: 1575)"}
     assert extract(doc)["gpu_clock"] == "ok (helper status: 1575)"
+
+
+# -- mem_guard / config / config_error pass-through (boundaries tab) -------------
+
+
+def test_extract_passes_mem_guard_through_as_the_same_object():
+    guard = {"action": "kill", "floor_mb": 2048}
+    out = extract(doc(1.0, mem_guard=guard))
+    assert out["mem_guard"] is guard
+
+
+def test_extract_without_mem_guard_gives_none_and_snapshot_is_ok():
+    out = extract(doc(1.0))  # an older daemon: no mem_guard, config or config_error
+    assert out["mem_guard"] is None
+    assert out["config"] is None
+    assert out["config_error"] is None
+    reader, t, _clock, _wall = make()
+    t["a"].items = [doc(1.0)]
+    reader.poll_once("a")
+    e = entry(reader)
+    assert e["state"] == "ok"
+    assert e["thermal"]["mem_guard"] is None
+
+
+@pytest.mark.parametrize("bad", ["on", 3, ["x"], True])
+def test_extract_coerces_a_non_dict_mem_guard_to_none(bad):
+    assert extract(doc(1.0, mem_guard=bad))["mem_guard"] is None
+
+
+def test_snapshot_carries_mem_guard_config_and_config_error():
+    guard = {"action": "log"}
+    reader, t, _clock, _wall = make()
+    t["a"].items = [
+        doc(1.0, mem_guard=guard, config="/etc/hg.toml", config_error="bad key [memory]")
+    ]
+    reader.poll_once("a")
+    th = entry(reader)["thermal"]
+    assert th["mem_guard"] == guard
+    assert th["config"] == "/etc/hg.toml"
+    assert th["config_error"] == "bad key [memory]"
