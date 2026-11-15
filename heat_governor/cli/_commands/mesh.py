@@ -175,6 +175,19 @@ def _now() -> float:
     return time.monotonic()
 
 
+def _guard_summary(g: object) -> dict | None:
+    """The memory guard in four fields; None when the daemon reports no guard."""
+    if not isinstance(g, dict):
+        return None
+    bounds = g.get("boundaries")
+    return {
+        "action": g.get("action"),
+        "armed": g.get("armed"),
+        "kills_last_hour": g.get("kills_last_hour"),
+        "boundary_count": len(bounds) if isinstance(bounds, list) else 0,
+    }
+
+
 def _row(m: dict) -> dict:
     th = m.get("thermal") or {}
     health = m.get("health") or {}
@@ -192,6 +205,7 @@ def _row(m: dict) -> dict:
         "level": th.get("level"),
         "admit": th.get("admit") if m.get("state") == "ok" else None,
         "version": th.get("version"),
+        "mem_guard": _guard_summary(th.get("mem_guard")),
         "last_error": health.get("last_error"),
         "failing": bool(health.get("failing")),
     }
@@ -232,6 +246,18 @@ def _mem_text(r: dict) -> str:
     return f"{text:<16} {ddr:<7}"
 
 
+def _guard_text(g: dict | None) -> str:
+    """``guard kill armed 2k 3b`` (action, armed or not, kills in the last hour, boundaries)."""
+    if not g:
+        return f"{'guard -':<24}"
+    armed = "armed" if g.get("armed") else "unarmed"
+    text = (
+        f"guard {_fmt(g.get('action'))} {armed} "
+        f"{_fmt(g.get('kills_last_hour'))}k {_fmt(g.get('boundary_count'))}b"
+    )
+    return f"{text:<24}"
+
+
 def _admit_text(admit: object) -> str:
     if admit is None:
         return "-"
@@ -247,7 +273,7 @@ def render_status(st: dict) -> str:
         lines.append(
             f"{str(r['name']):<{w}}  {str(r['state']):<11} age {_fmt(r['age_s'], '.1f'):>6}s  "
             f"{_fmt(r['temp_c'], '.1f'):>5}C  {_mem_text(r)}  {_fmt(r['level']):<8} {admit:<5} "
-            f"v{_fmt(r['version'])}"
+            f"{_guard_text(r.get('mem_guard'))} v{_fmt(r['version'])}"
             + (f"  ({r['last_error']})" if r["last_error"] and _show_error(r) else "")
         )
     rd = st.get("reader") or {}

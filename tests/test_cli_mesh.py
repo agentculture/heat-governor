@@ -383,3 +383,53 @@ def test_status_text_memory_without_ddr_or_total():
     assert "ddr" not in text
     cols = {line.index("cool") for line in text.splitlines()[:2]}
     assert len(cols) == 1  # level column stays aligned
+
+
+GUARD = {
+    "action": "kill",
+    "armed": True,
+    "kills_last_hour": 2,
+    "avail_mib": 9000,
+    "boundaries": [{"name": "a", "max_mib": 1}, {"name": "b", "max_mib": 2}, {"name": "c"}],
+}
+
+
+def _guard_snap(*guards):
+    machines = []
+    for i, g in enumerate(guards):
+        th = {"admit": True, "temp_c": 48.0, "level": "cool", "mem_guard": g}
+        machines.append({"name": f"m{i}", "state": "ok", "age_s": 1.0, "thermal": th, "health": {}})
+    return {"reader": {}, "machines": machines}
+
+
+def test_status_json_carries_mem_guard_summary():
+    from heat_governor.cli._commands.mesh import build_status
+
+    rows = {r["name"]: r for r in build_status(_guard_snap(GUARD, None), "x", None)["machines"]}
+    assert rows["m0"]["mem_guard"] == {
+        "action": "kill",
+        "armed": True,
+        "kills_last_hour": 2,
+        "boundary_count": 3,
+    }
+    assert rows["m1"]["mem_guard"] is None
+    assert rows["m0"]["name"] == "m0"  # existing keys are kept
+
+
+def test_status_json_mem_guard_without_boundaries_counts_zero():
+    from heat_governor.cli._commands.mesh import build_status
+
+    g = {"action": "record", "armed": False, "kills_last_hour": 0}
+    row = build_status(_guard_snap(g), "x", None)["machines"][0]
+    assert row["mem_guard"]["boundary_count"] == 0
+
+
+def test_status_text_has_one_guard_column_dash_when_absent():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    text = render_status(build_status(_guard_snap(GUARD, None), "x", None))
+    l0, l1 = text.splitlines()[:2]
+    assert "guard kill armed 2k 3b" in l0
+    assert "guard -" in l1
+    assert l0.index("guard") == l1.index("guard")  # column stays aligned
+    assert l0.index("v") > 0 and l0.index("guard") < l0.rindex(" v")
