@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-11-14T18:37:22Z",
-  "updated": "2026-11-14T22:28:04Z",
+  "updated": "2026-11-15T05:12:26Z",
   "targets": [
     {
       "id": "c1",
@@ -741,8 +741,8 @@
       "text": "Spark's own daemon needs a ship target other than spark (R2 or another box); not configured by this plan.",
       "kind": "follow_up",
       "task_id": null,
-      "resolved": false,
-      "resolution": ""
+      "resolved": true,
+      "resolution": "spark ships to a second MinIO on arduino (100.97.170.7:9000); every other box ships to spark; no box ships to itself (user, 2026-11-15)"
     },
     {
       "id": "r4",
