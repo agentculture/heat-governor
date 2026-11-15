@@ -1,0 +1,1348 @@
+{
+  "slug": "boundaries-tab",
+  "title": "boundaries-tab",
+  "schema_version": 6,
+  "status": "exported",
+  "created": "2026-11-15T19:46:43Z",
+  "updated": "2026-11-15T20:06:35Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "The fleet dashboard has a Boundaries tab: an operator reads every machine's memory-guard boundaries and their live state, and creates, changes and deletes them from the page, without logging in to each box (issue #18)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "Every acceptance criterion of issue #18 maps to a confirmed claim in this frame or is listed as out of scope",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "fleet_reader passes each daemon's mem_guard through to /api/fleet, mesh status and the MCP machine_state, tolerating its absence on daemons older than 0.17 (today extract() keeps only THERMAL_FIELDS, heat_governor/fleet_reader.py:79-98,225-243; mesh.py _row whitelists columns)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "A daemon document without mem_guard still yields state ok, and the history ring and /api/history are unchanged",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [
+        {
+          "id": "q4",
+          "text": "Delivery slicing: ship the read-only tab first (mem_guard pass-through, richer /state, the tab) and the write path (boundaries.toml, CLI noun, transport write, auth, editor) in a second PR, or everything in one?",
+          "resolved": true,
+          "blocking": false,
+          "resolution": "User (2026-11-15): read first, then write: PR 1 is mem_guard pass-through, richer /state and a read-only Boundaries tab; PR 2 is boundaries.toml, the CLI noun, the transport write path, auth, the editor and confirmations"
+        }
+      ],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "The daemon's mem_guard document gains what the page shows and /state lacks today: each boundary's matchers (comm, cmdline, cgroup) and source file, plus act_over_pct, max_kills_per_hour and min_victim_mib. Today an entry is exactly name, max_mib, scope, usage_mib, state (memboundary.py:165-172; docs/contracts/state.md:52), and adding keys is allowed ('clients ignore unknown fields')",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "docs/contracts/state.md documents every added mem_guard key, and a client that reads only the 0.17 keys still works",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "The config loader merges [[memory.allow]] rules from a sibling boundaries.toml into [memory] before validation, rejects a name that appears in both files, watches both files' mtimes, and keeps the last good boundaries when only that file is invalid (today load() reads one path, Config.path/mtime are scalars, changed() compares one mtime: config.py:885-909, daemon.py:502-540)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "A name present in both config.toml and boundaries.toml is rejected with a message naming both files, and an invalid boundaries.toml keeps the last good boundaries while a valid config.toml edit still applies",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "A stdlib emitter writes the boundaries.toml [[memory.allow]] shape, escaping control characters and newlines in matcher strings, and the write is atomic (temp file + os.replace) with a backup. No emitter exists: _toml_value (config.py:924-935) handles scalars/lists only and escapes only backslash and double quote; config init --write is a plain write_text (tuning.py:120)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "Emitting any valid rule set and loading it back with tomllib yields the same rules, including matchers containing quotes, backslashes and non-ASCII; a failed write leaves the previous file intact",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "A new boundaries CLI noun (overview, list, add, set, rm, a stdin apply used by the remote write, and a preview) follows the agent-first contract: register() in cli/__init__.py, overview verb and bare-noun overview, explain catalog entry, learn text, overview._VERBS line, --json and exit codes",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "uv run teken cli doctor . --strict passes and explain resolves every boundaries path",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "The SSH and local transports gain one fixed, argv-only write path that can send a body on stdin and return the remote exit code and stderr (the validator's message), with its own timeout and a defined way to find heat-governor on the remote box",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h13",
+          "text": "The remote command is a fixed argv with the rule data only on stdin, never interpolated into the command string, and the validator's message reaches the caller verbatim",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "mesh serve accepts boundary writes: method dispatch for POST/PUT/DELETE, a capped JSON body reader, a bearer token compared in constant time (401 on a bad token, 403 when none is configured), Origin and Content-Type checks, If-Match with 409 on a stale version, and 4xx error mapping. test_post_not_allowed, the read-only docstrings and the mesh serve help text change with it",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "With no token file every write is refused with 403 and GET responses are byte-for-byte what they are today; tokens are compared with hmac.compare_digest and never logged",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [
+        {
+          "id": "q3",
+          "text": "Token model: the design shows token labels ('Writes enabled, token ops-laptop'; 'saved 09:41 from token spark-ops'), which implies several named tokens; the issue proposes one --token-file. One token, or a file of labelled tokens? And does the browser keep the pasted token in memory only or in sessionStorage?",
+          "resolved": true,
+          "blocking": false,
+          "resolution": "User (2026-11-15): labelled tokens: the token file holds several label = token entries, the audit log and conflict dialog name the label, and the browser keeps the pasted token for the tab session only"
+        }
+      ],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c9",
+      "kind": "requirement",
+      "text": "The daemon, not the CLI, emits memory_boundary_changed when it reloads a changed boundaries file, and the kind joins recorder.MEMORY_EVENTS so it is recorded and shipped; the reader keeps its own audit log (token label, time, machine, old and new rule) in its state dir",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h15",
+          "text": "A boundaries change made by hand on the box also produces memory_boundary_changed, and the reader's audit log is append-only with mode 0600",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "A preview runs on the target box: memprocs.scan + memboundary.assess for within/over/far_over per matching process, with the killer's names function, uid, protect list, min_victim_mib and action deciding whether a far-over process would really be killed; command lines pass through redact() and the container column comes from container_id(cgroup)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h16",
+          "text": "The preview and the live guard agree: for the same process table and rule, the preview's state and killable verdict equal what MemKiller decides",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "The Boundaries tab is built inside heat_governor/web/index.html as a second view of the one React/htm page: a hash-routed Sections nav (Machines | Boundaries) in the header, reusing the existing classes (.pills button[aria-current], .chip, .status, .tag, .facts, .dt, .search, .eyebrow, .lede, Mark/rune, useFleet) and the html[data-mode] theme, not the design's .app.dark class or its anchor-styled pills",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h17",
+          "text": "tests/test_web_page.py still passes, #machines renders exactly as today, and the page loads nothing from another origin",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [
+        {
+          "id": "q1",
+          "text": "Colour tokens: the design's light theme uses darker cool/warm/hot/accent (#2f7fa6 / #a8661a / #c4371f / #c75a1f) and a darker --ink-faint (#8a8477) than the shipped page (#3a8fb8 / #c27a24 / #d23f25 / #e06a2a, #9f998c), and different dark-mode --ink-soft, --ink-faint and --hot. Keep the shipped tokens for both tabs, adopt the design's darker ones for both, or let the tabs differ?",
+          "resolved": true,
+          "blocking": false,
+          "resolution": "User (2026-11-15): keep the shipped tokens in web/index.html for both tabs; the Machines view does not change; contrast of small coloured text is a follow-up"
+        }
+      ],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "The Boundaries tab is built inside heat_governor/web/index.html as a second view of the one React/htm page: a hash-routed Sections nav (Machines | Boundaries) in the header, reusing the existing classes (.pills button[aria-current], .chip, .status, .tag, .facts, .dt, .search, .eyebrow, .lede, Mark/rune, useFleet) and the html[data-mode] theme, not the design's .app.dark class or <a class=p> pills",
+          "kind": "requirement",
+          "reason": "the bare HTML tag failed markdownlint MD033 in the export; wording only"
+        }
+      ]
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "New styles are limited to what the dashboard does not have yet: buttons (.btn, primary, danger), icon buttons, form fields (input, select, label, hint, error state), a usage bar with boundary and far-over marks, a left-aligned rules table, and a modal confirmation dialog; the design's inline stroke SVG icons (plus, pencil, bin, lock, warning, refresh) are a new vocabulary for the page",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "Every new control is a real button, input, select or label reachable by keyboard, and the modal traps focus and closes on Escape",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [
+        {
+          "id": "q2",
+          "text": "Edit surface: the design draws create/change as a separate full page (two columns: form + live preview) and the four confirmations as cards on a third page. The shipped page has one pattern for secondary content, the right-hand drawer (min(800px,100vw), index.html .drawer). Open the editor as a full sub-view under #boundaries, or in the existing drawer with the preview stacked under the form? And are confirmations true modal dialogs (new to the page)?",
+          "resolved": true,
+          "blocking": false,
+          "resolution": "User (2026-11-15): the editor is a full sub-view under #boundaries (form beside the live preview, back link); confirmations are real modal dialogs"
+        }
+      ],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c13",
+      "kind": "boundary",
+      "text": "The page stays self-contained: Lato from /vendor, no Google Fonts link (the design's helmet loads fonts.googleapis.com), no new vendored library, no third-party runtime dependency, CSP unchanged",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h19",
+          "text": "pyproject.toml dependencies stays [] and the CSP string in mesh_server.py is unchanged",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c14",
+      "kind": "assumption",
+      "text": "Where the design hard-codes sample values the page computes them: bar marks from each machine's act_over_pct (the design fixes them at 58.8% and 88.2%, which is act_over_pct 50 only), the guard badge from mem_guard.action and armed (the design always shows 'armed \u00b7 kill'), the rune from rune(name), and usage labelled as anonymous memory, the metric the guard judges",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c15",
+      "kind": "requirement",
+      "text": "The page covers states the design does not draw: a machine that is unreachable or stale, a daemon with no mem_guard (older than 0.17 or guard off), action = record (a far-over process is not killed), a save that fails or times out over SSH, a validator rejection for any field (the design shows it for max_mib only), and a rule whose max_mib is under min_victim_mib (blamed, never killed)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h20",
+          "text": "Each listed state has a rendering covered by a page test or a fixture document",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c16",
+      "kind": "boundary",
+      "text": "The page edits boundaries.toml rules only: it never changes [memory] action, act_over_pct, limits, [ship] or thermal settings, and rules written in config.toml show read-only (issue #18 Safety and Out of scope)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "The write endpoint and boundaries apply accept only [[memory.allow]] rule fields; any other key is rejected by the validator",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c17",
+      "kind": "boundary",
+      "text": "GET /api/fleet, /api/history and the Machines view keep their behaviour, and remote daemons keep listening on loopback only, reached over the reader's SSH link (issue #18 acceptance criteria and Out of scope)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "The existing mesh server, fleet reader and transport tests pass unmodified except test_post_not_allowed",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c18",
+      "kind": "non_goal",
+      "text": "The Survey and Decisions tabs of docs/design/fleet-dashboard.html are not restored, and there are no user accounts or roles beyond the bearer token",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c19",
+      "kind": "decision",
+      "text": "Colours: both tabs use the tokens already in heat_governor/web/index.html; the Machines view does not change, and the contrast of small coloured text is a follow-up (user, 2026-11-15)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c20",
+      "kind": "decision",
+      "text": "Editor: create and change open as a full sub-view under #boundaries (form beside the live preview, back link); delete, kill warning and conflict are real modal dialogs (user, 2026-11-15)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c21",
+      "kind": "decision",
+      "text": "Tokens: the token file holds several labelled tokens; the audit log and the conflict dialog name the label; the browser keeps the pasted token for the tab session only (user, 2026-11-15)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c22",
+      "kind": "decision",
+      "text": "Delivery: PR 1 is the read side (mem_guard pass-through, richer /state, a read-only Boundaries tab); PR 2 is the write side (boundaries.toml, the boundaries CLI noun, the transport write path, auth, the editor and confirmations) (user, 2026-11-15)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c23",
+      "kind": "audience",
+      "text": "The operator of the six-box fleet who opens the mesh serve dashboard on the EliteMini, and agents that read the fleet through heat-governor mesh status, the MCP tools and the boundaries CLI",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h2",
+          "text": "The page, mesh status --json, the MCP machine_state tool and boundaries list --json all return the same boundary data for a machine",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c24",
+      "kind": "before_state",
+      "text": "Boundaries are [[memory.allow]] rules hand-edited in each box's config.toml over SSH; no box has one configured; the dashboard, mesh status and the MCP tools show no memory-guard data at all, and mesh serve is read-only and unauthenticated",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "On 2026-11-15 /api/fleet on the EliteMini reader carried no mem_guard key and tests/test_mesh_server.py::test_post_not_allowed asserts POST is refused",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c25",
+      "kind": "after_state",
+      "text": "The dashboard has a Boundaries tab listing, per machine, the guard's action, limits, kills and every boundary with its matchers, usage and state; with a write token the operator adds, changes or deletes a boundaries.toml rule on any machine from the page or from heat-governor boundaries, sees which running processes it matches before saving, and the daemon applies it on its normal live reload",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "A rule created from the page on one machine is visible in heat-governor boundaries list --machine M and in that machine's /state without any manual step on the box",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c26",
+      "kind": "why_it_matters",
+      "text": "All six boxes run action = kill with no boundaries, so known large workloads (vLLM near full memory on thor and the sparks) are judged by growth alone; setting boundaries per box by hand is slow and unreviewed, and a wrong rule can make the guard kill a process",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "The delivery summary docs/deliveries/2026-11-14-memory-guard.md lists 'boundaries configured on no box' as remaining work",
+          "status": "rejected",
+          "instruction": ""
+        },
+        {
+          "id": "h23",
+          "text": "docs/deliveries/2026-11-14-memory-guard.md:117 states 'No [[memory.allow]] rule is configured on any box yet'",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c27",
+      "kind": "success_signal",
+      "text": "After PR 1, /api/fleet returns mem_guard for all 6 machines and the Boundaries tab shows each machine's guard state within 1 poll of the reader",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "A test feeds a /state document with and without mem_guard through fleet_reader.extract and gets the key through unchanged or absent, never an error",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c28",
+      "kind": "success_signal",
+      "text": "After PR 2, a rule saved from the page on a local and on an SSH machine appears in that machine's mem_guard.boundaries in under 15 s, a write with no or a wrong token gets 403 or 401, and a stale version gets 409 with nothing written",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "Tests cover 401, 403, 409 and a successful write through a fake transport and a localhost server, and the live check on one SSH box is recorded under docs/evidence before the write path is called live",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "The reader runs the remote write and preview by an explicit binary path, default ~/.local/bin/heat-governor with a per-machine override key in fleet.toml, and the on-box command writes boundaries.toml beside the config file the running daemon reports in /state (config, daemon.py:1061), not beside whatever the SSH shell's environment resolves (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h24",
+          "text": "On every fleet machine the write succeeds with heat-governor absent from the non-interactive SSH PATH, and a daemon started with --config elsewhere gets its boundaries.toml beside that file",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "The reader refuses a write to a machine whose daemon version predates boundaries.toml support, with a message naming the version needed, and the page shows that machine as read-only until it is upgraded; a missing remote boundaries verb is reported as that same refusal, not as 'unreachable' (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h25",
+          "text": "A write aimed at a 0.17.x daemon is refused before any file is touched on the box",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "The version check and the write are one atomic step on the box: the on-box command takes an exclusive lock, compares the caller's base version with the hash of the file as it is now, and only then writes; the reader never decides a conflict on its own copy (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h26",
+          "text": "Two concurrent applies with the same base version produce exactly one success and one conflict, and a hand edit between read and save is reported as a conflict",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "The editor's rule list and base version come from the boundaries.toml file read on the box, not from /state, and the reader passes through the daemon's config path and config_error so the page can say when the file on disk was rejected and the daemon is still running the last good rules (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h27",
+          "text": "With an invalid boundaries.toml on a box the page shows the rejection message and the last good rules as live, and an edit starts from the file's content",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c33",
+      "kind": "requirement",
+      "text": "A change that only touches boundary rules does not lose the guard's detection state: the fill-rate window and the kill budget survive it, either by swapping the rules in the running guard or by carrying the trigger window across the rebuild (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h28",
+          "text": "A test saves a boundary while a simulated runaway is filling memory and the trigger fires no later than it does without the save",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c34",
+      "kind": "requirement",
+      "text": "The kill confirmation is enforced on the box, not only drawn in the page: the on-box apply re-runs the preview at write time and refuses a change that would put a killable own-user process far over its boundary unless the request explicitly allows it, returning the processes concerned (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h29",
+          "text": "An apply without the allow flag that would make a running own-user process far over writes nothing and returns that process; the same request with the flag writes",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c35",
+      "kind": "requirement",
+      "text": "The validator rejects a boundary whose matchers are all bare wildcards, and the preview reports how many processes a rule matches, because a rule that matches everything with a large maximum makes every process 'within' and so switches the guard off for that box (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h30",
+          "text": "A rule with cmdline = '*' and no other matcher is rejected with a message, on the page and in the CLI",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c36",
+      "kind": "requirement",
+      "text": "Every endpoint that returns process command lines or accepts a change requires the token, including the preview; the token travels only in the Authorization header, never in a URL; mesh serve refuses to start with a token file readable by group or others; write requests are refused when the Host header is not the address the server listens on (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h31",
+          "text": "An unauthenticated request to the preview endpoint gets 401 or 403 and no process data, and a token file with mode 0644 stops mesh serve with an error",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c37",
+      "kind": "assumption",
+      "text": "The dashboard stays plain HTTP: the tailnet (WireGuard) is the transport encryption for the token, and mesh serve is never bound to a non-tailnet, non-loopback address while a token file is configured (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c38",
+      "kind": "requirement",
+      "text": "A save whose response is lost is not left ambiguous: writes are whole-rule and idempotent, and after a timeout the page re-reads the file version and reports saved, not saved or conflict from what is on the box (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h32",
+          "text": "With a fake transport that applies the write and then times out, the page ends in 'saved' and a repeat of the same request changes nothing",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c39",
+      "kind": "requirement",
+      "text": "Recovery is specified: each write keeps a timestamped backup of the previous boundaries.toml, at most 5 are kept, and the contract documents how to restore one; deleting boundaries.toml is a valid state that means no page-managed rules (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h33",
+          "text": "After 7 writes exactly 5 backups exist and restoring the newest one reproduces the previous rules after a reload",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c40",
+      "kind": "requirement",
+      "text": "The daemon remembers the hash of the boundaries it last applied in its state dir and emits memory_boundary_changed at startup when the file differs, so a change made while the daemon was down or restarting is still recorded and shipped (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h34",
+          "text": "Stopping the daemon, changing boundaries.toml and starting it again yields one memory_boundary_changed event with the old and new rules",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c41",
+      "kind": "boundary",
+      "text": "Writing a boundary changes a live machine: the first live write on any box, enabling a token file on the EliteMini mesh unit, and any test or probe against a real box need the user's go-ahead; tests use tmp_path config dirs, a fake transport and fake /proc trees and never write under a real ~/.config or signal a process they did not spawn (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h35",
+          "text": "CLAUDE.md, AGENTS.override.md, AGENTS.colleague.md and QWEN.md carry this rule next to the existing run --apply and [memory] action rules, and no test touches the real config directory",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c42",
+      "kind": "assumption",
+      "text": "The boundaries CLI run directly on a box or with --machine uses the operator's own SSH access as its authority and needs no token; its audit entries name user@host instead of a token label (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "The conflict dialog names what changed and which token saved it; a hand edit on the box has no token, so the reader can only attribute changes it wrote itself (its audit log) and must show 'changed on the box' otherwise",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "Light-theme contrast: shipped --warm #c27a24 and --ink-faint #9f998c are used as small text on --surface; whether they meet 4.5:1 is unmeasured and bears on the token question",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v3",
+      "text": "How the reader finds heat-governor on a remote box for the write and preview commands (PATH over non-interactive ssh, a uv tool path, or a per-machine key in fleet.toml) is unverified on the six boxes",
+      "kind": "unknown_nonblocking",
+      "claim_id": "c7",
+      "resolved": true,
+      "resolution": "User (2026-11-15) confirmed c29 after a read-only probe: the binary is at ~/.local/bin/heat-governor on all five remote boxes and on PATH for non-interactive ssh on only one, so the reader calls it by explicit path with a per-machine override in fleet.toml",
+      "resolution_claim_id": "c29"
+    },
+    {
+      "id": "v4",
+      "text": "Downgrade: a box rolled back to a version that does not read boundaries.toml silently loses its page-managed boundaries, so protected workloads fall back to growth-only judgement; whether to warn in the release notes or migrate rules into config.toml on downgrade is undecided",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v5",
+      "text": "A preview runs a full /proc scan on the target box on demand; its cost on thor and the sparks at 8-10% free memory is unmeasured, and a rate limit per machine may be needed",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v6",
+      "text": "Plan-side: PR 2's live check on one SSH box must be staged (dry local machine first, then one remote box with a rule that matches nothing running) and recorded under docs/evidence",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "heat_governor/fleet_reader.py + cli/_commands/mesh.py + mcp_server.py",
+      "finding": "extract() keeps only THERMAL_FIELDS (fleet_reader.py:79-98,225-243) so mem_guard published at daemon.py:1091 is dropped; history Ring stores compact tuples so passing it through adds no storage; MCP machine_state returns the whole entry (mcp_server.py:104-116) but mesh status _row whitelists columns (mesh.py:178-197)",
+      "seeds": [
+        "c2"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "heat_governor/memguard.py + memboundary.py + docs/contracts/state.md",
+      "finding": "MemGuard._build_doc (memguard.py:228-241) publishes action, armed, avail_mib, last_kill, kills_last_hour, limits{floor_mib,soft_mib,source}, boundaries; entries carry no matchers, no source, and act_over_pct / the kill-budget cap are not published, yet the design draws matcher chips, a source tag, the far-over mark and 'budget of 3 per hour (1 used)'",
+      "seeds": [
+        "c3"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "heat_governor/config.py + daemon.py reload",
+      "finding": "Single-file loader and single-mtime reload (config.py:885-909; daemon.py:502-540, reload_every_s = 2.0); _validate_allow checks name uniqueness within one list only (config.py:580-590), and applied_rule breaks ties by smallest max_mib then list order (memboundary.py:63-69), so merge order and cross-file collisions must be defined; a rejected file today keeps the whole last good config",
+      "seeds": [
+        "c4",
+        "c5"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "heat_governor/cli/_commands + explain/catalog.py",
+      "finding": "No boundaries noun exists; memory has overview/status/top/replay (cli/_commands/memory.py:321-390); config verbs live in tuning.py and only init --write mutates; noun wiring is asserted by tests/test_cli_memory_ship.py:40-50, tests/test_cli.py:111 and tests/test_mcp.py:282",
+      "seeds": [
+        "c6"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "heat_governor/transport.py + fleet.py",
+      "finding": "SshTransport only runs curl 127.0.0.1:9476/state and python3 -c HISTORY_SCRIPT (transport.py:127-137); _run pins stdin to DEVNULL (transport.py:155); _check collapses any non-zero exit into Unreachable (transport.py:181-185); it never invokes heat-governor remotely and fleet.toml MACHINE_KEYS is only name, host, transport (fleet.py:21); the 5 s fetch timeout would also bound a write",
+      "seeds": [
+        "c7"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "heat_governor/mesh_server.py + tests/test_mesh_server.py",
+      "finding": "GET/HEAD only: do_POST = do_PUT = do_DELETE = do_PATCH = _not_allowed (mesh_server.py:160), _route branches on path only (97-108), _guarded maps every exception to 500 (144-149), MeshServer(reader, host, port) carries no token or audit settings, mesh serve has no --token-file (cli/_commands/mesh.py:337-361); no Origin/Authorization handling anywhere; the page's CSP (default-src 'self') already allows same-origin fetch",
+      "seeds": [
+        "c8"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "heat_governor/recorder.py + ship.py + daemon.py event routing",
+      "finding": "Only the daemon holds Recorder and Shipper; shipping is enumerated via SHIP_EVENTS = MEMORY_EVENTS (daemon.py:117, 937-946; recorder.py:165), so a non-daemon boundaries apply cannot record or ship an event; the reader state dir (default_data_dir, state.py:32-34) holds only ssh/*.sock today",
+      "seeds": [
+        "c9"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "heat_governor/memprocs.py + memkill.py (preview)",
+      "finding": "scan() and assess() are pure and daemon-free (memprocs.py:99; memboundary.py:180-192) and memory top already uses scan; killability lives in MemKiller.refusal (memkill.py:144-156,247-259): other-uid, protected names, below min_victim_mib (default 2048), root daemon; Proc has a numeric uid and no username or container field (memprocs.py:33-42); default names omits the exe basename the killer adds (memkill.py:126)",
+      "seeds": [
+        "c10"
+      ]
+    },
+    {
+      "id": "s9",
+      "surface": "heat_governor/web/index.html vs artifact Main.dc.html",
+      "finding": "Shipped App() renders only Machines with no Sections nav (index.html:1318-1333); the nav with location.hash routing exists in docs/design/fleet-dashboard.html:1015-1029 (tabs Machines, Survey, Decisions) and was dropped when the page shipped. The design matches the shipped layout: header, 74rem main, eyebrow + h1, summary chips, filters row, 16px-radius surface cards, .tag, .facts, rune marks. It restyles things that already exist: .badge duplicates .status, span chips with a .dot duplicate button chips with ::before, .code duplicates code",
+      "seeds": [
+        "c11"
+      ]
+    },
+    {
+      "id": "s10",
+      "surface": "heat_governor/web/index.html component inventory",
+      "finding": "The shipped page has no form controls beyond .search, no solid buttons (.addbtn, .linkbtn, .xbtn, .clear only), no modal (the drawer is role=dialog with a non-blocking scrim, index.html:1205), no inline icons (grep for 14-20px svg finds none), and table.dt is right-aligned numeric (index.html .dt th/td text-align:right); .scale is the heat-gradient thermometer, not a usage bar",
+      "seeds": [
+        "c12"
+      ]
+    },
+    {
+      "id": "s11",
+      "surface": "heat_governor/web/vendor + mesh_server CSP",
+      "finding": "index.html:11-15 loads Lato from /vendor/*.woff2 and the CSP is default-src 'self' (mesh_server.py:47-50), so the design's Google Fonts stylesheet would be blocked; pyproject dependencies = [] per CLAUDE.md",
+      "seeds": [
+        "c13"
+      ]
+    },
+    {
+      "id": "s12",
+      "surface": "artifact Main.dc.html sample data vs memboundary.py",
+      "finding": "classify() uses usage > max*(1+pct/100) with act_over_pct a global [memory] key, range 1-1000 (memboundary.py:72-78; config.py:262-263,550); usage is RssAnon not RSS (memboundary.py:208-219); the design gives elitemini the rune for e, which rune() does not map (index.html:285 falls back to the f rune); the design's comm field is comma-separated text while comm is a TOML list (config.py:147-154)",
+      "seeds": [
+        "c14"
+      ]
+    },
+    {
+      "id": "s13",
+      "surface": "artifact Edit/Confirm boards vs kill semantics",
+      "finding": "The kill warning says the guard kills 'within about 10 seconds'; from code it is up to 2 s reload (daemon.py:106) plus up to top_every_s 10 s in normal memory (memguard.py:300-310), and no kill happens when action = record (memkill.py:368-369), the uid differs, the name is protected or the process is under min_victim_mib (memkill.py:144-156,247-259); the Machines view already draws unreachable, stale and unsupported (index.html .lane.unreachable/.stale/.unsupported)",
+      "seeds": [
+        "c15"
+      ]
+    },
+    {
+      "id": "s14",
+      "surface": "issue #18 (scope, safety, out of scope)",
+      "finding": "Issue #18 limits writes to boundary rules, keeps GET unchanged, keeps daemons on loopback and excludes roles beyond a bearer token; the shipped page header says it was built from the locked design 'Machines view, Polar night skin only' (index.html:6-8)",
+      "seeds": [
+        "c16",
+        "c17",
+        "c18"
+      ]
+    },
+    {
+      "id": "s15",
+      "surface": "challenge pass / adjacent-systems lens: live probe of arduino, spark, spark2, thor, orin over ssh (read-only)",
+      "finding": "command -v heat-governor fails in a non-interactive ssh shell on 4 of 5 boxes (only spark has it on PATH); the binary is at ~/.local/bin/heat-governor on all 5 and every unit runs 'run --config %h/.config/heat-governor/config.toml'; all 5 report heat-governor 0.17.0; config dirs already hold ad-hoc config.toml.bak-* files",
+      "seeds": [
+        "c29"
+      ]
+    },
+    {
+      "id": "s16",
+      "surface": "challenge pass / lifecycle lens: version skew between reader and daemons",
+      "finding": "all six boxes run 0.17.x today and the reader already carries each daemon's version (THERMAL_FIELDS, fleet_reader.py:79-98); a file written for a daemon that does not read boundaries.toml would be accepted and silently ignored; transport._check turns any non-zero exit into Unreachable (transport.py:181-185)",
+      "seeds": [
+        "c30"
+      ]
+    },
+    {
+      "id": "s17",
+      "surface": "challenge pass / concurrency lens: page, CLI and hand edits on one boundaries.toml",
+      "finding": "three writers exist (page via reader, boundaries CLI, an editor on the box) and the spec's 409 was specified only at mesh_server; no file locking exists anywhere in config.py or tuning.py (config init --write is a plain write_text, tuning.py:120)",
+      "seeds": [
+        "c31"
+      ]
+    },
+    {
+      "id": "s18",
+      "surface": "challenge pass / data-flow lens: /state vs the file on disk",
+      "finding": "mem_guard.boundaries reflects the rules the guard loaded, and a rejected edit keeps the last good config (daemon.py:510-518) while config_error is published at daemon.py:1064 but dropped by fleet_reader.extract; an ETag computed from /state would not describe the file being overwritten",
+      "seeds": [
+        "c32"
+      ]
+    },
+    {
+      "id": "s19",
+      "surface": "challenge pass / failure-mode lens: heat_governor/daemon.py set_memory + memtrigger.py",
+      "finding": "set_memory stops and restarts the whole guard on any MemoryRule inequality and carries only killer.export_state() (daemon.py:767-781); Trigger keeps its 10 s slope window in a deque on the instance (memtrigger.py:60-72) and needs MIN_SAMPLES = 3, so every boundary save from the page resets runaway detection on that box",
+      "seeds": [
+        "c33"
+      ]
+    },
+    {
+      "id": "s20",
+      "surface": "challenge pass / security + reversibility lens: preview-to-save gap",
+      "finding": "the design's kill warning is a page dialog fed by a preview taken seconds earlier; a SIGKILL cannot be undone and the guard acts within reload 2 s + scan up to 10 s (daemon.py:106; memguard.py:300-310); nothing in the spec made the confirmation binding for the CLI path or for a process that appears after the preview",
+      "seeds": [
+        "c34"
+      ]
+    },
+    {
+      "id": "s21",
+      "surface": "challenge pass / security lens: what a boundary write can do (docs/contracts/memory.md Boundaries)",
+      "finding": "within its boundary a process is never blamed or killed (issue #18 background; memboundary applied_rule, memboundary.py:63-69), so the write path can disable the guard as well as trigger kills; _validate_allow_fields requires only one non-empty matcher (config.py:600-607)",
+      "seeds": [
+        "c35"
+      ]
+    },
+    {
+      "id": "s22",
+      "surface": "challenge pass / security lens: heat_governor/mesh_server.py + the EliteMini unit",
+      "finding": "the server has no auth, Origin or Host handling and its CSP allows inline script (mesh_server.py:47-50); the live unit binds 100.95.106.3:9480 over plain HTTP (systemctl --user cat heat-governor-mesh.service); the spec guarded writes but left the preview, which returns command lines of another box, unclassified",
+      "seeds": [
+        "c36",
+        "c37"
+      ]
+    },
+    {
+      "id": "s23",
+      "surface": "challenge pass / failure-mode lens: half-completed write over SSH",
+      "finding": "the reader's timeout_s is 5 s in the live fleet.toml and SshTransport kills the child on expiry (transport.py _collect); a write can therefore succeed on the box while the reader reports a failure",
+      "seeds": [
+        "c38"
+      ]
+    },
+    {
+      "id": "s24",
+      "surface": "challenge pass / rollback + observability lens: backups and the change event",
+      "finding": "the spec said 'atomic + backup' without a count or a restore path, and the boxes already accumulate unbounded config.toml.bak-* files (live probe); the change event was tied to a reload (c9), and maybe_reload only compares against the config the running process loaded (daemon.py:502-540), so a restart between change and reload emits nothing",
+      "seeds": [
+        "c39",
+        "c40"
+      ]
+    },
+    {
+      "id": "s25",
+      "surface": "challenge pass / operations + overlooked-actors lens: CLAUDE.md working rules and the CLI path",
+      "finding": "CLAUDE.md requires the user's go-ahead for run --apply, [memory] action = kill and [ship] and keeps tests off real /sys and /proc, but has no rule for a remote config write; the spec's token model covered the page only, while c6 gives the same write to a CLI that talks SSH directly",
+      "seeds": [
+        "c41",
+        "c42"
+      ]
+    },
+    {
+      "id": "s26",
+      "surface": "challenge pass / reversibility lens: PR 1 (read side)",
+      "finding": "clean: PR 1 only adds keys to /state (docs/contracts/state.md says clients ignore unknown fields) and to /api/fleet, adds no write path, and the history ring is untouched (fleet_reader.py:442-482); reverting it removes the tab and nothing else",
+      "seeds": []
+    },
+    {
+      "id": "s27",
+      "surface": "challenge pass / unexamined surfaces",
+      "finding": "not examined: the two sparks' config.pair.toml and whether [pair] reload interacts with a second watched file; the cost of a preview process scan on thor under full AI load; real browser behaviour of the modal and the session-kept token (the repo has no browser test harness, tests/test_web_page.py reads the HTML as text); shipping the new event to R2 or AWS; scripts/scan-secrets.py against token fixtures in tests and docs",
+      "seeds": []
+    }
+  ],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "provenance-missing",
+      "what": "After export I backticked an HTML token in docs/specs/2026-11-15-boundaries-tab.md by hand instead of amending claim c11, so the frame state and the exported spec differed",
+      "skipped_check": "amend c11 and re-export",
+      "refs": [
+        "c11"
+      ],
+      "origin": "llm",
+      "status": "approved"
+    }
+  ],
+  "obligations": [
+    {
+      "id": "o1",
+      "claim_id": "c2",
+      "seam": "fleet_reader.extract() and GET /api/fleet (tests/test_fleet_reader.py, tests/test_mesh_server.py)",
+      "behavior": "a /state document with mem_guard yields the same mem_guard object under the machine's entry; one without it yields state ok and no error; mesh status --json and MCP machine_state show the same object",
+      "source_text": "fleet_reader passes each daemon's mem_guard through to /api/fleet, mesh status and the MCP machine_state, tolerating its absence on daemons older than 0.17 (today extract() keeps only THERMAL_FIELDS, heat_governor/fleet_reader.py:79-98,225-243; mesh.py _row whitelists columns)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o2",
+      "claim_id": "c3",
+      "seam": "daemon GET /state, key mem_guard (memguard.MemGuard.doc, tests/test_memguard_boundary.py)",
+      "behavior": "every boundary entry carries comm, cmdline, cgroup and source beside the five 0.17 keys, and mem_guard carries act_over_pct, max_kills_per_hour and min_victim_mib",
+      "source_text": "The daemon's mem_guard document gains what the page shows and /state lacks today: each boundary's matchers (comm, cmdline, cgroup) and source file, plus act_over_pct, max_kills_per_hour and min_victim_mib. Today an entry is exactly name, max_mib, scope, usage_mib, state (memboundary.py:165-172; docs/contracts/state.md:52), and adding keys is allowed ('clients ignore unknown fields')",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o3",
+      "claim_id": "c4",
+      "seam": "config.load() / config.changed() with a sibling boundaries.toml (tests/test_config_memory_allow.py)",
+      "behavior": "rules from both files are merged before validation; a name in both files raises ConfigError naming both files; an invalid boundaries.toml keeps the last good boundaries while a valid config.toml edit still applies; touching only boundaries.toml triggers a reload",
+      "source_text": "The config loader merges [[memory.allow]] rules from a sibling boundaries.toml into [memory] before validation, rejects a name that appears in both files, watches both files' mtimes, and keeps the last good boundaries when only that file is invalid (today load() reads one path, Config.path/mtime are scalars, changed() compares one mtime: config.py:885-909, daemon.py:502-540)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o4",
+      "claim_id": "c5",
+      "seam": "the boundaries.toml emitter and writer (new module, tmp_path tests)",
+      "behavior": "emit then tomllib.loads returns the same rules for matchers with quotes, backslashes, newlines, control characters and non-ASCII; a write that fails midway leaves the previous file byte-identical",
+      "source_text": "A stdlib emitter writes the boundaries.toml [[memory.allow]] shape, escaping control characters and newlines in matcher strings, and the write is atomic (temp file + os.replace) with a backup. No emitter exists: _toml_value (config.py:924-935) handles scalars/lists only and escapes only backslash and double quote; config init --write is a plain write_text (tuning.py:120)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o5",
+      "claim_id": "c6",
+      "seam": "heat-governor boundaries overview|list|add|set|rm|apply|preview (tests/test_cli*.py, teken cli doctor)",
+      "behavior": "each verb takes --json, sends results to stdout and errors to stderr, exits 0/1/2 per cli/_errors.py, the bare noun prints the overview, and explain resolves every boundaries path",
+      "source_text": "A new boundaries CLI noun (overview, list, add, set, rm, a stdin apply used by the remote write, and a preview) follows the agent-first contract: register() in cli/__init__.py, overview verb and bare-noun overview, explain catalog entry, learn text, overview._VERBS line, --json and exit codes",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o6",
+      "claim_id": "c7",
+      "seam": "Transport write method on SshTransport and LocalTransport (tests/test_transport.py fake ssh)",
+      "behavior": "the remote argv is constant for any rule content, the rule body arrives on stdin, and the caller receives the remote exit code and stderr text rather than Unreachable",
+      "source_text": "The SSH and local transports gain one fixed, argv-only write path that can send a body on stdin and return the remote exit code and stderr (the validator's message), with its own timeout and a defined way to find heat-governor on the remote box",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o7",
+      "claim_id": "c8",
+      "seam": "mesh_server write routes (tests/test_mesh_server.py, MeshServer on port 0)",
+      "behavior": "no token file gives 403; a wrong or missing token gives 401; a stale If-Match gives 409 with the current rules; a wrong Origin or Content-Type is refused; every GET response body and status is unchanged from 0.17.1",
+      "source_text": "mesh serve accepts boundary writes: method dispatch for POST/PUT/DELETE, a capped JSON body reader, a bearer token compared in constant time (401 on a bad token, 403 when none is configured), Origin and Content-Type checks, If-Match with 409 on a stale version, and 4xx error mapping. test_post_not_allowed, the read-only docstrings and the mesh serve help text change with it",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o8",
+      "claim_id": "c9",
+      "seam": "daemon reload path to Recorder and Shipper (tests/test_recorder_memory.py, fake S3) and the reader's audit file",
+      "behavior": "a changed boundaries file produces one memory_boundary_changed record with old and new rules that is also submitted to the shipper; a write through the reader appends one audit line with token label, time, machine, old and new rule",
+      "source_text": "The daemon, not the CLI, emits memory_boundary_changed when it reloads a changed boundaries file, and the kind joins recorder.MEMORY_EVENTS so it is recorded and shipped; the reader keeps its own audit log (token label, time, machine, old and new rule) in its state dir",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o9",
+      "claim_id": "c10",
+      "seam": "boundaries preview on a fake /proc tree (tests with tmp_path proc_root)",
+      "behavior": "for each matching process the preview's state equals memboundary.assess and its killable verdict equals MemKiller.refusal for the same table; command lines are redacted",
+      "source_text": "A preview runs on the target box: memprocs.scan + memboundary.assess for within/over/far_over per matching process, with the killer's names function, uid, protect list, min_victim_mib and action deciding whether a far-over process would really be killed; command lines pass through redact() and the container column comes from container_id(cgroup)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o10",
+      "claim_id": "c11",
+      "seam": "heat_governor/web/index.html served at / (tests/test_web_page.py)",
+      "behavior": "the page has a Sections nav with Machines and Boundaries driven by location.hash, an unknown or empty hash shows Machines, the existing page tests pass unchanged, and no URL in the page points at another origin",
+      "source_text": "The Boundaries tab is built inside heat_governor/web/index.html as a second view of the one React/htm page: a hash-routed Sections nav (Machines | Boundaries) in the header, reusing the existing classes (.pills button[aria-current], .chip, .status, .tag, .facts, .dt, .search, .eyebrow, .lede, Mark/rune, useFleet) and the html[data-mode] theme, not the design's .app.dark class or its anchor-styled pills",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o11",
+      "claim_id": "c12",
+      "seam": "new controls in heat_governor/web/index.html (tests/test_web_page.py source checks)",
+      "behavior": "every action is a button, input, select or label element with an accessible name; the confirmation is a modal dialog with focus handling and Escape to close; no click handler sits on a div or span",
+      "source_text": "New styles are limited to what the dashboard does not have yet: buttons (.btn, primary, danger), icon buttons, form fields (input, select, label, hint, error state), a usage bar with boundary and far-over marks, a left-aligned rules table, and a modal confirmation dialog; the design's inline stroke SVG icons (plus, pencil, bin, lock, warning, refresh) are a new vocabulary for the page",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o12",
+      "claim_id": "c13",
+      "seam": "pyproject.toml and mesh_server CSP constant",
+      "behavior": "dependencies is [] and the Content-Security-Policy string equals the 0.17.1 value",
+      "source_text": "The page stays self-contained: Lato from /vendor, no Google Fonts link (the design's helmet loads fonts.googleapis.com), no new vendored library, no third-party runtime dependency, CSP unchanged",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o13",
+      "claim_id": "c15",
+      "seam": "Boundaries view rendering from fixture /api/fleet documents",
+      "behavior": "there is a distinct rendering for unreachable, stale, no mem_guard, action = record, save failed, validator rejection on any field, and max_mib under min_victim_mib",
+      "source_text": "The page covers states the design does not draw: a machine that is unreachable or stale, a daemon with no mem_guard (older than 0.17 or guard off), action = record (a far-over process is not killed), a save that fails or times out over SSH, a validator rejection for any field (the design shows it for max_mib only), and a rule whose max_mib is under min_victim_mib (blamed, never killed)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o14",
+      "claim_id": "c16",
+      "seam": "the write endpoint body and boundaries apply stdin",
+      "behavior": "a request containing any key outside name, comm, cmdline, cgroup, max_mib, scope is rejected and writes nothing; [memory] action, act_over_pct and limits are unchanged after any sequence of page writes",
+      "source_text": "The page edits boundaries.toml rules only: it never changes [memory] action, act_over_pct, limits, [ship] or thermal settings, and rules written in config.toml show read-only (issue #18 Safety and Out of scope)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o15",
+      "claim_id": "c17",
+      "seam": "existing mesh server, fleet reader, transport and state tests",
+      "behavior": "they pass without edits apart from test_post_not_allowed, and the daemon's listener address is still loopback",
+      "source_text": "GET /api/fleet, /api/history and the Machines view keep their behaviour, and remote daemons keep listening on loopback only, reached over the reader's SSH link (issue #18 acceptance criteria and Out of scope)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o16",
+      "claim_id": "c27",
+      "seam": "live /api/fleet on the EliteMini reader after PR 1 is deployed (docs/evidence)",
+      "behavior": "all 6 machines carry mem_guard and the Boundaries tab shows each machine's guard state within one 3 s poll",
+      "source_text": "After PR 1, /api/fleet returns mem_guard for all 6 machines and the Boundaries tab shows each machine's guard state within 1 poll of the reader",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o17",
+      "claim_id": "c28",
+      "seam": "live write on one local and one SSH machine after PR 2, with the user's go-ahead (docs/evidence)",
+      "behavior": "a saved rule appears in that machine's mem_guard.boundaries in under 15 s; a write with no token gets 403 or 401; a stale version gets 409 and the file is unchanged",
+      "source_text": "After PR 2, a rule saved from the page on a local and on an SSH machine appears in that machine's mem_guard.boundaries in under 15 s, a write with no or a wrong token gets 403 or 401, and a stale version gets 409 with nothing written",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o18",
+      "claim_id": "c29",
+      "seam": "reader to box command line and boundaries path resolution (fake ssh argv log)",
+      "behavior": "the remote argv starts with the configured binary path, default ~/.local/bin/heat-governor; the file is written beside the config path the daemon reports in /state",
+      "source_text": "The reader runs the remote write and preview by an explicit binary path, default ~/.local/bin/heat-governor with a per-machine override key in fleet.toml, and the on-box command writes boundaries.toml beside the config file the running daemon reports in /state (config, daemon.py:1061), not beside whatever the SSH shell's environment resolves (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o19",
+      "claim_id": "c30",
+      "seam": "reader write precondition on daemon version",
+      "behavior": "a write to a machine reporting a version below the first boundaries release is refused before any transport call, with the needed version in the message",
+      "source_text": "The reader refuses a write to a machine whose daemon version predates boundaries.toml support, with a message naming the version needed, and the page shows that machine as read-only until it is upgraded; a missing remote boundaries verb is reported as that same refusal, not as 'unreachable' (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o20",
+      "claim_id": "c31",
+      "seam": "boundaries apply on the box, two concurrent invocations (tmp_path, threads or processes)",
+      "behavior": "with the same base version exactly one succeeds and the other reports a conflict with the current rules; a base version that does not match the file writes nothing",
+      "source_text": "The version check and the write are one atomic step on the box: the on-box command takes an exclusive lock, compares the caller's base version with the hash of the file as it is now, and only then writes; the reader never decides a conflict on its own copy (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o21",
+      "claim_id": "c32",
+      "seam": "reader pass-through of config and config_error, and the editor's read",
+      "behavior": "/api/fleet carries each daemon's config path and config_error; the editor's rules and base version come from the file read on the box",
+      "source_text": "The editor's rule list and base version come from the boundaries.toml file read on the box, not from /state, and the reader passes through the daemon's config path and config_error so the page can say when the file on disk was rejected and the daemon is still running the last good rules (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o22",
+      "claim_id": "c33",
+      "seam": "Daemon.set_memory with a boundary-only change (tests/test_memguard*.py)",
+      "behavior": "the trigger's fill-rate window and the kill budget are the same before and after the change, and a simulated runaway fires no later than without the change",
+      "source_text": "A change that only touches boundary rules does not lose the guard's detection state: the fill-rate window and the kill budget survive it, either by swapping the rules in the running guard or by carrying the trigger window across the rebuild (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o23",
+      "claim_id": "c34",
+      "seam": "boundaries apply at write time, fake /proc with an own-user process far over the new boundary",
+      "behavior": "without the allow flag nothing is written and the process is returned; with it the file is written",
+      "source_text": "The kill confirmation is enforced on the box, not only drawn in the page: the on-box apply re-runs the preview at write time and refuses a change that would put a killable own-user process far over its boundary unless the request explicitly allows it, returning the processes concerned (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o24",
+      "claim_id": "c35",
+      "seam": "config validation of [[memory.allow]] and the preview output",
+      "behavior": "a rule whose matchers are all bare wildcards raises ConfigError; the preview reports the number of matching processes",
+      "source_text": "The validator rejects a boundary whose matchers are all bare wildcards, and the preview reports how many processes a rule matches, because a rule that matches everything with a large maximum makes every process 'within' and so switches the guard off for that box (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o25",
+      "claim_id": "c36",
+      "seam": "mesh_server auth on preview and write routes; mesh serve startup",
+      "behavior": "preview without a token returns 401 or 403 and no process data; a token in a query string is ignored; a token file with group or other read permission stops startup with exit code 2; a write with a foreign Host header is refused",
+      "source_text": "Every endpoint that returns process command lines or accepts a change requires the token, including the preview; the token travels only in the Authorization header, never in a URL; mesh serve refuses to start with a token file readable by group or others; write requests are refused when the Host header is not the address the server listens on (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o26",
+      "claim_id": "c38",
+      "seam": "page save flow over a fake transport that applies then times out",
+      "behavior": "the page ends in saved after re-reading the version, and repeating the same request leaves the file byte-identical",
+      "source_text": "A save whose response is lost is not left ambiguous: writes are whole-rule and idempotent, and after a timeout the page re-reads the file version and reports saved, not saved or conflict from what is on the box (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o27",
+      "claim_id": "c39",
+      "seam": "boundaries writer backups (tmp_path)",
+      "behavior": "each write leaves a timestamped backup of the previous file, never more than 5, and restoring the newest reproduces the previous rules",
+      "source_text": "Recovery is specified: each write keeps a timestamped backup of the previous boundaries.toml, at most 5 are kept, and the contract documents how to restore one; deleting boundaries.toml is a valid state that means no page-managed rules (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o28",
+      "claim_id": "c40",
+      "seam": "daemon start with a boundaries file that differs from the last applied hash",
+      "behavior": "exactly one memory_boundary_changed event is emitted at startup; none when the hash matches",
+      "source_text": "The daemon remembers the hash of the boundaries it last applied in its state dir and emits memory_boundary_changed at startup when the file differs, so a change made while the daemon was down or restarting is still recorded and shipped (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o29",
+      "claim_id": "c41",
+      "seam": "CLAUDE.md, AGENTS.override.md, AGENTS.colleague.md, QWEN.md and the test suite",
+      "behavior": "all four files state the go-ahead rule for live boundary writes and token files, and no test opens a path under the real home config directory",
+      "source_text": "Writing a boundary changes a live machine: the first live write on any box, enabling a token file on the EliteMini mesh unit, and any test or probe against a real box need the user's go-ahead; tests use tmp_path config dirs, a fake transport and fake /proc trees and never write under a real ~/.config or signal a process they did not spawn (challenge pass, 2026-11-15)",
+      "origin": "llm",
+      "status": "approved"
+    }
+  ]
+}
