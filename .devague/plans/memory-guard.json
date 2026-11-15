@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-11-14T18:37:22Z",
-  "updated": "2026-11-15T05:12:26Z",
+  "updated": "2026-11-15T06:12:36Z",
   "targets": [
     {
       "id": "c1",
@@ -789,8 +789,8 @@
       "text": "tests/test_ship.py failed once locally (1 failed, 24 passed; test name not captured) right after the S9073 split, then passed 10 serial runs and 25 parallel stress runs; CI passed. The t7 agent flagged its 0.2-0.6 s timing windows as timing-based. Watch for flakes; widen the windows if it recurs.",
       "kind": "unknown_nonblocking",
       "task_id": "t7",
-      "resolved": false,
-      "resolution": ""
+      "resolved": true,
+      "resolution": "the flake was test_stalled_server_never_blocks_submit bounding 20 fsyncing submits at 0.25 s total (CI took 0.264 s); now bounds each call by the 0.3 s client timeout"
     }
   ],
   "obligations": []
