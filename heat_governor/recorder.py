@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from collections import Counter
@@ -85,22 +86,55 @@ def tail(
     return out
 
 
+_TAIL_BLOCK = 64 * 1024
+_T_PREFIX = re.compile(rb'^\s*\{\s*"t"\s*:\s*(-?[0-9][0-9.eE+-]*)')
+
+
+def _lines_backwards(fh, block: int = _TAIL_BLOCK) -> Iterator[bytes]:
+    """The lines of an open binary file, last first, reading ``block`` bytes at a time."""
+    pos = fh.seek(0, os.SEEK_END)
+    carry = b""
+    while pos > 0:
+        size = min(block, pos)
+        pos -= size
+        fh.seek(pos)
+        parts = (fh.read(size) + carry).split(b"\n")
+        carry = parts[0]  # may continue in the previous block
+        yield from reversed(parts[1:])
+    yield carry
+
+
 def _rows_between(path: Path, since: float, now: float) -> list[dict]:
-    """The rows of one day file with ``since <= t <= now``; none if it cannot be opened."""
+    """The rows of one day file with ``since <= t <= now``, oldest first; none if it cannot
+    be opened. Reads from the end and stops at the first row older than ``since`` (rows are
+    appended in time order), parsing only lines whose leading ``{"t":<number>`` is in range."""
     out: list[dict] = []
     try:
-        fh = open(path, encoding="utf-8")
+        fh = open(path, "rb")
     except OSError:
         return out
     with fh:
-        for line in fh:
+        for raw in _lines_backwards(fh):
+            m = _T_PREFIX.match(raw)
+            if m is not None:
+                try:
+                    lead = float(m.group(1))
+                except ValueError:
+                    lead = None
+                if lead is not None and lead < since:
+                    break
+                if lead is not None and lead > now:
+                    continue
+            elif not raw.strip():
+                continue
             try:
-                rec = json.loads(line)
+                rec = json.loads(raw)
             except ValueError:
                 continue
             t = rec.get("t") if isinstance(rec, dict) else None
             if isinstance(t, (int, float)) and since <= t <= now:
                 out.append(rec)
+    out.reverse()
     return out
 
 

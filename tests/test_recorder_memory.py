@@ -102,3 +102,68 @@ def test_tail_spans_day_boundary(tmp_path):
     rows = tail(tmp_path, 3, clock=lambda: midnight + 10)
     assert [r["n"] for r in rows] == [-100, -10, 5]
     assert tail(tmp_path / "missing", 5, now=midnight) == []
+
+
+def _old_tail(directory, minutes, now):
+    """The pre-fix behaviour: parse every line of the day files."""
+    import json as _json
+
+    since = now - minutes * 60.0
+    days = {datetime.fromtimestamp(x, timezone.utc).strftime("%Y%m%d") for x in (since, now)}
+    out = []
+    for day in sorted(days):
+        path = directory / f"{day}.jsonl"
+        if not path.exists():
+            continue
+        for line in path.read_text().splitlines(True):
+            try:
+                rec = _json.loads(line)
+            except ValueError:
+                continue
+            t = rec.get("t") if isinstance(rec, dict) else None
+            if isinstance(t, (int, float)) and since <= t <= now:
+                out.append(rec)
+    return out
+
+
+def test_tail_matches_full_scan_on_mixed_rows(tmp_path):
+    midnight = datetime(2026, 11, 15, tzinfo=timezone.utc).timestamp()
+    prev = tmp_path / "20261114.jsonl"
+    cur = tmp_path / "20261115.jsonl"
+    prev.write_text(
+        "".join(
+            json.dumps({"t": midnight - 700 + i * 10, "n": i, "top": [{"pid": i}]}) + "\n"
+            for i in range(70)
+        )
+        + '{"t":%s,"event":"start","boot":"x"}\n' % (midnight - 5)
+    )
+    cur.write_text(
+        'garbage line\n{"t":"str"}\n[1,2]\n\n'
+        + "".join(json.dumps({"t": midnight + i, "n": 100 + i}) + "\n" for i in range(60))
+        + '{"t": %s, "event": "memory_kill"}\n' % (midnight + 61)
+        + '{"t": %s, "n": 9' % (midnight + 62)  # torn last line, no newline
+    )
+    for minutes in (0.5, 2, 5, 15, 60):
+        now = midnight + 90
+        got = tail(tmp_path, minutes, now=now)
+        assert got == _old_tail(tmp_path, minutes, now)
+        assert got  # the fixture always yields rows
+
+
+def test_tail_reads_a_small_fraction_of_a_large_file(tmp_path, monkeypatch):
+    from heat_governor import recorder
+
+    base = datetime(2026, 11, 15, tzinfo=timezone.utc).timestamp()
+    rows = 200_000
+    step = 86_000 / rows
+    with open(tmp_path / "20261115.jsonl", "w") as fh:
+        for i in range(rows):
+            fh.write('{"t":%.3f,"n":%d}\n' % (base + i * step, i))
+    now = base + 86_000
+    calls = []
+    real = recorder.json.loads
+    monkeypatch.setattr(recorder.json, "loads", lambda s, *a, **k: calls.append(1) or real(s))
+    got = tail(tmp_path, 10, now=now)
+    expected = [i for i in range(rows) if base + i * step >= now - 600]
+    assert [r["n"] for r in got] == expected
+    assert len(calls) < rows // 50

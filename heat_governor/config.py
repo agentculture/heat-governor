@@ -207,7 +207,10 @@ class PairRule:
 
 @dataclass(frozen=True)
 class MemoryRule:
-    """``[memory]``: the memory guard. Absent section = record only, never kill."""
+    """``[memory]``: the memory guard.
+
+    Absent section = no guard at all; present with the default action = record only.
+    """
 
     action: str = "record"  # record | kill
     floor_pct: float = 5.0  # MemAvailable below this share of RAM is the floor
@@ -236,7 +239,7 @@ class ShipRule:
     bucket: str | None = None
     prefix: str = "fleet"
     profile: str | None = None  # AWS credentials profile
-    machine: str | None = None  # default: the hostname
+    machine: str | None = None  # default: fleet.toml's transport = "local" entry, else shipping off
     blackbox_every_s: float = 60.0
     blackbox_minutes: float = 10.0
     spool_dir: str | None = None  # default: under the daemon's data dir
@@ -973,7 +976,7 @@ def template(profile: Profile) -> str:
         '# bucket = "my-fleet-bucket"   # 3-63 chars: lowercase, digits, hyphens, dots',
         '# prefix = "fleet"',
         '# profile = "default"          # credentials profile',
-        '# machine = "spark-1"          # default: the hostname',
+        '# machine = "spark-1"          # default: fleet.toml transport = "local" entry; else off',
         "# blackbox_every_s = 60        # 5-3600",
         "# blackbox_minutes = 10        # 1-120",
         '# spool_dir = "/var/lib/heat-governor/spool"  # default: under data_dir',
