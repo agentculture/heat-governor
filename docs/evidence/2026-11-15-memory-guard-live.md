@@ -52,12 +52,30 @@ The guard fired on the horizon rule: 1232 MiB/s with 8748 MiB left. It killed th
 The recorded parent chain names what started the process: a Claude Code session over SSH. On
 2026-11-14 this attribution was only recoverable from the kernel's OOM tables.
 
+## Fleet rollout (same day, 05:10-05:12 UTC)
+
+The other five boxes were enabled the same way: the 0.17.0 wheel from the PR head, `[memory]
+action = "kill"` with each platform's declared limits, `[ship]`, a `MemoryMin=128M` drop-in and a
+unit restart. Every box passed `config check`, logged `mlockall: ok` and passed `ship test`. No box
+ships to itself: spark ships to a second MinIO on arduino (`100.97.170.7:9000`, same image, same
+bucket and scoped policy), and everyone else ships to spark.
+
+| Box (machine name) | Limits (floor / soft) | Free at start | Ships to |
+|---|---|---|---|
+| thor | 3072 / 6144 MiB (platform) | 10567 MiB | spark |
+| spark2 | 3072 / 6144 MiB (platform) | 9663 MiB | spark |
+| orin | 2048 / 4096 MiB (platform) | 8150 MiB | spark |
+| arduino (`cultureos`) | 1024 / 2048 MiB (platform) | 6054 MiB | spark |
+| spark | 3072 / 6144 MiB (platform) | 11861 MiB | arduino |
+| elitemini | 2296 / 9187 MiB (percent) | 40574 MiB | spark |
+
+Afterwards the fleet view reported all six `ok` and admitting work. Spark's store held black
+boxes from cultureos, elitemini, orin, spark2 and thor; arduino's held spark's.
+
 ## Not covered here
 
-- Only the EliteMini runs the guard. spark, spark2, thor, orin and the VENTUNO Q still run 0.16
-  without `[memory]`. Their platform limits (deviation d3) are declared from 2026-11-15 readings,
-  not measured under a runaway.
+- The runaway test ran on the EliteMini only. On the five AI boxes the platform limits (deviation
+  d3) are declared from 2026-11-15 readings, not measured under a runaway.
 - The postmortem path (upload after an unclean boot) has not fired for real; there was no unclean
   boot after the deploy.
 - No real kill of a multi-process (group fallback) runaway yet.
-- spark's own daemon needs a ship target other than spark (risk r3).
