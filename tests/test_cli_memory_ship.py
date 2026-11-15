@@ -465,3 +465,17 @@ def test_unit_has_memory_min(capsys):
     assert "MemoryMin=128M" in out
     _, out, _ = run(capsys, "unit", "--json")
     assert "MemoryMin=128M" in json.loads(out)["unit"]
+
+
+def test_status_output_is_unchanged_by_the_added_boundary_keys(capsys, tmp_path):
+    """A 0.17-shaped boundary and one with the added keys print the same lines."""
+    old = {"name": "v", "max_mib": 1024, "scope": "total", "usage_mib": 5.0, "state": "within"}
+    new = dict(old, comm=["v"], cmdline=None, cgroup="*x*", source="config.toml")
+    outs = []
+    for b in (old, new):
+        src = write_state(tmp_path, dict(GUARD, boundaries=[b]))
+        rc, out, err = run(capsys, "memory", "status", "--source", str(src))
+        assert (rc, err) == (0, "")
+        outs.append(out)
+    assert outs[0] == outs[1]
+    assert "boundary v: within, 5 of 1024 MiB (total)" in outs[0]

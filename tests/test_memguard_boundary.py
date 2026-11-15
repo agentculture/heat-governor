@@ -168,9 +168,61 @@ def test_doc_boundaries_shape(tmp_path):
     guard.step()
     assert guard.doc()["boundaries"] == [
         {"name": "hog", "max_mib": 10_000, "scope": "process", "usage_mib": 20000.0,
-         "state": "far_over"},
-        {"name": "none", "max_mib": 64, "scope": "total", "usage_mib": 0.0, "state": "idle"},
+         "state": "far_over", "comm": ["hog"], "cmdline": None, "cgroup": None,
+         "source": "config.toml"},
+        {"name": "none", "max_mib": 64, "scope": "total", "usage_mib": 0.0, "state": "idle",
+         "comm": ["nothing"], "cmdline": None, "cgroup": None, "source": "config.toml"},
     ]  # fmt: skip
+
+
+MATCHER_KEYS = {"name", "max_mib", "scope", "usage_mib", "state", "comm", "cmdline", "cgroup",
+                "source"}  # fmt: skip
+
+
+def test_every_boundary_entry_carries_matchers_and_source_idle_and_scanned(tmp_path):
+    rule = AllowRule(
+        name="c", max_mib=64, comm=("a", "b"), cmdline="*x*", cgroup="*y*", source="boundaries.toml"
+    )
+    guard, clock, *_ = make(tmp_path, action="record", allow=(HOG, rule))
+    idle = guard.doc()["boundaries"]
+    guard.step()
+    scanned = guard.doc()["boundaries"]
+    for entries in (idle, scanned):
+        assert all(set(b) == MATCHER_KEYS for b in entries)
+    assert idle[1]["comm"] == ["a", "b"]
+    assert (idle[1]["cmdline"], idle[1]["cgroup"]) == ("*x*", "*y*")
+    assert idle[1]["source"] == scanned[1]["source"] == "boundaries.toml"
+    assert scanned[0]["state"] == "far_over"
+    assert isinstance(scanned[1]["comm"], list)
+
+
+def test_idle_doc_carries_matchers_and_source():
+    from heat_governor import memboundary
+
+    (entry,) = memboundary.idle_doc((HOG,))
+    assert set(entry) == MATCHER_KEYS
+    assert entry["source"] == "config.toml"
+
+
+def test_allow_rule_source_defaults_and_is_not_a_toml_key():
+    from heat_governor import config
+
+    assert HOG.source == "config.toml"
+    assert "source" not in config.ALLOW_KEYS
+    cfg = config.Config(
+        data={"memory": {"allow": [{"name": "x", "max_mib": 128, "comm": ["x"], "source": "y"}]}}
+    )
+    assert any("source" in p for p in config.validate(cfg.data))
+
+
+def test_doc_carries_act_over_pct_kill_budget_and_min_victim_from_config(tmp_path):
+    guard, *_ = make(
+        tmp_path, action="record", act_over_pct=33.0, max_kills_per_hour=7, min_victim_mib=999
+    )
+    for _ in range(2):  # the placeholder doc, then a scanned one
+        d = guard.doc()
+        assert (d["act_over_pct"], d["max_kills_per_hour"], d["min_victim_mib"]) == (33.0, 7, 999)
+        guard.step()
 
 
 def test_doc_boundaries_is_a_copy(tmp_path):

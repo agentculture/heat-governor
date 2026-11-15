@@ -160,6 +160,10 @@ def test_within_set_lists_only_within_processes():
     assert a.within == frozenset({1})
 
 
+def M(comm):
+    return {"comm": [comm], "cmdline": None, "cgroup": None, "source": "config.toml"}
+
+
 def test_doc_shape_and_states():
     rules = (
         AllowRule(name="p", max_mib=100, comm=("p",)),
@@ -169,16 +173,44 @@ def test_doc_shape_and_states():
     ps = procs(proc(1, 90, comm="p"), proc(2, 300, comm="p"), proc(3, 60, comm="t"))
     doc = memboundary.assess(ps, rules, 50.0).doc()
     assert doc == [
-        {"name": "p", "max_mib": 100, "scope": "process", "usage_mib": 300.0, "state": "far_over"},
-        {"name": "t", "max_mib": 100, "scope": "total", "usage_mib": 60.0, "state": "within"},
-        {"name": "idle", "max_mib": 100, "scope": "process", "usage_mib": 0.0, "state": "idle"},
+        {
+            "name": "p",
+            "max_mib": 100,
+            "scope": "process",
+            "usage_mib": 300.0,
+            "state": "far_over",
+            **M("p"),
+        },
+        {
+            "name": "t",
+            "max_mib": 100,
+            "scope": "total",
+            "usage_mib": 60.0,
+            "state": "within",
+            **M("t"),
+        },
+        {
+            "name": "idle",
+            "max_mib": 100,
+            "scope": "process",
+            "usage_mib": 0.0,
+            "state": "idle",
+            **M("nobody"),
+        },
     ]
 
 
 def test_idle_doc_without_a_scan():
     rules = (AllowRule(name="x", max_mib=64, comm=("x",)),)
     assert memboundary.idle_doc(rules) == [
-        {"name": "x", "max_mib": 64, "scope": "process", "usage_mib": 0.0, "state": "idle"}
+        {
+            "name": "x",
+            "max_mib": 64,
+            "scope": "process",
+            "usage_mib": 0.0,
+            "state": "idle",
+            **M("x"),
+        }
     ]
 
 

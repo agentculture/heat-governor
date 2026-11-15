@@ -222,7 +222,7 @@ class MemGuard:
             d = dict(self._doc)
         if d["last_kill"] is not None:
             d["last_kill"] = dict(d["last_kill"])
-        d["boundaries"] = [dict(b) for b in d["boundaries"]]
+        d["boundaries"] = [dict(b, comm=list(b["comm"])) for b in d["boundaries"]]
         return d
 
     def _build_doc(self, avail_mib: float | None, now: float | None = None) -> dict:
@@ -237,7 +237,10 @@ class MemGuard:
             "last_kill": None if self._last_kill is None else dict(self._last_kill),
             "kills_last_hour": int(kills),
             "limits": self._limits_doc(),
-            "boundaries": [dict(b) for b in self._bounds_doc],
+            "boundaries": [dict(b, comm=list(b["comm"])) for b in self._bounds_doc],
+            "act_over_pct": float(self.rule.act_over_pct),
+            "max_kills_per_hour": int(self.rule.max_kills_per_hour),
+            "min_victim_mib": int(self.rule.min_victim_mib),
         }
 
     def _limits_doc(self) -> dict:
