@@ -2,11 +2,16 @@
 
 ``MemKiller.act(procs, tracker, reason)`` is called once per trigger fire. It:
 
-1. chooses a victim (``choose``): an own-uid process with anonymous RSS >= ``min_victim_mib``
-   that is not protected, ranked by anon growth (MiB/s) then anon size. If none qualifies, it
-   falls back to the own-uid group (``memprocs.groups``) whose anon memory grows fastest, and
-   picks that group's biggest non-protected member (decision c37). A fallback group must be
-   growing (> 0 MiB/s) and hold >= ``min_victim_mib`` anon in total.
+1. chooses a victim (``choose``) by anon growth (MiB/s). Candidates are (a) the fastest-growing
+   eligible single: an own-uid, non-protected process with anonymous RSS >= ``min_victim_mib``
+   whose growth is > 0, and (b) the fastest-growing own-uid group (``memprocs.groups``,
+   decision c37) that grows (> 0 MiB/s), holds >= ``min_victim_mib`` anon in total and has at
+   least one growing eligible member. A group's score is its growth minus the single's when
+   the single is one of its members, so a runaway is never outbid by its own group. The
+   faster of the two wins (a tie goes to the single); for a group the victim is its biggest
+   growing eligible member. A big idle process is therefore never chosen while something
+   else is growing. Only when nothing is growing (a floor fire on a flat curve) does it fall
+   back to the biggest eligible single >= ``min_victim_mib``.
 2. with ``action = "record"`` returns ``memory_would_kill`` and never signals;
 3. past ``max_kills_per_hour`` (rolling) returns ``memory_would_kill`` plus
    ``memory_budget_exhausted`` and never signals;
@@ -143,17 +148,16 @@ class MemKiller:
 
         eligible = [p for p in procs.values() if self._refusal(p, shielded) is None]
         singles = [p for p in eligible if p.rss_anon_mib >= min_mib]
-        if singles:
-            best = max(singles, key=lambda p: (growth(p), p.rss_anon_mib, -p.pid))
-            return Choice(best, how="process", growth_mib_s=growth(best))
 
+        # 1. the fastest-growing single (it must actually be growing)
+        growing = [p for p in singles if growth(p) > 0]
+        single = max(growing, key=lambda p: (growth(p), p.rss_anon_mib, -p.pid), default=None)
+        single_g = growth(single) if single is not None else 0.0
+
+        # 2. the fastest-growing group, scored by the growth the single does not explain
+        group, group_g, group_best = None, 0.0, None
         ok = {p.pid for p in eligible}
-        ranked = sorted(
-            memprocs.groups(procs, self.uid, tracker),
-            key=lambda g: (g["growth_mib_s"], g["rss_anon_mib"]),
-            reverse=True,
-        )
-        for g in ranked:
+        for g in memprocs.groups(procs, self.uid, tracker):
             if g["growth_mib_s"] <= 0 or g["rss_anon_mib"] < min_mib:
                 continue
             members = [
@@ -161,10 +165,28 @@ class MemKiller:
                 for pid in ok
                 if memprocs.top_level(procs, pid) == g["pid"] and procs[pid].uid == self.uid
             ]
-            if not members:
-                continue
-            best = max(members, key=lambda p: (p.rss_anon_mib, growth(p), -p.pid))
-            return Choice(best, how="group", group=dict(g), growth_mib_s=growth(best))
+            moving = [p for p in members if growth(p) > 0]
+            if not moving:
+                continue  # its growth is all in protected members: no kill here stops it
+            score = g["growth_mib_s"]
+            if single is not None and single in members:
+                score -= single_g
+            best = max(moving, key=lambda p: (p.rss_anon_mib, growth(p), -p.pid))
+            if group is None or (score, g["rss_anon_mib"]) > (group_g, group["rss_anon_mib"]):
+                group, group_g, group_best = g, score, best
+
+        # 3. act on whichever grows faster (a tie goes to the single: the precise target)
+        if group is not None and group_g > single_g:
+            return Choice(
+                group_best, how="group", group=dict(group), growth_mib_s=growth(group_best)
+            )
+        if single is not None:
+            return Choice(single, how="process", growth_mib_s=single_g)
+
+        # 4. nothing is growing (a floor fire on a flat curve): the biggest eligible single
+        if singles:
+            best = max(singles, key=lambda p: (p.rss_anon_mib, -p.pid))
+            return Choice(best, how="process", growth_mib_s=max(growth(best), 0.0))
         return Choice(
             None,
             why_not=f"no-victim: no eligible own-uid process >= {int(min_mib)} MiB "
@@ -206,6 +228,24 @@ class MemKiller:
             self._kills.popleft()
         for key in [k for k, q in self._repeats.items() if not q or q[-1] <= now - REPEAT_WINDOW_S]:
             del self._repeats[key]
+
+    def export_state(self) -> dict:
+        """A snapshot of the rolling kill budget and repeat history, for ``import_state``.
+
+        Lets a caller that rebuilds the killer (a config reload) carry both across. The
+        timestamps are on this killer's ``clock``, so import only into a killer on the same
+        clock in the same process. The snapshot shares nothing with this killer."""
+        return {
+            "kills": tuple(self._kills),
+            "repeats": {key: tuple(q) for key, q in self._repeats.items()},
+        }
+
+    def import_state(self, state: dict | None) -> None:
+        """Replace the budget and repeat history with an ``export_state`` snapshot (None or
+        an empty dict leaves a fresh killer)."""
+        state = state or {}
+        self._kills = deque(sorted(state.get("kills", ())))
+        self._repeats = {key: deque(q) for key, q in dict(state.get("repeats", {})).items()}
 
     def kills_last_hour(self, now: float | None = None) -> int:
         self._prune(self.clock() if now is None else now)

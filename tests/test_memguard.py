@@ -7,6 +7,7 @@ loop for a fraction of a second against the fake tree.
 
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -40,12 +41,16 @@ class FakePidfd:
         self.opened: list[int] = []
         self.sent: list[tuple[int, int]] = []
         self.on_send = None
+        self.refuse = 0  # refuse this many sends with EPERM before accepting (-1: always)
 
     def open(self, pid: int, flags: int = 0) -> int:
         self.opened.append(pid)
         return 9000 + pid
 
     def send(self, fd: int, sig: int, siginfo=None, flags: int = 0) -> None:
+        if self.refuse:
+            self.refuse -= 1 if self.refuse > 0 else 0
+            raise PermissionError(1, "Operation not permitted")
         self.sent.append((fd, sig))
         if self.on_send is not None:
             self.on_send()
@@ -170,6 +175,90 @@ def test_one_fire_per_wave_and_rearm_after_recovery(tmp_path):
     clock.mono += 30
     falling_wave(guard, clock, proc, stop_mib=1000)
     assert len(named(events, "memory_would_kill")) == 2
+
+
+def _gaps(events):
+    ts = [e["t"] for e in events]
+    return [b - a for a, b in zip(ts, ts[1:])]
+
+
+def test_refused_kill_rearms_and_the_next_qualifying_poll_kills(tmp_path):
+    guard, clock, fake, events, _, proc, _ = make(tmp_path)
+    fake.refuse = 1
+    falling_wave(guard, clock, proc, fake)
+    would = named(events, "memory_would_kill")
+    kills = named(events, "memory_kill")
+    assert len(would) == 1
+    assert would[0]["why_not"].startswith("refused")
+    assert len(kills) == 1  # one kill, then disarmed for the rest of the wave
+    assert kills[0]["pid"] == 777
+    assert len(fake.sent) == 1
+    assert kills[0]["t"] - would[0]["t"] >= 1.0  # rate limit: >= max(4 x poll_s, 1 s)
+    assert guard.doc()["armed"] is False
+
+
+def test_doc_armed_is_true_right_after_a_refused_fire(tmp_path):
+    guard, clock, fake, events, _, proc, _ = make(tmp_path)
+    fake.refuse = -1
+    avail = 40_000.0
+    while not named(events, "memory_would_kill"):
+        write_meminfo(proc, avail)
+        guard.step()
+        clock.mono += guard.rule.poll_s
+        avail -= RATE_MIB_S * guard.rule.poll_s
+    assert guard.doc()["armed"] is True
+
+
+def test_persistently_refused_kill_refires_at_most_once_per_second(tmp_path):
+    guard, clock, fake, events, _, proc, _ = make(tmp_path)
+    fake.refuse = -1
+    falling_wave(guard, clock, proc, fake)
+    would = named(events, "memory_would_kill")
+    assert len(would) >= 2
+    assert all(e["why_not"].startswith("refused") for e in would)
+    assert min(_gaps(would)) >= 1.0
+    polls_low = sum(1 for e in named(events, "memory_top") if e["avail_mib"] < 24_576)
+    assert len(would) <= polls_low // 4 + 1
+    assert fake.sent == []
+
+
+def test_no_victim_fire_rearms_rate_limited(tmp_path):
+    guard, clock, fake, events, _, proc, _ = make(tmp_path)
+    shutil.rmtree(proc / "777")
+    falling_wave(guard, clock, proc, fake)
+    would = named(events, "memory_would_kill")
+    assert len(would) >= 2
+    assert all(e["why_not"].startswith("no-victim") for e in would)
+    assert min(_gaps(would)) >= 1.0
+
+
+def test_rearm_gap_scales_with_a_slow_poll(tmp_path):
+    guard, clock, fake, events, _, proc, _ = make(tmp_path, poll_s=0.5)
+    fake.refuse = -1
+    falling_wave(guard, clock, proc, fake)
+    would = named(events, "memory_would_kill")
+    assert len(would) >= 2
+    assert min(_gaps(would)) >= 2.0  # 4 x 0.5 s
+
+
+def test_budget_exhausted_fires_once_per_wave_no_storm(tmp_path):
+    guard, clock, fake, events, _, proc, _ = make(tmp_path)
+    guard.killer.import_state({"kills": (clock.mono - 10,) * 3})
+    falling_wave(guard, clock, proc, fake)
+    would = named(events, "memory_would_kill")
+    assert len(would) == 1
+    assert would[0]["why_not"] == "budget"
+    assert len(named(events, "memory_budget_exhausted")) == 1
+    assert fake.opened == []
+    assert guard.doc()["armed"] is False
+
+
+def test_record_only_fires_once_per_wave_with_kill_capable_killer_idle(tmp_path):
+    guard, clock, fake, events, _, proc, _ = make(tmp_path, action="record")
+    falling_wave(guard, clock, proc, fake)
+    falling_wave(guard, clock, proc, fake, start_mib=1000.0, stop_mib=10.0)  # still low
+    assert len(named(events, "memory_would_kill")) == 1
+    assert guard.doc()["armed"] is False
 
 
 def test_doc_after_kill_matches_state_row(tmp_path):
@@ -337,7 +426,7 @@ def test_mlockall_refused_is_logged_and_guard_runs(tmp_path):
             time.sleep(0.005)
     finally:
         guard.stop()
-    assert calls == [memguard.MCL_CURRENT | memguard.MCL_FUTURE]
+    assert calls == [memguard.MCL_CURRENT]
     assert any(m.startswith("mlockall: refused errno=") and "continuing" in m for m in logs)
     assert guard.polls >= 3
     d = guard.doc()
@@ -355,9 +444,12 @@ def test_mlockall_refused_is_logged_and_guard_runs(tmp_path):
 
 def test_mlockall_ok_logged_and_raising_mlockall_does_not_fail_start(tmp_path):
     guard, *_, logs, _, _ = make(tmp_path, poll_s=0.01)
+    calls = []
+    guard._mlockall = lambda flags: calls.append(flags) or 0
     guard.start()
     guard.stop()
-    assert "mlockall: ok" in logs
+    assert calls == [memguard.MCL_CURRENT]  # never MCL_FUTURE: later allocations stay unlocked
+    assert "mlockall: ok (current pages)" in logs
 
     guard2, *_, logs2, _, _ = make(tmp_path, poll_s=0.01)
 

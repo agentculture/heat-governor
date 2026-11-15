@@ -244,6 +244,160 @@ def test_group_fallback_never_picks_protected_or_daemon_members(tmp_path):
     assert c.proc is None
 
 
+# --- choice by growth (review finding #1) ---------------------------------------------------
+
+
+def _workers(tmp_path, rate=40.0, n=4, mib=1500):
+    """A test runner (top 900) whose small workers (each under min_victim_mib) all grow."""
+    g = "/user.slice/user-1000.slice/run-w.scope"
+    add_proc(tmp_path, 900, ppid=1, uid=UID, comm="node", anon_kib=100 * MIB, cgroup=g)
+    rates = {}
+    for i in range(n):
+        pid = 901 + i
+        add_proc(tmp_path, pid, ppid=900, uid=UID, comm="node", anon_kib=mib * MIB, cgroup=g)
+        rates[pid] = rate
+    return rates
+
+
+def test_big_idle_single_never_chosen_over_growing_group_of_small_workers(tmp_path):
+    base_tree(tmp_path)
+    add_proc(
+        tmp_path,
+        600,
+        ppid=1,
+        uid=UID,
+        comm="idle-model",
+        anon_kib=40_000 * MIB,
+        cgroup="/user.slice/user-1000.slice/idle.scope",
+    )
+    rates = _workers(tmp_path)  # 4 x 1500 MiB, 40 MiB/s each: 160 MiB/s, 6000 MiB in total
+    rates[600] = 0.0
+    c = choose(tmp_path, rates=rates)
+    assert c.proc is not None
+    assert c.proc.pid != 600
+    assert c.how == "group"
+    assert c.group["pid"] == 900
+    assert c.proc.pid in (901, 902, 903, 904)
+
+
+def test_slightly_growing_big_single_loses_to_faster_growing_group(tmp_path):
+    base_tree(tmp_path)
+    add_proc(
+        tmp_path,
+        600,
+        ppid=1,
+        uid=UID,
+        comm="idle-model",
+        anon_kib=40_000 * MIB,
+        cgroup="/user.slice/user-1000.slice/idle.scope",
+    )
+    rates = _workers(tmp_path)
+    rates[600] = 0.5  # noise-level growth
+    c = choose(tmp_path, rates=rates)
+    assert c.how == "group"
+    assert c.proc.pid != 600
+
+
+def test_growing_single_beats_slower_growing_group(tmp_path):
+    base_tree(tmp_path)
+    add_proc(
+        tmp_path,
+        600,
+        ppid=1,
+        uid=UID,
+        comm="eater",
+        anon_kib=3000 * MIB,
+        cgroup="/user.slice/user-1000.slice/eat.scope",
+    )
+    rates = _workers(tmp_path, rate=10.0)  # group: 40 MiB/s
+    rates[600] = 500.0
+    c = choose(tmp_path, rates=rates)
+    assert c.how == "process"
+    assert c.proc.pid == 600
+    assert c.growth_mib_s == 500.0
+
+
+def test_single_inside_a_group_is_not_outbid_by_its_own_group_growth(tmp_path):
+    """The group's growth includes the single's: only the rest of the group competes."""
+    base_tree(tmp_path)
+    g = "/user.slice/user-1000.slice/run-z.scope"
+    add_proc(tmp_path, 900, ppid=1, uid=UID, comm="pytest", anon_kib=100 * MIB, cgroup=g)
+    add_proc(tmp_path, 901, ppid=900, uid=UID, comm="python", anon_kib=9000 * MIB, cgroup=g)
+    add_proc(tmp_path, 902, ppid=900, uid=UID, comm="python", anon_kib=30_000 * MIB, cgroup=g)
+    c = choose(tmp_path, rates={901: 800.0, 902: 1.0})
+    assert c.how == "process"
+    assert c.proc.pid == 901
+
+
+def test_group_member_choice_skips_idle_members(tmp_path):
+    """A winning group's victim is its biggest *growing* member, never an idle big one."""
+    base_tree(tmp_path)
+    g = "/user.slice/user-1000.slice/run-m.scope"
+    add_proc(tmp_path, 900, ppid=1, uid=UID, comm="make", anon_kib=100 * MIB, cgroup=g)
+    add_proc(tmp_path, 901, ppid=900, uid=UID, comm="idle", anon_kib=1900 * MIB, cgroup=g)
+    add_proc(tmp_path, 902, ppid=900, uid=UID, comm="cc1", anon_kib=600 * MIB, cgroup=g)
+    add_proc(tmp_path, 903, ppid=900, uid=UID, comm="cc1", anon_kib=500 * MIB, cgroup=g)
+    c = choose(tmp_path, rates={902: 30.0, 903: 30.0})
+    assert c.how == "group"
+    assert c.proc.pid == 902
+
+
+def test_group_growing_only_through_protected_members_is_not_a_target(tmp_path):
+    base_tree(tmp_path)
+    g = "/user.slice/user-1000.slice/run-p.scope"
+    add_proc(tmp_path, 900, ppid=1, uid=UID, comm="bash", anon_kib=100 * MIB, cgroup=g)
+    add_proc(tmp_path, 901, ppid=900, uid=UID, comm="dockerd", anon_kib=3000 * MIB, cgroup=g)
+    add_proc(tmp_path, 902, ppid=900, uid=UID, comm="idle", anon_kib=500 * MIB, cgroup=g)
+    c = choose(tmp_path, rates={901: 300.0})
+    assert c.proc is None
+
+
+def test_nothing_growing_falls_back_to_biggest_eligible_single(tmp_path):
+    base_tree(tmp_path)
+    add_proc(
+        tmp_path,
+        600,
+        ppid=1,
+        uid=UID,
+        comm="big",
+        anon_kib=20_000 * MIB,
+        cgroup="/user.slice/user-1000.slice/a.scope",
+    )
+    add_proc(
+        tmp_path,
+        601,
+        ppid=1,
+        uid=UID,
+        comm="bigger",
+        anon_kib=30_000 * MIB,
+        cgroup="/user.slice/user-1000.slice/b.scope",
+    )
+    rates = _workers(tmp_path, rate=0.0)
+    rates[600] = -5.0  # shrinking is not growing
+    c = choose(tmp_path, rates=rates)
+    assert c.how == "process"
+    assert c.proc.pid == 601
+    assert c.growth_mib_s == 0.0
+
+
+def test_shrinking_single_is_not_a_growth_candidate(tmp_path):
+    base_tree(tmp_path)
+    add_proc(
+        tmp_path,
+        600,
+        ppid=1,
+        uid=UID,
+        comm="big",
+        anon_kib=40_000 * MIB,
+        cgroup="/user.slice/user-1000.slice/a.scope",
+    )
+    rates = _workers(tmp_path, rate=5.0)
+    rates[600] = -50.0
+    c = choose(tmp_path, rates=rates)
+    assert c.how == "group"
+    assert c.proc.pid != 600
+
+
 # --- kill path -----------------------------------------------------------------------------
 
 
@@ -483,3 +637,64 @@ def test_real_pidfd_kills_only_the_child(tmp_path):
             if child.poll() is None:
                 child.kill()
             child.wait(timeout=5)
+
+
+# --- carrying budget + repeats across a rebuild (review finding #6) ----------------------------
+
+
+def test_exported_state_keeps_budget_and_repeats_in_a_new_killer(tmp_path):
+    base_tree(tmp_path)
+    clock = Clock()
+    k, _ = make(tmp_path, clock=clock)
+    for i in range(3):
+        (ev,) = k.act(_respawn(tmp_path, 100 + i), FakeTracker({600: 9.0}), reason="horizon")
+        assert ev["event"] == "memory_kill"
+        clock.t += 300
+    state = k.export_state()
+
+    k2, fd2 = make(tmp_path, clock=clock)
+    k2.import_state(state)
+    assert k2.kills_last_hour() == 3
+    events = k2.act(_respawn(tmp_path, 200), FakeTracker({600: 9.0}), reason="horizon")
+    assert [e["event"] for e in events] == ["memory_would_kill", "memory_budget_exhausted"]
+    assert events[0]["repeat"] == 4
+    assert fd2.sent == []
+
+
+def test_repeat_count_continues_after_import(tmp_path):
+    base_tree(tmp_path)
+    clock = Clock()
+    rule = MemoryRule(action="kill", max_kills_per_hour=10)
+    k, _ = make(tmp_path, clock=clock, rule=rule)
+    for i in range(2):
+        k.act(_respawn(tmp_path, 100 + i), FakeTracker({600: 9.0}), reason="horizon")
+        clock.t += 60
+    k2, fd2 = make(tmp_path, clock=clock, rule=rule)
+    k2.import_state(k.export_state())
+    (ev,) = k2.act(_respawn(tmp_path, 300), FakeTracker({600: 9.0}), reason="horizon")
+    assert ev["event"] == "memory_kill"
+    assert ev["repeat"] == 3
+    assert ev["kills_last_hour"] == 3
+
+
+def test_exported_state_is_a_snapshot_not_shared(tmp_path):
+    base_tree(tmp_path)
+    clock = Clock()
+    rule = MemoryRule(action="kill", max_kills_per_hour=10)
+    k, _ = make(tmp_path, clock=clock, rule=rule)
+    k.act(_respawn(tmp_path, 100), FakeTracker({600: 9.0}), reason="horizon")
+    state = k.export_state()
+    k2, _ = make(tmp_path, clock=clock, rule=rule)
+    k2.import_state(state)
+    k2.act(_respawn(tmp_path, 101), FakeTracker({600: 9.0}), reason="horizon")
+    assert k.kills_last_hour() == 1  # the old killer is untouched by the new one's kills
+    assert k2.kills_last_hour() == 2
+
+
+def test_import_of_none_or_empty_state_is_a_fresh_killer(tmp_path):
+    base_tree(tmp_path)
+    k, _ = make(tmp_path)
+    k.import_state(None)
+    assert k.kills_last_hour() == 0
+    k.import_state({})
+    assert k.kills_last_hour() == 0

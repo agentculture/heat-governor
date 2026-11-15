@@ -10,6 +10,11 @@ The fill rate is the least-squares slope of the samples in the last ``window_s``
 one noisy sample moves it only a little. A condition must also hold on two consecutive
 samples before it fires. After a fire the trigger is disarmed until available memory
 recovers above the soft threshold, so one wave of pressure fires once.
+
+``rearm(not_before=t)`` re-arms it explicitly inside a wave (the guard calls it when a fire
+found no victim or the kill was refused). The re-armed trigger still needs a fresh
+``CONFIRM`` streak, and it will not fire before ``not_before``. A recovery above the soft
+threshold clears that hold.
 """
 
 from __future__ import annotations
@@ -67,6 +72,19 @@ class Trigger:
         self._win: deque[tuple[float, float]] = deque()
         self._armed = True
         self._streak = 0
+        self._not_before = float("-inf")
+
+    @property
+    def armed(self) -> bool:
+        """True when the next qualifying streak may fire (a ``rearm`` hold may still apply)."""
+        return self._armed
+
+    def rearm(self, not_before: float = float("-inf")) -> None:
+        """Re-arm inside a wave. The streak restarts, so a fire needs ``CONFIRM`` new
+        qualifying samples, and no fire happens at a sample time before ``not_before``."""
+        self._armed = True
+        self._streak = 0
+        self._not_before = float(not_before)
 
     def step(self, t: float, avail_mib: float) -> Fire | None:
         win = self._win
@@ -76,9 +94,12 @@ class Trigger:
         rate = fill_rate(win)
         if avail_mib >= self.soft_mib:
             self._armed = True
+            self._not_before = float("-inf")
         reason = self._reason(avail_mib, rate)
         self._streak = self._streak + 1 if reason else 0
         if not (reason and self._armed and self._streak >= CONFIRM):
+            return None
+        if t < self._not_before:
             return None
         self._armed = False
         return Fire(t=t, reason=reason, avail_mib=float(avail_mib), rate_mib_s=max(rate, 0.0))
