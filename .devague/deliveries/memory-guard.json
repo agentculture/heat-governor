@@ -2,7 +2,7 @@
   "plan_slug": "memory-guard",
   "schema_version": 2,
   "created": "2026-11-14T21:28:16Z",
-  "updated": "2026-11-15T05:52:56Z",
+  "updated": "2026-11-15T07:04:23Z",
   "deviations": [
     {
       "id": "d1",
@@ -74,7 +74,354 @@
       "seq": 4
     }
   ],
-  "evidence": [],
-  "deltas": [],
+  "evidence": [
+    {
+      "id": "e1",
+      "obligation_ref": "o1",
+      "test_ref": "tests/test_daemon_memory.py::test_level_admit_and_factor_identical_with_and_without_memory; ::test_state_doc_has_mem_guard_only_with_memory_and_clients_still_read_it; tests/test_client_state.py (10 tests)",
+      "behavior_text": "state docs with and without [memory] are identical except mem_guard; client read/wait/Gate behave the same against a doc carrying mem_guard",
+      "contract_text": "mem_guard is optional and additive; level, admit and concurrency_factor are byte-identical with or without it; clients that ignore unknown fields see no change.",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "no behavioral marker or folder in this repo; the obligation's tests were selected by name and run agent-side with pytest at the named commit, all green (2 + 10 passed)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 5
+    },
+    {
+      "id": "e2",
+      "obligation_ref": "o2",
+      "test_ref": "tests/test_recorder_memory.py (7 tests: concurrent writes, reboot mem block, old records, mixed rows, tail across midnight, tail == full scan, tail reads a small fraction)",
+      "behavior_text": "event rows carry 'event'; report() and the records reader parse old ticks, memory events and ticks with 'top'; also checked by hand 2026-11-14: history.py's niced script read 125 lines, skipped 5 event rows, parsed 120 ticks",
+      "contract_text": "every new row type carries an 'event' key; tick rows gain only an optional 'top' list; history.py and report() parse all existing and new rows without error.",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "no behavioral marker or folder in this repo; the obligation's tests were selected by name and run agent-side with pytest at the named commit, all green (7 passed)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 6
+    },
+    {
+      "id": "e3",
+      "obligation_ref": "o3",
+      "test_ref": "tests/test_ship.py -k key_layout/events_land/fetch_listing/postmortem (7) + tests/test_cli_memory_ship.py -k fetch (7)",
+      "behavior_text": "objects land at <prefix>/<machine>/<boot_id>/events|blackbox|postmortem; postmortem under the crashed boot; ship fetch reads exactly that layout from the fake S3",
+      "contract_text": "keys are <prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json, <prefix>/<machine>/<boot_id>/blackbox.jsonl.gz and <prefix>/<machine>/<boot_id>/postmortem.json; ship fetch reads exactly this layout.",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "no behavioral marker or folder in this repo; the obligation's tests were selected by name and run agent-side with pytest at the named commit, all green (7 + 7 passed)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 7
+    },
+    {
+      "id": "e4",
+      "obligation_ref": "o3",
+      "test_ref": "live: heat-governor ship fetch --machine elitemini run on spark (temporary wheel) against MinIO on spark, 2026-11-15T04:36Z",
+      "behavior_text": "fetch found boot 6f20de46..., 1 memory_kill (pid 918094 python3) and a 610-row black box 04:25:58Z-04:35:57Z",
+      "contract_text": "keys are <prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json, <prefix>/<machine>/<boot_id>/blackbox.jsonl.gz and <prefix>/<machine>/<boot_id>/postmortem.json; ship fetch reads exactly this layout.",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed live from a second machine; output recorded in docs/evidence/2026-11-15-memory-guard-live.md",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T04:36:30",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 8
+    },
+    {
+      "id": "e5",
+      "obligation_ref": "o4",
+      "test_ref": "tests/test_sigv4.py (9 tests incl. AWS's documented GET Object example f0e8bdb8...) + tests/test_ship.py round_trip/skew (2)",
+      "behavior_text": "SigV4 matches AWS's published S3 example byte for byte; region 'auto' signs; path-style PUT/GET/List round-trip against a SigV4-verifying fake",
+      "contract_text": "path-style PUT/GET/ListObjectsV2 signed with SigV4 (UNSIGNED-PAYLOAD never used; x-amz-content-sha256 is the payload hash), region configurable incl. 'auto'; the same requests work against all three.",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "no behavioral marker or folder in this repo; the obligation's tests were selected by name and run agent-side with pytest at the named commit, all green (9 + 2 passed)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 9
+    },
+    {
+      "id": "e6",
+      "obligation_ref": "o4",
+      "test_ref": "live: heat-governor ship test on all six boxes + scoped-key probe, MinIO RELEASE.2025-09-07 on spark and arduino, 2026-11-15",
+      "behavior_text": "PUT+GET probe ok from every box; ListObjectsV2 on own bucket ok; PUT and LIST on another bucket refused 403 AccessDenied. NOT run against Cloudflare R2 or AWS S3.",
+      "contract_text": "path-style PUT/GET/ListObjectsV2 signed with SigV4 (UNSIGNED-PAYLOAD never used; x-amz-content-sha256 is the payload hash), region configurable incl. 'auto'; the same requests work against all three.",
+      "evidence_type": "integration",
+      "strength": "execution",
+      "strength_basis": "real S3-compatible store (MinIO) only; R2/AWS compatibility rests on the AWS-example signature test",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T06:18:45",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 10
+    },
+    {
+      "id": "e7",
+      "obligation_ref": "o5",
+      "test_ref": "tests/test_memkill.py + tests/test_memkill_boundary.py (48 tests incl. a real 'sleep 60' child killed via the real pidfd path, bystander child untouched)",
+      "behavior_text": "other-uid/protected/self/parent-chain/under-minimum never chosen; pid reuse refused; SIGKILL via pidfd only; budget 3/hour; repeats counted; choice by growth",
+      "contract_text": "only processes of the daemon's own uid, never protected or below min_victim_mib, pinned by pidfd, SIGKILL only, within the kill budget; every kill and would-kill writes its event before the next poll.",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "no behavioral marker or folder in this repo; the obligation's tests were selected by name and run agent-side with pytest at the named commit, all green (48 passed)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 11
+    },
+    {
+      "id": "e8",
+      "obligation_ref": "o5",
+      "test_ref": "live: controlled runaway (python3, ~1.2 GB/s, 36 GB MemoryMax scope) on the EliteMini, 0.17.0 PR head, twice (04:35Z and 06:16Z)",
+      "behavior_text": "guard SIGKILLed the own-uid runaway on the horizon rule at 8748 / 8769 MiB available, max tick gap 1.0 s, no kernel OOM; event recorded before the next poll and shipped in the same second",
+      "contract_text": "only processes of the daemon's own uid, never protected or below min_victim_mib, pinned by pidfd, SIGKILL only, within the kill budget; every kill and would-kill writes its event before the next poll.",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed on a live machine; records and kernel log checked; docs/evidence/2026-11-15-memory-guard-live.md",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T06:16:28",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 12
+    },
+    {
+      "id": "e9",
+      "obligation_ref": "o6",
+      "test_ref": "tests/test_config_memory_ship.py + tests/test_config_memory_allow.py (111 tests)",
+      "behavior_text": "every [memory]/[ship]/[[memory.allow]] key's type and range checked, unknown keys rejected with the known-key list, absent sections behaviour-neutral",
+      "contract_text": "unknown keys and out-of-range values are rejected by config check and by a live reload (the running config stays in force), like every other section.",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "no behavioral marker or folder in this repo; the obligation's tests were selected by name and run agent-side with pytest at the named commit, all green (111 passed); the live-reload half was observed: a 0.16 daemon rejected the new sections and kept its last good config (governor.log 04:34:21Z)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 13
+    },
+    {
+      "id": "e10",
+      "obligation_ref": "o7",
+      "test_ref": "tests/test_cli_memory_ship.py (35 tests) + teken cli doctor . --strict (exit 0)",
+      "behavior_text": "memory/ship verbs: --json, stdout/stderr split, exit codes 0/1/2, bare noun prints overview, every catalog path resolves",
+      "contract_text": "every verb takes --json, writes results to stdout and errors to stderr, exits 0/1/2 per _errors.py, and has an explain entry.",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "no behavioral marker or folder in this repo; the obligation's tests were selected by name and run agent-side with pytest at the named commit, all green (35 passed; teken doctor exit 0)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 14
+    },
+    {
+      "id": "e11",
+      "obligation_ref": "o8",
+      "test_ref": "tests/test_memprocs.py -k redact (3) + tests/test_ship.py -k secret/world (3) + tests/test_memkill.py -k redact/raw (1)",
+      "behavior_text": "cmdline values after token/key/secret/password flags, KEY=VALUE args, Authorization headers and AKIA shapes masked, truncated to 512; environ never read; credentials absent from logs, spool, exceptions; raw cmdline never stored in events",
+      "contract_text": "no object contains environment variables, credentials, or cmdline values following token/key/secret/password-style flags; cmdlines are truncated to 512 chars.",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "no behavioral marker or folder in this repo; the obligation's tests were selected by name and run agent-side with pytest at the named commit, all green (3 + 3 + 1 passed)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 15
+    },
+    {
+      "id": "e12",
+      "obligation_ref": "o9",
+      "test_ref": "live: controlled runaway on the EliteMini (36 GB MemoryMax scope), 2026-11-15T04:35:48Z, re-run 06:16Z on the review-fixed build",
+      "behavior_text": "killed at 8748 MiB available (re-run 8769), max tick gap 1.0 s, memory_kill object written to MinIO in the same second as the event",
+      "contract_text": "a ~1.2 GB/s own-user allocator is killed with >= 2 GB available, no governor tick gap > 2 s, and its memory_kill event is in S3 within 10 s",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed live twice; numbers from the records, kernel log and MinIO lastModified",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T06:16:28",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 16
+    },
+    {
+      "id": "e13",
+      "obligation_ref": "o10",
+      "test_ref": "tests/test_memtrigger.py::test_replay_lead_time_before_danger (fixture tests/data/memory-2026-11-14.csv) + live: heat-governor memory replay over records 20261110-13",
+      "behavior_text": "5 fires, leads 17.6/7/5/6/4 s, 5423-7097 MiB available at the fire; quiet days 0 fires over 85948/86390/86391/86391 samples",
+      "contract_text": "on the 2026-11-14 incident the trigger fires on all five waves >= 4 s before avail < 2048 MiB with >= 5 GB available, and 0 times over the 2026-11-10..13 records",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "replay test green at the named commit; quiet-day replay run with the shipped CLI on the real record files (too large to commit)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T07:03:15",
+        "commit": "91aa846"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 17
+    }
+  ],
+  "deltas": [
+    {
+      "id": "b1",
+      "kind": "amended",
+      "behavior_text": "trigger acceptance: '>= 15 s before 2048 MiB' became '>= 4 s before, with >= 5 GB available at the fire' (defaults unchanged)",
+      "caused_by": [
+        "d1"
+      ],
+      "evidence_refs": [
+        "e13"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b2",
+      "kind": "added",
+      "behavior_text": "run passes [memory]/[ship] to the daemon even with [daemon] reload = false",
+      "caused_by": [
+        "d2"
+      ],
+      "evidence_refs": [
+        "e9"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b3",
+      "kind": "added",
+      "behavior_text": "absolute per-platform memory limits (floor_mib/soft_mib; spark/thor 3/6 GB, orin 2/4 GB, ventunoq 1/2 GB) and kill enabled on all six boxes",
+      "caused_by": [
+        "d3"
+      ],
+      "evidence_refs": [
+        "e6",
+        "e8"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b4",
+      "kind": "added",
+      "behavior_text": "blame of any user's top growers on every fire, and [[memory.allow]] acceptable boundaries (within: never blamed/chosen; over: first; far over: acted on before memory runs low)",
+      "caused_by": [
+        "d4"
+      ],
+      "evidence_refs": [
+        "e7"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b5",
+      "kind": "amended",
+      "behavior_text": "victim choice is by growth: a big idle process is never chosen over a growing group; floor fallback to the biggest only when nothing grows (code review #1)",
+      "caused_by": [
+        "c4"
+      ],
+      "evidence_refs": [
+        "e7",
+        "e8"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b6",
+      "kind": "added",
+      "behavior_text": "a fire that found no victim or a refused kill re-arms with backoff 1 s doubling to 60 s (code review #2)",
+      "caused_by": [
+        "c3"
+      ],
+      "evidence_refs": [
+        "e7"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b7",
+      "kind": "amended",
+      "behavior_text": "mlockall locks current pages only (MCL_CURRENT), not future allocations (code review #4)",
+      "caused_by": [
+        "c14"
+      ],
+      "evidence_refs": [],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    }
+  ],
   "supersessions": []
 }

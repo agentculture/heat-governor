@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-11-15
+
+### Added
+
+- docs/deliveries/2026-11-14-memory-guard.md: delivery summary for the memory guard plan (planned vs actual for t1-t13, deviations d1-d4, code review fixes, evidence, claims with confidence, remaining work)
+- devague delivery ledger: evidence e1-e13 for obligations o1-o10 (o9/o10 cover success signals c26/c27), behavioural deltas b1-b7, all proposed for operator adjudication
+
 ## [0.17.0] - 2026-11-15
 
 ### Added
