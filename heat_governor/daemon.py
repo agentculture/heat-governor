@@ -770,8 +770,13 @@ class Daemon:
             return
         self.opts.memory = rule
         if self._started:
+            # carry the rolling kill budget and repeat history across the rebuild (review #6):
+            # an unrelated edit must not re-open a budget that was meant as a safety stop
+            state = self.guard.killer.export_state() if self.guard is not None else None
             self._stop_guard()
             self._start_guard()
+            if state is not None and self.guard is not None:
+                self._fenced("memory guard state", lambda: self.guard.killer.import_state(state))
             if rule is None:
                 self._log("memory guard: off")
 
@@ -896,7 +901,7 @@ class Daemon:
             pid=os.getpid(),
         )
         if entry is not None:
-            self.shipper.submit_postmortem(entry)
+            self.shipper.submit_postmortem(entry, boot_id=entry.get("previous_boot"))
             self._log(
                 f"ship: postmortem queued for unclean boot {entry['previous_boot']} "
                 f"(last record {entry['last_record_utc']})"

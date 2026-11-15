@@ -511,3 +511,35 @@ def test_stop_joins_promptly_even_with_long_poll(tmp_path):
     guard.stop()
     assert time.monotonic() - began < 0.5
     assert guard._thread is None
+
+
+def _hold(guard, clock, proc, avail_mib, seconds):
+    for _ in range(int(seconds / guard.rule.poll_s)):
+        write_meminfo(proc, avail_mib)
+        guard.step()
+        clock.mono += guard.rule.poll_s
+
+
+def test_persistent_no_victim_backs_off_exponentially_to_a_cap(tmp_path):
+    """Memory eaten by something we may not kill (a root container) keeps the box below the
+    floor: the retry must back off (1, 2, 4 ... 60 s), not log a would-kill every second."""
+    guard, clock, fake, events, _, proc, _ = make(tmp_path)
+    shutil.rmtree(proc / "777")
+    _hold(guard, clock, proc, 500.0, 300)
+    would = named(events, "memory_would_kill")
+    gaps = _gaps(would)
+    assert len(would) <= 12  # 1+2+4+8+16+32+60+60+60+60 ~ 300 s
+    for i, gap in enumerate(gaps):
+        assert gap >= min(2.0**i, 60.0) - 0.01, gaps
+    assert max(gaps) <= 61.0
+
+
+def test_backoff_resets_after_memory_recovers(tmp_path):
+    guard, clock, fake, events, _, proc, _ = make(tmp_path)
+    shutil.rmtree(proc / "777")
+    _hold(guard, clock, proc, 500.0, 40)  # several backed-off retries
+    _hold(guard, clock, proc, 40_000.0, 5)  # recovery above soft re-arms and resets
+    before = len(named(events, "memory_would_kill"))
+    _hold(guard, clock, proc, 500.0, 4)
+    after = named(events, "memory_would_kill")[before:]
+    assert len(after) >= 2  # first fire + a 1 s retry, not a 16 s+ backed-off one

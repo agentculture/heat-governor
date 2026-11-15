@@ -41,14 +41,16 @@ class FakeShipper:
         self.kw = kw
         self.submitted: list[tuple[str, dict]] = []
         self.postmortems: list[dict] = []
+        self.postmortem_boots: list[str | None] = []
         self.started = self.stopped = False
 
     def submit(self, kind: str, record: dict, *, t: float | None = None) -> str:
         self.submitted.append((kind, record))
         return f"key/{kind}"
 
-    def submit_postmortem(self, record: dict) -> str:
+    def submit_postmortem(self, record: dict, *, boot_id: str | None = None) -> str:
         self.postmortems.append(record)
+        self.postmortem_boots.append(boot_id)
         return "key/postmortem"
 
     def start(self) -> None:
@@ -469,6 +471,8 @@ def test_unclean_previous_boot_submits_a_postmortem_once(tmp_path):
     pm = pms[0]
     assert pm["previous_boot"] == "boot-old"
     assert pm["new_boot"] == THIS_BOOT
+    # review #8: keyed under the crashed boot, where ship fetch looks for it
+    assert rig.shippers[0].postmortem_boots == ["boot-old"]
     assert [e["event"] for e in pm["events"]] == ["memory_kill"]
     assert pm["max_temp_c"] == 99.0
     rig.rewrite(SHIP_NAMED.replace("box1", "box2"))  # a reload rebuilds the shipper
@@ -540,3 +544,17 @@ def test_a_stuck_recorder_never_blocks_the_guard_thread(tmp_path):
         release.set()
     rig.daemon.memsink.flush()
     assert any(r.get("event") == "oom_kill" for r in rig.rows())
+
+
+def test_reload_keeps_the_kill_budget_and_repeat_history(tmp_path):
+    """Review #6: an unrelated [memory] edit rebuilds the guard but must not reset the
+    rolling kill budget (a safety stop) or the repeat-offender counts."""
+    rig = Rig(tmp_path, MEMORY)
+    rig.daemon.start()
+    now = rig.clock.monotonic()
+    rig.guard.killer.import_state({"kills": (now, now, now), "repeats": {}})
+    old = rig.daemon.guard
+    rig.rewrite(MEMORY + "top_n = 5\n")
+    assert rig.daemon.guard is not old  # rebuilt
+    assert rig.daemon.guard.rule.top_n == 5
+    assert rig.daemon.guard.killer.kills_last_hour(now) == 3

@@ -20,7 +20,8 @@ Each ``step()``:
    its events, re-stamped with wall-clock ``t``. When that fire killed nothing because no
    victim was found or the kill was refused, the trigger is re-armed (``Trigger.rearm``)
    so the guard tries again in the same wave: after a fresh ``CONFIRM`` streak and no sooner
-   than ``max(REFIRE_POLLS x poll_s, REFIRE_MIN_S)`` (1 s by default). ``record-only`` and
+   than ``max(REFIRE_POLLS x poll_s, REFIRE_MIN_S)`` (1 s by default), doubling on each
+   consecutive retry up to ``REFIRE_MAX_S`` (60 s). ``record-only`` and
    ``budget`` fires do not re-arm, so they stay one per wave;
 5. reads ``/proc/vmstat`` ``oom_kill`` and the ``oom_kill`` line of each watched cgroup's
    ``memory.events``. The first read is the baseline; each later increase emits one
@@ -51,6 +52,10 @@ EV_OOM = "oom_kill"
 # appears a moment later) without a would-kill row on every poll for the rest of the wave.
 REFIRE_POLLS = 4
 REFIRE_MIN_S = 1.0
+# Consecutive retries in one wave back off exponentially (gap x 2 each time) up to
+# REFIRE_MAX_S, so memory eaten by something the guard may not kill (a root container)
+# yields ~10 would-kill rows in 5 minutes, not 300. A kill or a recovery resets it.
+REFIRE_MAX_S = 60.0
 RETRY_WHY_NOT = ("no-victim", "refused")
 
 
@@ -145,6 +150,7 @@ class MemGuard:
         self._trigger = None
         self._total_mib: float | None = None
         self._armed = True
+        self._retries = 0  # consecutive no-victim/refused retries in this wave
         self._last_top: float | None = None
         self._last_kill: dict | None = None
         self._counters: dict[str, int] = {}
@@ -279,6 +285,8 @@ class MemGuard:
             )
             self._total_mib = total
         soft_mib = self._limits[1]
+        if avail >= soft_mib:
+            self._retries = 0  # recovered: the next wave starts with a short retry gap
         fire = self._trigger.step(mono, avail)
         self._armed = self._trigger.armed
         low = avail < soft_mib
@@ -301,9 +309,13 @@ class MemGuard:
         if fire is not None:
             events = self.killer.act(procs, self.tracker, fire.reason, mono)
             if self._should_retry(events):
-                gap = max(REFIRE_POLLS * float(r.poll_s), REFIRE_MIN_S)
+                base = max(REFIRE_POLLS * float(r.poll_s), REFIRE_MIN_S)
+                gap = min(base * 2.0**self._retries, REFIRE_MAX_S)
+                self._retries += 1
                 self._trigger.rearm(not_before=mono + gap)
                 self._armed = self._trigger.armed
+            elif any(ev.get("event") == EV_KILL for ev in events):
+                self._retries = 0
             for ev in events:
                 ev = dict(ev)
                 ev["t"] = wall  # memkill stamps its monotonic clock; records use epoch
