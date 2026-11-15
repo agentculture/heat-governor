@@ -179,7 +179,7 @@ wheels = [
 
 [[package]]
 name = "heat-governor"
-version = "0.18.0"
+version = "0.18.1"
 source = { editable = "." }
 
 [package.dev-dependencies]

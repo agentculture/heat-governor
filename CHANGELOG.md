@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-11-16
+
+### Added
+
+- `docs/evidence/2026-11-16-boundaries-read-live.md`: live check of the read side on the EliteMini reader (all 6 machines carry `mem_guard`; the Boundaries tab shows each guard).
+
+### Changed
+
+- `CLAUDE.md` state table: the read side is live on the EliteMini reader; the five remote daemons still run 0.17.0.
+
 ## [0.18.0] - 2026-11-15
 
 ### Added

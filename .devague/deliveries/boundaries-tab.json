@@ -2,7 +2,7 @@
   "plan_slug": "boundaries-tab",
   "schema_version": 2,
   "created": "2026-11-15T21:25:02Z",
-  "updated": "2026-11-15T21:36:41Z",
+  "updated": "2026-11-15T23:04:56Z",
   "deviations": [
     {
       "id": "d1",
@@ -30,7 +30,27 @@
       "seq": 2
     }
   ],
-  "evidence": [],
+  "evidence": [
+    {
+      "id": "e1",
+      "obligation_ref": "o16",
+      "test_ref": "docs/evidence/2026-11-16-boundaries-read-live.md (live read of /api/fleet and the Boundaries tab on the EliteMini reader)",
+      "behavior_text": "all 6 machines carry mem_guard in /api/fleet and the Boundaries tab shows each machine's guard state; the 'within one 3 s poll' timing was not measured, the first read was 14 s after the reader restarted",
+      "contract_text": "After PR 1, /api/fleet returns mem_guard for all 6 machines and the Boundaries tab shows each machine's guard state within 1 poll of the reader",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "one live observation on 2026-11-16 after upgrading the EliteMini to 0.18.0; presence observed for 6 of 6 machines, timing not measured",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-15T22:32:14Z",
+        "commit": "100cc1797d6515dc8dae3b1a4fb8f9fe1cc69fb9"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 3
+    }
+  ],
   "deltas": [],
   "supersessions": []
 }
