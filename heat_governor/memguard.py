@@ -17,7 +17,11 @@ Each ``step()``:
    the soft limit;
 4. on a trigger fire hands the scan to ``memkill.MemKiller.act`` (which kills with
    ``action = "kill"`` or returns ``memory_would_kill`` with ``action = "record"``) and emits
-   its events, re-stamped with wall-clock ``t``;
+   its events, re-stamped with wall-clock ``t``. When that fire killed nothing because no
+   victim was found or the kill was refused, the trigger is re-armed (``Trigger.rearm``)
+   so the guard tries again in the same wave: after a fresh ``CONFIRM`` streak and no sooner
+   than ``max(REFIRE_POLLS x poll_s, REFIRE_MIN_S)`` (1 s by default). ``record-only`` and
+   ``budget`` fires do not re-arm, so they stay one per wave;
 5. reads ``/proc/vmstat`` ``oom_kill`` and the ``oom_kill`` line of each watched cgroup's
    ``memory.events``. The first read is the baseline; each later increase emits one
    ``oom_kill`` event per counter.
@@ -35,13 +39,19 @@ import time
 from pathlib import Path
 
 from heat_governor import memprocs
-from heat_governor.memkill import EV_KILL, MemKiller
+from heat_governor.memkill import EV_KILL, EV_WOULD, MemKiller
 from heat_governor.memtrigger import Trigger
 
 MCL_CURRENT = 1
-MCL_FUTURE = 2
 EV_TOP = "memory_top"
 EV_OOM = "oom_kill"
+# A fire that found no victim or whose kill was refused re-arms the trigger, but the next
+# fire waits at least max(REFIRE_POLLS x poll_s, REFIRE_MIN_S): 1 s at the 0.25 s default.
+# That leaves a refused kill a retry every second (a pid reused mid-kill, a victim that
+# appears a moment later) without a would-kill row on every poll for the rest of the wave.
+REFIRE_POLLS = 4
+REFIRE_MIN_S = 1.0
+RETRY_WHY_NOT = ("no-victim", "refused")
 
 
 def _libc_mlockall(flags: int) -> int:
@@ -174,12 +184,16 @@ class MemGuard:
 
     def _lock_memory(self) -> None:
         try:
-            rc = self._mlockall(MCL_CURRENT | MCL_FUTURE)
+            # MCL_CURRENT only: lock the interpreter, modules and guard code resident now.
+            # MCL_FUTURE would lock and fault in every later allocation (thread stacks, HTTP
+            # threads, parse buffers): 420-590 MB locked against ~100 MB RSS on the live
+            # daemons. The unit's MemoryMin covers residency beyond the start-up pages.
+            rc = self._mlockall(MCL_CURRENT)
         except Exception as e:  # noqa: BLE001 - best effort that must never fail start()
             self._log(f"mlockall: unavailable ({e}), continuing")
             return
         if rc == 0:
-            self._log("mlockall: ok")
+            self._log("mlockall: ok (current pages)")
         else:
             self._log(f"mlockall: refused errno={ctypes.get_errno()}, continuing")
 
@@ -265,11 +279,8 @@ class MemGuard:
             )
             self._total_mib = total
         soft_mib = self._limits[1]
-        if avail >= soft_mib:
-            self._armed = True  # mirrors Trigger's re-arm rule
         fire = self._trigger.step(mono, avail)
-        if fire is not None:
-            self._armed = False
+        self._armed = self._trigger.armed
         low = avail < soft_mib
         routine = self._last_top is None or mono - self._last_top >= float(r.top_every_s)
         procs = None
@@ -288,7 +299,12 @@ class MemGuard:
                 }
             )
         if fire is not None:
-            for ev in self.killer.act(procs, self.tracker, fire.reason, mono):
+            events = self.killer.act(procs, self.tracker, fire.reason, mono)
+            if self._should_retry(events):
+                gap = max(REFIRE_POLLS * float(r.poll_s), REFIRE_MIN_S)
+                self._trigger.rearm(not_before=mono + gap)
+                self._armed = self._trigger.armed
+            for ev in events:
                 ev = dict(ev)
                 ev["t"] = wall  # memkill stamps its monotonic clock; records use epoch
                 ev.setdefault("avail_mib", round(fire.avail_mib, 1))
@@ -302,6 +318,17 @@ class MemGuard:
                         "repeat": ev.get("repeat"),
                     }
                 self._send(ev)
+
+    @staticmethod
+    def _should_retry(events: list[dict]) -> bool:
+        """True when a fire killed nothing because no victim was found or the kill was
+        refused; never for ``record-only`` or ``budget``, which would repeat every poll."""
+        if any(ev.get("event") == EV_KILL for ev in events):
+            return False
+        return any(
+            ev.get("event") == EV_WOULD and str(ev.get("why_not", "")).startswith(RETRY_WHY_NOT)
+            for ev in events
+        )
 
     def _oom_counters(self, wall: float) -> None:
         sources = [("vmstat", self.proc_root / "vmstat")]

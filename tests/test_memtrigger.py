@@ -174,3 +174,65 @@ def test_wave_shapes_match_before_state():
             if t1 - t0 <= 1.5:
                 peak = max(peak, (a0 - a1) / (t1 - t0))
     assert peak >= 1100
+
+
+# --- explicit re-arm after a fire that did not kill (review finding #2) -----------------------
+
+
+def _fired(trig, t0=0.0, n=3, avail=2000):
+    """Step a flat floor series until it fires; return the next t to use."""
+    fires = []
+    t = t0
+    for _ in range(n):
+        f = trig.step(t, avail)
+        if f is not None:
+            fires.append(f)
+        t += 0.25
+    assert len(fires) == 1
+    return t
+
+
+def test_armed_property_tracks_fire_and_recovery():
+    trig = Trigger(TOTAL)
+    assert trig.armed is True
+    t = _fired(trig)
+    assert trig.armed is False
+    trig.step(t, 20_000)  # back above soft
+    assert trig.armed is True
+
+
+def test_rearm_needs_a_fresh_confirm_streak():
+    trig = Trigger(TOTAL)
+    t = _fired(trig)
+    trig.rearm()
+    assert trig.armed is True
+    assert trig.step(t, 2000) is None  # streak restarts at 1: CONFIRM is 2
+    f = trig.step(t + 0.25, 2000)
+    assert f is not None
+    assert f.reason == "floor"
+    assert trig.armed is False
+
+
+def test_rearm_not_before_holds_the_next_fire():
+    trig = Trigger(TOTAL)
+    t = _fired(trig)
+    trig.rearm(not_before=t + 1.0)
+    fires = []
+    for i in range(8):  # 2 s of qualifying polls at 0.25 s
+        if (f := trig.step(t + 0.25 * i, 2000)) is not None:
+            fires.append(f)
+    assert len(fires) == 1
+    assert fires[0].t >= t + 1.0
+
+
+def test_recovery_clears_a_rearm_hold():
+    trig = Trigger(TOTAL)
+    t = _fired(trig)
+    trig.rearm(not_before=t + 100.0)
+    trig.step(t, 20_000)  # recovered: a new wave owes nothing to the old hold
+    assert trig.step(t + 0.25, 2000) is None
+    assert trig.step(t + 0.5, 2000) is not None
+
+
+def test_without_rearm_one_fire_per_wave_still_holds():
+    assert len(run([(i * 0.25, 2000) for i in range(40)])) == 1
