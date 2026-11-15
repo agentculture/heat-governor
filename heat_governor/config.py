@@ -233,6 +233,8 @@ class AllowRule:
     cmdline: str | None = None
     cgroup: str | None = None
     scope: str = "process"
+    # The file the rule came from. Never a TOML key: the loader sets it, not the user.
+    source: str = "config.toml"
 
 
 @dataclass(frozen=True)

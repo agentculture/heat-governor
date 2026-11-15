@@ -383,3 +383,95 @@ def test_status_text_memory_without_ddr_or_total():
     assert "ddr" not in text
     cols = {line.index("cool") for line in text.splitlines()[:2]}
     assert len(cols) == 1  # level column stays aligned
+
+
+GUARD = {
+    "action": "kill",
+    "armed": True,
+    "kills_last_hour": 2,
+    "avail_mib": 9000,
+    "boundaries": [{"name": "a", "max_mib": 1}, {"name": "b", "max_mib": 2}, {"name": "c"}],
+}
+
+
+def _guard_snap(*guards):
+    machines = []
+    for i, g in enumerate(guards):
+        th = {"admit": True, "temp_c": 48.0, "level": "cool", "mem_guard": g}
+        machines.append({"name": f"m{i}", "state": "ok", "age_s": 1.0, "thermal": th, "health": {}})
+    return {"reader": {}, "machines": machines}
+
+
+def test_status_json_carries_mem_guard_summary():
+    from heat_governor.cli._commands.mesh import build_status
+
+    rows = {r["name"]: r for r in build_status(_guard_snap(GUARD, None), "x", None)["machines"]}
+    assert rows["m0"]["mem_guard"] == {
+        "action": "kill",
+        "armed": True,
+        "kills_last_hour": 2,
+        "boundary_count": 3,
+        "stale": False,
+    }
+    assert rows["m1"]["mem_guard"] is None
+    assert rows["m0"]["name"] == "m0"  # existing keys are kept
+
+
+def test_status_json_mem_guard_without_boundaries_counts_zero():
+    from heat_governor.cli._commands.mesh import build_status
+
+    g = {"action": "record", "armed": False, "kills_last_hour": 0}
+    row = build_status(_guard_snap(g), "x", None)["machines"][0]
+    assert row["mem_guard"]["boundary_count"] == 0
+
+
+def test_status_text_has_one_guard_column_dash_when_absent():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    text = render_status(build_status(_guard_snap(GUARD, None), "x", None))
+    l0, l1 = text.splitlines()[:2]
+    assert "guard kill armed 2k 3b" in l0
+    assert "guard -" in l1
+    assert l0.index("guard") == l1.index("guard")  # column stays aligned
+    assert l0.index("v") > 0
+    assert l0.index("guard") < l0.rindex(" v")
+
+
+def test_status_guard_of_a_machine_that_is_not_ok_is_marked_as_last_read():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    snap = _guard_snap(GUARD, GUARD)
+    snap["machines"][1]["state"] = "unreachable"
+    st = build_status(snap, "x", None)
+    rows = {r["name"]: r for r in st["machines"]}
+    assert rows["m0"]["mem_guard"]["stale"] is False
+    assert rows["m1"]["mem_guard"]["stale"] is True
+    lines = {ln.split()[0]: ln for ln in render_status(st).splitlines()[:2]}
+    assert "guard (last) kill armed 2k 3b" in lines["m1"]
+    assert "(last)" not in lines["m0"]
+
+
+def test_status_guard_is_unknown_when_the_snapshot_has_no_mem_guard_key():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    snap = _guard_snap(None, None)
+    del snap["machines"][0]["thermal"]["mem_guard"]  # a mesh serve older than 0.18 drops the key
+    st = build_status(snap, "x", None)
+    rows = {r["name"]: r for r in st["machines"]}
+    assert rows["m0"]["mem_guard_known"] is False
+    assert rows["m1"]["mem_guard_known"] is True
+    lines = {ln.split()[0]: ln for ln in render_status(st).splitlines()[:2]}
+    assert "guard ?" in lines["m0"]
+    assert "guard -" in lines["m1"]
+
+
+def test_status_version_column_stays_aligned_for_a_long_guard_value():
+    from heat_governor.cli._commands.mesh import build_status, render_status
+
+    long = {"action": "record", "armed": False, "kills_last_hour": 3, "boundaries": [{}] * 12}
+    snap = _guard_snap(long, None)
+    for m in snap["machines"]:
+        m["thermal"]["version"] = "0.18.0"
+    l0, l1 = render_status(build_status(snap, "x", None)).splitlines()[:2]
+    assert "guard record unarmed 3k 12b" in l0
+    assert l0.index(" v0.18.0") == l1.index(" v0.18.0")

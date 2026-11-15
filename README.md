@@ -260,6 +260,10 @@ appears only where the board exposes one (the VENTUNO Q does; Jetson and DGX
 Spark boards do not, and report null). The page, `mesh status` (`mem 91% of 122G`,
 plus `ddr 46C` where present) and the trend tooltip and table show it.
 
+The dashboard's **Boundaries** tab (`#boundaries`) lists each machine's memory guard (action,
+limits, kills) and every `[[memory.allow]]` rule with its matchers, anonymous-memory usage and
+state. It is read-only; `mesh status` shows the same guard in one column (`guard kill armed 2k 3b`).
+
 For agents, `heat-governor mcp` is a read-only MCP server over stdio. Add it to
 a client as a stdio command, for example:
 

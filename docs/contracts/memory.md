@@ -114,8 +114,10 @@ scope = "process"                  # "process" (default) or "total" across all m
   process is killed (same protections, budget and pidfd path; `reason: "boundary"`); one the
   guard may not kill gets a single `memory_would_kill` with `why_not: "boundary: not killable
   (uid N)"`. Either happens once per process.
-- `min_victim_mib` still applies: a rule whose `max_mib` is below it blames and records but
-  never kills.
+- `min_victim_mib` still applies, per process: a match using less anonymous memory than
+  `min_victim_mib` is blamed and recorded but never killed, whatever the rule's `max_mib`.
+  So a rule whose `max_mib` is below `min_victim_mib` only kills a match once that process
+  has grown past `min_victim_mib`.
 
 ## Blame
 
@@ -167,7 +169,7 @@ MinIO), signing requests itself (SigV4, no third-party library):
 - `machine` is `[ship] machine`, else the `transport = "local"` entry of `fleet.toml`. It is
   never the kernel hostname. Without either, shipping is disabled.
 - Credentials come from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, else the `profile` in
-  `~/.aws/credentials` (keep it mode 600). They are never written to records, logs or uploads.
+  the AWS shared credentials file (`.aws/credentials` in the home directory; keep it mode 600). They are never written to records, logs or uploads.
 - `http://` endpoints are accepted only for loopback and tailnet (100.64.0.0/10) hosts; use
   `https://` for anything else.
 - Nothing on the guard's thread waits on disk or the network: its events are handed to a
@@ -210,7 +212,7 @@ action = "kill"          # default "record": never kills
 enabled = true
 endpoint = "http://<spark-tailnet-ip>:9000"   # MinIO on the tailnet; https for R2/AWS
 bucket = "heat-governor"
-profile = "heat-governor"                     # a [heat-governor] profile in ~/.aws/credentials
+profile = "heat-governor"                     # a [heat-governor] profile in the AWS credentials file
 machine = "elitemini"
 ```
 

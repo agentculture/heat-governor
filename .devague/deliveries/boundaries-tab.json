@@ -1,0 +1,36 @@
+{
+  "plan_slug": "boundaries-tab",
+  "schema_version": 2,
+  "created": "2026-11-15T21:25:02Z",
+  "updated": "2026-11-15T21:36:41Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "t4's fourth criterion says a rule whose max_mib is under min_victim_mib renders as blamed-never-killed. The page instead says 'under 2.0 GiB (min_victim_mib) a match is blamed, never killed', because the guard compares each process's anonymous memory with min_victim_mib (memkill.py:255), not the rule's max_mib; a process over such a rule is killable once it passes min_victim_mib.",
+      "task_ref": "t4",
+      "reason": "the plan text came from docs/contracts/memory.md:117-118, which states the rule loosely; the code is the authority",
+      "affects": [
+        "t5",
+        "t16"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "t1 edited tests/test_memboundary.py, tests/test_memguard.py and tests/test_cli_memory_ship.py, which its instruction did not list as owned: adding keys to the boundary entry broke exact-equality assertions in the first two, and it added the memory status test to the third.",
+      "task_ref": "t1",
+      "reason": "the instruction's ownership list missed the existing exact-equality tests",
+      "affects": [],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 2
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}

@@ -142,8 +142,12 @@ Machines come from `fleet.toml` beside `config.toml` (format:
 
 - `mesh overview` -- describe this noun.
 - `mesh status [--fleet PATH] [--url URL]` -- name, state (ok / stale /
-  unreachable), age in seconds, temperature, level, admit, version and last
-  error per machine, hottest first. It asks a running `mesh serve`
+  unreachable), age in seconds, temperature, level, admit, memory guard
+  (`guard kill armed 2k 3b`: action, armed, kills in the last hour, boundary
+  count; `guard -` when the daemon reports none, `guard ?` when the answering
+  `mesh serve` is older than 0.18 and cannot say, `guard (last) ...` when the
+  machine is not ok and the values are the last ones read), version and last error per
+  machine, hottest first. It asks a running `mesh serve`
   (`/api/fleet`, 2 s) and otherwise reads every machine once, concurrently
   (about timeout_s + 1 s at most). `source` says which. Exit 0 when the read
   worked (an unreachable box is data); 2 when nothing could be read; 1 for a

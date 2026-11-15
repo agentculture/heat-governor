@@ -247,6 +247,23 @@ i.key { display:inline-block; width:14px; height:3px; border-radius:2px; margin-
 .lvrow .pct { color:var(--ink-faint); font-size:.76rem; text-align:right; font-variant-numeric:tabular-nums }
 @media (max-width:600px){ .lvrow { grid-template-columns:90px minmax(0,1fr) } .lvrow .pct { display:none } }
 
+/* boundaries: usage bar (solid boundary mark, dashed far-over mark) and a left-aligned rules table */
+.ubar { position:relative; height:6px; border-radius:999px; background:var(--raise); margin:4px 0 6px }
+.ubar .fill { position:absolute; left:0; top:0; bottom:0; border-radius:999px; background:var(--m) }
+.ubar .mx { position:absolute; top:-4px; bottom:-4px; width:2px; margin-left:-1px; border-radius:1px; background:var(--ink-soft) }
+.ubar .far { position:absolute; top:-4px; bottom:-4px; margin-left:-1px; border-left:2px dashed var(--hot) }
+table.rules { width:100%; border-collapse:collapse; font-size:.84rem; font-variant-numeric:tabular-nums }
+.rules th { text-align:left; font-size:.7rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap }
+.rules td { text-align:left; padding:12px 10px; border-bottom:1px solid var(--line); vertical-align:middle }
+.rules tr:last-child td { border-bottom:0 }
+.rules .rn { font-weight:700 }
+.rules .mt { display:flex; gap:4px 10px; flex-wrap:wrap; max-width:260px }
+.rules .usage { min-width:200px }
+.rules .note { font-size:.74rem; color:var(--ink-faint) }
+.idle { --m:var(--ink-faint) }
+.status.idle::before, .chip.idle::before { background:transparent; border:1.5px dashed var(--ink-faint); box-shadow:none }
+.bcard.unreachable, .bcard.stale, .bcard.unsupported { border-style:dashed; background:transparent }
+
 /* heat aura: grows with level; only critical moves */
 .lane.warm, .tile.warm { box-shadow:0 0 26px -14px var(--warm) }
 .lane.hot, .tile.hot { border-color:color-mix(in srgb,var(--hot) 30%,transparent); box-shadow:0 0 34px -12px var(--hot) }
@@ -281,8 +298,8 @@ const store = { get(k, d) { try { return localStorage.getItem(k) || d; } catch (
 const PLATFORM_LABEL = { ventunoq:"VENTUNO Q", spark:"Spark", thor:"Thor", orin:"Orin", nano:"Orin Nano", generic:"Generic", windows:"Windows" };
 const titleCase = s => String(s || "unknown").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const platLabel = p => PLATFORM_LABEL[p] || titleCase(p);
-// Elder Futhark initial of the machine's name: c→ᚲ, s→ᛋ, th→ᚦ, o→ᛟ, n→ᚾ, m→ᛗ, h→ᚺ, g→ᚷ
-const rune = n => n.startsWith("th") ? "ᚦ" : ({ c:"ᚲ", s:"ᛋ", o:"ᛟ", n:"ᚾ", m:"ᛗ", h:"ᚺ", g:"ᚷ" })[n[0]] || "ᚠ";
+// Elder Futhark initial of the machine's name: c→ᚲ, s→ᛋ, th→ᚦ, o→ᛟ, n→ᚾ, m→ᛗ, h→ᚺ, g→ᚷ, e→ᛖ
+const rune = n => n.startsWith("th") ? "ᚦ" : ({ c:"ᚲ", s:"ᛋ", o:"ᛟ", n:"ᚾ", m:"ᛗ", h:"ᚺ", g:"ᚷ", e:"ᛖ" })[n[0]] || "ᚠ";
 const fmt = (n, d=1) => n == null ? "—" : Number(n).toFixed(d);
 const fin = v => Number.isFinite(v);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -492,6 +509,7 @@ const HINT = {
   zones: "Thermal zones read; the hottest watched one sets the level.",
   sensors: "No readable Linux thermal sensors on this machine.",
   band: "Warm: new work slows. Critical: admission stops and batch jobs pause.",
+  anon: "Anonymous memory (RssAnon), what the guard judges. File-backed pages are not counted.",
 };
 function Info({ k }) {
   return html`<span class="info" tabIndex="0" aria-label=${HINT[k]} onClick=${e => e.stopPropagation()} onKeyDown=${e => e.stopPropagation()}>
@@ -1315,20 +1333,244 @@ function Machines({ doc, err }) {
   </section>`;
 }
 
+// ---- Boundaries: each machine's memory guard and its [[memory.allow]] rules (read-only) ----
+const TABS = [["machines", "Machines"], ["boundaries", "Boundaries"]];
+// the section named by the URL hash; an empty or unknown hash shows Machines
+function readTab(hash) {
+  const h = String(hash || "").replace(/^#/, "");
+  return TABS.some(t => t[0] === h) ? h : "machines";
+}
+const RULE_STATES = ["within", "over", "far_over", "idle"];
+const RULE_CLASS = { within: "cool", over: "warm", far_over: "hot", idle: "idle" };
+// the mem_guard document, or null when the daemon has none ([memory] off, or older than 0.17)
+const guardOf = t => (t && t.mem_guard && typeof t.mem_guard === "object" ? t.mem_guard : null);
+const ruleState = r => (r && RULE_STATES.includes(r.state) ? r.state : "unknown");
+const ruleClass = s => RULE_CLASS[s] || "idle";
+const ruleWord = s => (s === "far_over" ? "far over" : s);
+// bar geometry on a scale that ends 0.2 boundaries past the far-over line: the boundary mark sits
+// at 1x, the far-over mark at 1 + act_over_pct/100 (50 when the daemon does not say, for the bar only)
+function barMarks(pct) {
+  const known = fin(pct) && pct > 0;
+  const p = known ? pct : 50;
+  const end = 1 + p / 100 + 0.2;
+  return { pct: p, known, end, max: 100 / end, far: (1 + p / 100) * 100 / end };
+}
+// usage as a share of the bar, 0 when there is nothing to draw
+function barFill(r, marks) {
+  if (!fin(r.usage_mib) || !fin(r.max_mib) || r.max_mib <= 0) return 0;
+  return clamp(r.usage_mib / r.max_mib / marks.end, 0, 1) * 100;
+}
+const mibText = v => (fin(v) ? gib(v) : "—");
+function usageText(r) {
+  if (ruleState(r) === "idle") return "no matching process";
+  if (!fin(r.usage_mib)) return "—";
+  const share = fin(r.max_mib) && r.max_mib > 0 ? " · " + Math.round(r.usage_mib / r.max_mib * 100) + "% of boundary" : "";
+  return mibText(r.usage_mib) + " anonymous" + share;
+}
+// "comm cc1plus", "cmdline *vllm*", "cgroup *docker-*"; null when the daemon does not report matchers
+function matcherList(r) {
+  if (!("comm" in r) && !("cmdline" in r) && !("cgroup" in r)) return null;
+  const comm = Array.isArray(r.comm) ? r.comm.map(c => "comm " + c) : [];
+  return [...comm, ...["cmdline", "cgroup"].filter(k => r[k]).map(k => k + " " + r[k])];
+}
+const scopeText = s => (s === "total" ? "total of all matches" : "per process");
+function limitsText(l) {
+  if (!l || typeof l !== "object") return "limits not reported";
+  const src = l.source ? " (" + l.source + ")" : "";
+  if (!fin(l.floor_mib) || !fin(l.soft_mib)) return "limits not read yet" + src;
+  return "limits " + mibText(l.floor_mib) + " / " + mibText(l.soft_mib) + src;
+}
+function lastKillText(k) {
+  if (!k || typeof k !== "object") return "none";
+  const when = fin(k.t) ? hhmm(k.t * 1000) + " UTC" : "";
+  const again = fin(k.repeat) && k.repeat > 1 ? "repeat " + k.repeat : "";
+  const size = fin(k.rss_mib) ? mibText(k.rss_mib) : "";
+  return [k.comm || (k.pid != null ? "pid " + k.pid : ""), size, when, again].filter(Boolean).join(" · ") || "—";
+}
+function killsText(g) {
+  if (!fin(g.kills_last_hour)) return "—";
+  const cap = fin(g.max_kills_per_hour) ? ", of " + g.max_kills_per_hour + " allowed" : "";
+  return g.kills_last_hour + " in the last hour" + cap;
+}
+// the guard badge: from mem_guard.action and armed (armed is false after a fire until memory recovers)
+// live is false for a stale or unreachable machine: its guard fields are the last ones read and
+// the daemon (so the guard) may not be running, so the badge says so and is never the healthy colour
+function guardLabel(g, live = true) {
+  if (!g) return "no memory guard";
+  return (live ? "" : "last seen: ") + (g.armed ? "armed" : "not armed") + " · " + (g.action || "unknown");
+}
+function guardClass(g, live = true) {
+  if (!g || !live || g.action !== "kill") return "idle";
+  return g.armed ? "cool" : "warm";
+}
+// the killer skips a process whose anonymous memory is under min_victim_mib, so a rule below it
+// only ever blames; with action = record nothing is killed at all (said once for the machine)
+// A total-scope rule can be over while every match is under min_victim_mib, so it gets the note too.
+function killNote(g, r) {
+  if (g.action === "record" || !fin(g.min_victim_mib) || !fin(r.max_mib)) return "";
+  if (r.scope !== "total" && r.max_mib >= g.min_victim_mib) return "";
+  return "under " + mibText(g.min_victim_mib) + " (min_victim_mib) a match is blamed, never killed";
+}
+// one /api/fleet machine -> what its Boundaries card needs
+function guardRules(g) {
+  return g && Array.isArray(g.boundaries) ? g.boundaries.filter(r => r && typeof r === "object") : [];
+}
+function toGuardRow(m) {
+  const b = toBox(m), g = guardOf(m.thermal);
+  return { b, g, rules: guardRules(g), marks: barMarks(g && g.act_over_pct) };
+}
+// the nav's rule count, without building a card row per machine
+const fleetRuleTotal = doc => ((doc && doc.machines) || []).reduce((n, m) => n + guardRules(guardOf(m && m.thermal)).length, 0);
+function ruleCounts(rows) {
+  const c = { within: 0, over: 0, far_over: 0, idle: 0 };
+  for (const row of rows) {
+    for (const r of row.rules) {
+      const s = ruleState(r);
+      if (s in c) c[s]++;
+    }
+  }
+  return c;
+}
+const ruleTotal = rows => rows.reduce((n, row) => n + row.rules.length, 0);
+// state chips keep only the rules in those states and drop machines left with none; the search
+// keeps a machine whose name matches with its rules, else only the rules whose name matches
+function filterRows(rows, states, q) {
+  const needle = q.trim().toLowerCase();
+  const out = [];
+  for (const row of rows) {
+    const named = !needle || row.b.name.toLowerCase().includes(needle);
+    let rules = states.length ? row.rules.filter(r => states.includes(ruleState(r))) : row.rules;
+    if (!named) rules = rules.filter(r => String(r.name || "").toLowerCase().includes(needle));
+    if (rules.length || (named && !states.length)) out.push({ ...row, rules });
+  }
+  return out;
+}
+const freeLine = ({ b, g }) => mibText(fin(g.avail_mib) ? g.avail_mib : b.mem && b.mem.avail_mib) + " free · " + limitsText(g.limits);
+
+function UsageBar({ r, marks }) {
+  const label = usageText(r) + "; boundary " + mibText(r.max_mib) + ", far over beyond " + fmt(marks.pct, 0) + "% more" + (marks.known ? "" : " (assumed: the daemon does not report act_over_pct)");
+  return html`<div class="ubar" role="img" aria-label=${label}>
+      <span class="fill" style=${{ width: barFill(r, marks).toFixed(2) + "%" }}></span>
+      <span class="mx" style=${{ left: marks.max.toFixed(2) + "%" }}></span>
+      <span class="far" style=${{ left: marks.far.toFixed(2) + "%" }}></span>
+    </div>`;
+}
+function RuleRow({ g, r, marks }) {
+  const s = ruleState(r), cls = ruleClass(s), m = matcherList(r), note = killNote(g, r);
+  let matchers = "—";
+  if (m === null) matchers = html`<span class="note">not reported</span>`;
+  else if (m.length) matchers = m.map(x => html`<code key=${x}>${x}</code>`);
+  return html`<tr>
+      <td><div class="rn">${r.name}</div>${r.source && html`<span class="tag">${r.source}</span>`}</td>
+      <td><div class="mt">${matchers}</div></td>
+      <td><div>${mibText(r.max_mib)}</div><div class="note">${scopeText(r.scope)}</div></td>
+      <td class=${"usage " + cls}><${UsageBar} r=${r} marks=${marks} /><div class="note">${usageText(r)}</div></td>
+      <td><span class=${"status " + cls}>${ruleWord(s)}</span>${note && html`<div class="note">${note}</div>`}</td>
+    </tr>`;
+}
+function RulesTable({ row }) {
+  const rows = row.rules.map((r, i) => html`<${RuleRow} key=${String(r.name) + i} g=${row.g} r=${r} marks=${row.marks} />`);
+  return html`<div class="tablewrap"><table class="rules">
+      <thead><tr><th scope="col">Rule</th><th scope="col">Matches</th><th scope="col">Boundary</th>
+        <th scope="col" title=${HINT.anon}>Anonymous memory now</th><th scope="col">State</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+// what sits under a machine's head: its rules, or why there are none to show
+function guardBody(row) {
+  const { b, g, rules } = row;
+  if (b.state === "unsupported") return html`<p class="srcnote">${whyText(b)}.</p>`;
+  if (!b.hasReading) return html`<p class="srcnote">No reading yet: the guard shows after the first good read.</p>`;
+  if (!g) return html`<p class="srcnote">No memory guard reported: the daemon is older than 0.17 or [memory] is off.</p>`;
+  const record = g.action === "record" && html`<p class="srcnote">Action is record: the guard records, it never kills here.</p>`;
+  const guessed = rules.length > 0 && !row.marks.known && html`<p class="srcnote">This daemon does not report act_over_pct: the far-over mark is drawn at the default, 50% over.</p>`;
+  const list = rules.length ? html`<${RulesTable} row=${row} />` : html`<p class="srcnote">No boundaries. Every process here is judged by growth alone.</p>`;
+  return html`<${React.Fragment}>${record}${guessed}${list}</${React.Fragment}>`;
+}
+function BoundaryCard({ row }) {
+  const { b, g } = row;
+  const live = b.state !== "unreachable" && b.state !== "stale" && b.state !== "unsupported";
+  const plat = b.state !== "unsupported" && b.hasReading && html`<span class="tag">${platLabel(b.pkey)}</span>`;
+  const badge = b.hasReading && b.state !== "unsupported" && html`<span class=${"status " + guardClass(g, live)}>${guardLabel(g, live)}</span>`;
+  const status = !live && html`<span class="status">${statusText(b)}</span>`;
+  const why = !live && b.hasReading && html`<span class="sub faint">${whyText(b)}${g ? " · the guard may not be running" : ""}</span>`;
+  const facts = g && html`<dl class="facts"><dt>Kills</dt><dd>${killsText(g)}</dd><dt>Last kill</dt><dd>${lastKillText(g.last_kill)}</dd></dl>`;
+  return html`<section class=${"card bcard " + b.state} aria-label=${b.name}>
+    <div class="drow">
+      <div class="who">
+        <div class="top"><${Mark} b=${b} /><span class="name">${b.name}</span>${plat}${badge}${status}</div>
+        ${g && html`<span class="sub">${freeLine(row)}</span>`}
+        ${why}
+      </div>
+      ${facts}
+    </div>
+    ${guardBody(row)}
+  </section>`;
+}
+function boundaryList(rows, shown, doc) {
+  if (!rows.length) return html`<div class="empty">${doc ? "No machines in the fleet file." : "Waiting for the fleet reader…"}</div>`;
+  if (!shown.length) return html`<div class="empty">No machine or rule matches these filters.</div>`;
+  const cards = shown.map(row => html`<${BoundaryCard} key=${row.b.name} row=${row} />`);
+  return html`<div class="lanes">${cards}</div>`;
+}
+
+function Boundaries({ doc, err }) {
+  const rows = useMemo(() => ((doc && doc.machines) || []).map(toGuardRow).sort((x, y) => byName(x.b, y.b)), [doc]);
+  const reader = (doc && doc.reader) || {};
+  const [states, setStates] = useState([]);
+  const [q, setQ] = useState("");
+  const counts = ruleCounts(rows), total = ruleTotal(rows);
+  const shown = filterRows(rows, states, q);
+  const toggle = st => setStates(xs => xs.includes(st) ? xs.filter(x => x !== st) : [...xs, st]);
+  const updated = fin(reader.now) ? hhmmss(reader.now * 1000) + " UTC" : "";
+  const chips = RULE_STATES.map(st => html`
+        <button key=${st} class=${"chip " + ruleClass(st)} aria-pressed=${states.includes(st)} disabled=${!counts[st] && !states.includes(st)}
+          onClick=${() => toggle(st)}><b>${counts[st]}</b>${ruleWord(st)}</button>`);
+  const clear = states.length || q ? html` <button class="clear" onClick=${() => { setStates([]); setQ(""); }}>Clear</button>` : "";
+  return html`<section>
+    <div class="titlebar">
+      <div><span class=${"eyebrow livebar" + (err ? " down" : "")} role="status">${eyebrowText(doc, err, rows.length, updated)}</span><h1>Boundaries</h1></div>
+    </div>
+    <p class="lede">How much memory a known process may use. Within its boundary a process is never blamed or killed. Over it, it is blamed first and is the first kill candidate. Far over it, the guard acts before memory runs low.</p>
+    <div class="summary" role="group" aria-label="Filter by rule state">
+      ${chips}
+    </div>
+    <div class="filters">
+      <input id="boundary-search" class="search" type="search" placeholder="Find a machine or rule" value=${q} onInput=${e => setQ(e.target.value)} aria-label="Find a machine or rule" />
+      <span class="count">${ruleTotal(shown)} of ${total} rules · ${shown.length} of ${rows.length} machines${clear}</span>
+    </div>
+    ${boundaryList(rows, shown, doc)}
+    <p class="srcnote">Bar: anonymous memory against the boundary (solid mark) and the far-over line (dashed, at that machine's act_over_pct). ${HINT.anon}</p>
+  </section>`;
+}
+
 function App() {
   const [pref, setPrefS] = useState(() => { const v = store.get("hg-mode", "system"); return ["system", "light", "dark"].includes(v) ? v : "system"; });
   const mode = useMode(pref);
   const { doc, err } = useFleet();
   const setPref = k => { setPrefS(k); store.set("hg-mode", k); };
   useEffect(() => { document.documentElement.dataset.mode = mode; }, [mode]);
+  const [tab, setTab] = useState(() => readTab(location.hash));
+  useEffect(() => { const on = () => setTab(readTab(location.hash)); addEventListener("hashchange", on); return () => removeEventListener("hashchange", on); }, []);
+  // setting the hash adds a history entry (Back returns to the previous tab) and fires hashchange
+  const go = t => { setTab(t); if (location.hash !== "#" + t) location.hash = t; };
+  const rules = useMemo(() => fleetRuleTotal(doc), [doc]);
+  const ruleCount = doc && html`<span class="n">${rules}</span>`;
+  const tabs = TABS.map(([k, l]) => html`<button key=${k} aria-current=${tab === k ? "page" : undefined} onClick=${() => go(k)}>${l}${k === "boundaries" && ruleCount}</button>`);
   return html`<${React.Fragment}>
     <header class="app-header">
-      <div class="brand"><span class="mark rune" aria-hidden="true">ᚲ</span>heat-governor</div>
+      <div style=${{ display: "flex", alignItems: "center", gap: "12px 18px", flexWrap: "wrap", minWidth: 0 }}>
+        <div class="brand"><span class="mark rune" aria-hidden="true">ᚲ</span>heat-governor</div>
+        <nav class="pills" aria-label="Sections">${tabs}</nav>
+      </div>
       <div class="pills sm" role="group" aria-label="Appearance">
         ${[["system", "Auto"], ["light", "Light"], ["dark", "Dark"]].map(([k, l]) => html`<button key=${k} aria-pressed=${pref === k} onClick=${() => setPref(k)}>${l}</button>`)}
       </div>
     </header>
-    <main><${Machines} doc=${doc} err=${err} /></main>
+    <main>
+      <div hidden=${tab !== "machines"}><${Machines} doc=${doc} err=${err} /></div>
+      <div hidden=${tab !== "boundaries"}><${Boundaries} doc=${doc} err=${err} /></div>
+    </main>
   </${React.Fragment}>`;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);

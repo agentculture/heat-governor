@@ -12,7 +12,7 @@ a MinIO container on spark. Plan tasks t12 (deploy, EliteMini only) and t13 (val
 - **Bucket and key:** bucket `heat-governor`. Policy `heat-governor-rw` allows ListBucket and
   GetBucketLocation on the bucket, and GetObject and PutObject on its objects. User `hg57ca…` is
   attached to that policy.
-- **EliteMini credentials:** a `[heat-governor]` profile in `~/.aws/credentials` (mode 600,
+- **EliteMini credentials:** a `[heat-governor]` profile in the AWS shared credentials file (mode 600,
   backed up first).
 - **EliteMini config:** `[memory] action = "kill"` (generic platform, so percentage limits:
   floor 2296 MiB, soft 9187 MiB) and `[ship]` to the MinIO endpoint, `machine = "elitemini"`.

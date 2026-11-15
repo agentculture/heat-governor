@@ -329,3 +329,29 @@ def test_subprocess_session():
     frames = [json.loads(line) for line in p.stdout.splitlines()]
     assert [f["id"] for f in frames] == [1, 2]
     assert len(frames[1]["result"]["tools"]) == 3
+
+
+def test_machine_state_returns_mem_guard_unchanged(fleet_file, monkeypatch):
+    guard = {
+        "action": "kill",
+        "armed": True,
+        "kills_last_hour": 1,
+        "boundaries": [{"name": "app", "max_mib": 4096, "state": "ok"}],
+        "limits": {"floor_mib": 1000, "soft_mib": 2000, "source": "platform"},
+    }
+    table = {
+        "cool": {
+            "level": "cool",
+            "at": time.time(),
+            "temp_c": 40.0,
+            "admit": True,
+            "version": "9.9.9",
+            "concurrency_factor": 1.0,
+            "mem_guard": guard,
+        },
+        "dead": OSError("ssh exited 255"),
+    }
+    monkeypatch.setattr(mesh, "transport_factory", lambda m: FakeTransport(table[m.name]))
+    r = one(call("machine_state", {"name": "cool", "fleet": str(fleet_file), "url": NO_SERVER}))
+    assert r["result"]["isError"] is False
+    assert r["result"]["structuredContent"]["thermal"]["mem_guard"] == guard

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-11-15
+
+### Added
+
+- Dashboard: a read-only Boundaries tab (`#boundaries`) lists each machine's memory guard (action, armed state, limits, kills) and every `[[memory.allow]]` rule with its matchers, anonymous-memory usage bar and state; the header has a Sections nav (Machines, Boundaries).
+- `/state` `mem_guard` gains `act_over_pct`, `max_kills_per_hour`, `min_victim_mib`, and each boundary entry gains `comm`, `cmdline`, `cgroup` and `source` (keys added only).
+- The fleet reader passes `mem_guard`, `config` and `config_error` through to `/api/fleet` and the MCP `machine_state`; before this release `/api/fleet` carried no memory-guard data. Daemons without them still read as ok.
+- `mesh status` shows the memory guard per machine (`guard kill armed 2k 3b`, `guard -` when absent) and `--json` carries a `mem_guard` summary.
+- Spec, plan and split for the Boundaries tab (issue #18); this is part 1 of 2, the write side is planned.
+
+### Changed
+
+- The Machines view marks elitemini with the rune for e.
+
+### Fixed
+
+- `docs/contracts/memory.md` stated the `min_victim_mib` rule loosely: it applies per process, not to a rule's `max_mib`.
+
 ## [0.17.1] - 2026-11-15
 
 ### Added
