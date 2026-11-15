@@ -393,7 +393,8 @@ off unless listed; contract: `docs/contracts/user-units.md`. `[pair]`
 (peer, containers, listen, stale_after_s, poll_s, cpu_cap) makes this box one
 half of a tensor-parallel pair; `listen` needs a restart.
 
-`[memory]` (the memory guard; absent = record only, never kill): `action` =
+`[memory]` (the memory guard; absent = no guard at all;
+present, the default action only records): `action` =
 record|kill (default record), `floor_pct` 5, `horizon_s` 10, `soft_pct` 20,
 `floor_mib`/`soft_mib` (absolute MiB, set together, win over the percentages and
 the platform's limits), `window_s` 10, `min_victim_mib` 2048,
@@ -401,7 +402,8 @@ the platform's limits), `window_s` 10, `min_victim_mib` 2048,
 0.25, `top_n` 10, `top_every_s` 10.
 `[ship]` (off unless `enabled = true`): `endpoint`, `bucket` (both required
 when enabled), `region` us-east-1, `prefix` fleet, `profile` (AWS credentials
-profile), `machine` (default: the hostname), `blackbox_every_s` 60,
+profile), `machine` (default: the
+`transport = "local"` entry in fleet.toml, else shipping is disabled), `blackbox_every_s` 60,
 `blackbox_minutes` 10, `spool_dir`. Plain HTTP is accepted only for loopback
 and tailnet endpoints. See `memory` and `ship`.
 """

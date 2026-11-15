@@ -285,7 +285,11 @@ def test_blackbox_gzips_recorder_tail(s3, tmp_path):
     rec.mkdir()
     now = time.time()
     day = datetime.fromtimestamp(now, timezone.utc).strftime("%Y%m%d")
-    rows = [{"t": now - 30, "a": 1}, {"t": now - 5, "a": 2}, {"t": now - 3600, "a": 0}]
+    rows = [
+        {"t": now - 3600, "a": 0},
+        {"t": now - 30, "a": 1},
+        {"t": now - 5, "a": 2},
+    ]  # time order
     (rec / f"{day}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     sh = make_shipper(s3, tmp_path, records_dir=rec, blackbox_every_s=3600, blackbox_minutes=10)
     sh.start()
@@ -493,3 +497,64 @@ def test_from_rule_uses_machine_default_and_profile(s3, tmp_path):
         ship.Shipper.from_rule(
             rule, default_machine="m", boot_id=BOOT, spool_dir=tmp_path, environ={}, home=tmp_path
         )
+
+
+PREV_BOOT = "0b1c2d3e-aaaa-bbbb-cccc-000000000000"
+
+
+def _land(s3, tmp_path, *, call):
+    sh = make_shipper(s3, tmp_path)
+    sh.start()
+    try:
+        key = call(sh)
+        assert wait_for(lambda: key in s3.objects)
+    finally:
+        sh.stop()
+    return key
+
+
+def test_postmortem_boot_id_keys_under_the_crashed_boot(s3, tmp_path):
+    key = _land(
+        s3, tmp_path, call=lambda sh: sh.submit_postmortem({"why": "oom"}, boot_id=PREV_BOOT)
+    )
+    assert key == f"fleet/{MACHINE}/{PREV_BOOT}/postmortem.json"
+
+
+def test_postmortem_uses_previous_boot_from_the_record(s3, tmp_path):
+    key = _land(
+        s3,
+        tmp_path,
+        call=lambda sh: sh.submit_postmortem({"why": "oom", "previous_boot": PREV_BOOT}),
+    )
+    assert key == f"fleet/{MACHINE}/{PREV_BOOT}/postmortem.json"
+
+
+def test_postmortem_explicit_boot_id_beats_the_record(s3, tmp_path):
+    other = "0b1c2d3e-aaaa-bbbb-cccc-000000000009"
+    key = _land(
+        s3,
+        tmp_path,
+        call=lambda sh: sh.submit_postmortem({"previous_boot": PREV_BOOT}, boot_id=other),
+    )
+    assert key == f"fleet/{MACHINE}/{other}/postmortem.json"
+
+
+def test_postmortem_default_is_the_current_boot(s3, tmp_path):
+    key = _land(s3, tmp_path, call=lambda sh: sh.submit_postmortem({"why": "x"}))
+    assert key == f"fleet/{MACHINE}/{BOOT}/postmortem.json"
+
+
+def test_fetch_listing_of_the_crashed_boot_finds_events_and_postmortem(s3, tmp_path):
+    # the crashed boot's events, shipped while it was alive
+    old = ship.event_key("fleet", MACHINE, PREV_BOOT, "memory_kill", 1_800_000_000.0)
+    s3.objects[old] = b"{}"
+    _land(
+        s3,
+        tmp_path,
+        call=lambda sh: sh.submit_postmortem({"previous_boot": PREV_BOOT, "why": "oom"}),
+    )
+    listing = client(s3).list(ship.object_root("fleet", MACHINE, PREV_BOOT) + "/")
+    assert old in listing
+    assert f"fleet/{MACHINE}/{PREV_BOOT}/postmortem.json" in listing
+    new_listing = client(s3).list(ship.object_root("fleet", MACHINE, BOOT) + "/")
+    assert not any(k.endswith("postmortem.json") for k in new_listing)

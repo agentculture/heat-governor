@@ -315,7 +315,8 @@ def cmd_overview(args: argparse.Namespace) -> int:
             {
                 "title": "Notes",
                 "items": [
-                    "the guard is the [memory] section of config.toml; absent = record only",
+                    "the guard is the [memory] section of config.toml; absent = no guard "
+                    "(present, the default action only records)",
                     "records do not carry MemTotal: replay uses the CSV header, --total-mib, "
                     "else this machine's /proc/meminfo, and says which",
                     "exit codes: 0 ok, 1 bad flag or file, 2 no daemon state / no /proc",

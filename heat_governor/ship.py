@@ -488,8 +488,14 @@ class Shipper:
             key = event_key(self.prefix, self.machine, self.boot_id, kind, t, self._seq)
         return self._enqueue(key, self._json(record), "application/json")
 
-    def submit_postmortem(self, record: dict) -> str | None:
-        key = postmortem_key(self.prefix, self.machine, self.boot_id)
+    def submit_postmortem(self, record: dict, *, boot_id: str | None = None) -> str | None:
+        """Queue the postmortem, keyed under the boot that crashed (what ``ship fetch`` reads).
+
+        The daemon submits from the NEW boot, so the key uses ``boot_id`` when given, else
+        ``record["previous_boot"]`` when it is a non-empty string, else the current boot."""
+        prev = record.get("previous_boot")
+        target = boot_id or (prev if isinstance(prev, str) and prev else None) or self.boot_id
+        key = postmortem_key(self.prefix, self.machine, target)
         return self._enqueue(key, self._json(record), "application/json")
 
     @staticmethod
