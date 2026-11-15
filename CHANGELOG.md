@@ -10,7 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - docs/deliveries/2026-11-14-memory-guard.md: delivery summary for the memory guard plan (planned vs actual for t1-t13, deviations d1-d4, code review fixes, evidence, claims with confidence, remaining work)
-- devague delivery ledger: evidence e1-e13 for obligations o1-o10 (o9/o10 cover success signals c26/c27), behavioural deltas b1-b7, all proposed for operator adjudication
+- devague delivery ledger: evidence e1-e13 for obligations o1-o10 (o9/o10 cover success signals c26/c27), behavioural deltas b1-b7 and lapses l1/l2, all approved by the operator
 
 ## [0.17.0] - 2026-11-15
 

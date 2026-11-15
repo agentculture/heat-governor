@@ -77,7 +77,7 @@ Quoted verbatim from the `devague summary` skeleton:
 
 ## Evidence
 
-Every test below ran agent-side on `main` at `91aa846` (2026-11-15T07:03Z) and passed. They are filed as devague evidence `e1`-`e13`, which is proposed and awaiting adjudication.
+Every test below ran agent-side on `main` at `91aa846` (2026-11-15T07:03Z) and passed. They are filed as devague evidence `e1`-`e13`, approved by the operator on 2026-11-15.
 
 - tests: `tests/test_daemon_memory.py::test_level_admit_and_factor_identical_with_and_without_memory`, `::test_state_doc_has_mem_guard_only_with_memory_and_clients_still_read_it`, `tests/test_client_state.py` (10) — pass (`o1`, `e1`)
 - tests: `tests/test_recorder_memory.py` (7) — pass (`o2`, `e2`)
@@ -95,7 +95,10 @@ Every test below ran agent-side on `main` at `91aa846` (2026-11-15T07:03Z) and p
 
 ## Delivery Claims
 
-The evidence records are proposed, so every row below is backed by a test that ran or a live observation, but none is yet adjudicated by the operator. Lapses `l1` and `l2` are pending approval (not yet evidence) and cap nothing until confirmed.
+Every row is backed by approved evidence (`e1`-`e13`): a test that ran or a live observation. Two approved lapses bear on the claims:
+
+- **`l1` (control-absent):** the `t8` guard-thread tests were written after the code and never seen failing first. Mutation checks were reported in mitigation. This caps at **medium** any behaviour backed only by `tests/test_memguard.py`, such as retry with backoff and OOM-counter events. The live kill (`e8`, `e12`) does not rest on those tests, so `c26` stays high.
+- **`l2` (provenance-missing):** the `t3` signer agent left no report; the main agent re-verified it against AWS's published example before merge. This bears on `c10`, which is already medium.
 
 | Claim | Confidence | Evidence |
 |-------|------------|----------|
@@ -109,6 +112,7 @@ The evidence records are proposed, so every row below is backed by a test that r
 | `c12` — the `memory`/`ship` CLI follows the agent-first contract | high | `tests/test_cli_memory_ship.py` · teken doctor exit 0 (`e10`) |
 | `c15` — `mem_guard` is additive; level, admit and factor are unchanged | high | `tests/test_daemon_memory.py::test_level_admit_and_factor_identical_with_and_without_memory` (`e1`) |
 | `c18` — uploads carry no secrets; command lines are redacted and truncated | high | `tests/test_memprocs.py` · `tests/test_ship.py` · `tests/test_memkill.py` (`e11`) |
+| `c2`/`c7` — the guard thread retries a failed kill with backoff and records every kernel or cgroup OOM kill | medium | `tests/test_memguard.py` (capped by approved lapse `l1`) |
 | `d3` — per-platform limits keep the AI boxes calm at 8-13% free | medium | all six boxes armed with their platform limits and no fires since rollout (`docs/evidence/2026-11-15-memory-guard-live.md`); no runaway tested on an AI box |
 | `d4` — blame and boundaries work as specified | medium | 107 new tests (`tests/test_memboundary.py`, `tests/test_memguard_boundary.py`, `tests/test_memkill_boundary.py`, `tests/test_config_memory_allow.py`); blame seen live on the EliteMini re-run. No `[[memory.allow]]` rule is configured on any box yet. |
 | the postmortem after an unclean boot lands under the crashed boot | low | unit tests only (`tests/test_daemon_memory.py::test_unclean_previous_boot_submits_a_postmortem_once`); never fired live |
@@ -125,5 +129,5 @@ The evidence records are proposed, so every row below is backed by a test that r
 - The boundary watch state (once-only crossing and far-over marks) resets on a config reload, so expect one repeat row per reload. It could be carried across like the kill budget.
 - `memory_boundary_exceeded` ships per process instance, so a tight rule on short-lived workers could upload often. There is no rate limit yet.
 - There is no notification on `memory_kill` (mesh or dashboard), which is a fleet-view follow-up.
-- Adjudicate the devague records: deviations `d1`-`d4` are approved; lapses `l1`/`l2`, evidence `e1`-`e13`, obligations `o9`/`o10` and deltas `b1`-`b7` are proposed.
+- The devague records are adjudicated: deviations `d1`-`d4`, lapses `l1`/`l2`, evidence `e1`-`e13`, obligations `o9`/`o10` and deltas `b1`-`b7` are approved (2026-11-15).
 - The merged `feat/memory-guard` and `memory-guard/*` branches are still present locally and on the remote. Delete them at the operator's discretion.
