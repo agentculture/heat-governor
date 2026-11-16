@@ -83,7 +83,7 @@ MAX_BODY_BYTES = 16 * 1024  # a rule is well under 1 KiB
 BODY_READ_TIMEOUT_S = 10.0
 DRAIN_TIMEOUT_S = 1.0
 MAX_BOUNDARIES_CONCURRENCY = 4
-AUTH_FAILURES_MAX = 10  # failed authentications per window, per server process
+AUTH_FAILURES_MAX = 10  # failed authentications per window, per client address
 AUTH_WINDOW_S = 60.0
 TOKEN_MIN_LEN = 32
 TOKEN_FILE_MAX_BYTES = 64 * 1024
@@ -219,9 +219,13 @@ def allowed_hosts(host: str, port: int, names: tuple[str, ...] | list[str] = ())
 
 
 class AuthLimiter:
-    """At most ``max_failures`` failed authentications per ``window_s`` per server; past that
-    every authenticated route answers 429 (even with the right token) until the window slides.
-    Tokens are long random strings, so this is defence in depth, not the guard itself."""
+    """At most ``max_failures`` failed authentications per ``window_s`` per client address;
+    past that, that address gets 429 on every authenticated route (even with the right token)
+    until its window slides. Other addresses are not affected, so one peer sending bad tokens
+    cannot lock the operator out. Tokens are long random strings, so this is defence in depth,
+    not the guard itself."""
+
+    MAX_CLIENTS = 1024  # addresses remembered; the oldest is dropped past this
 
     def __init__(
         self,
@@ -232,22 +236,30 @@ class AuthLimiter:
         self.max_failures = max_failures
         self.window_s = window_s
         self._clock = clock
-        self._fails: deque[float] = deque(maxlen=max_failures)
+        self._fails: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
 
-    def blocked(self) -> int:
-        """Seconds to wait (at least 1) when over the limit, else 0."""
+    def blocked(self, client: str = "") -> int:
+        """Seconds ``client`` must wait (at least 1) when over the limit, else 0."""
         with self._lock:
-            now = self._clock()
-            while self._fails and self._fails[0] <= now - self.window_s:
-                self._fails.popleft()
-            if len(self._fails) < self.max_failures:
+            fails = self._fails.get(client)
+            if not fails:
                 return 0
-            return max(1, math.ceil(self._fails[0] + self.window_s - now))
+            now = self._clock()
+            while fails and fails[0] <= now - self.window_s:
+                fails.popleft()
+            if not fails:
+                del self._fails[client]
+                return 0
+            if len(fails) < self.max_failures:
+                return 0
+            return max(1, math.ceil(fails[0] + self.window_s - now))
 
-    def fail(self) -> None:
+    def fail(self, client: str = "") -> None:
         with self._lock:
-            self._fails.append(self._clock())
+            if client not in self._fails and len(self._fails) >= self.MAX_CLIENTS:
+                del self._fails[next(iter(self._fails))]
+            self._fails.setdefault(client, deque(maxlen=self.max_failures)).append(self._clock())
 
 
 class _Refusal(Exception):
@@ -479,14 +491,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _authenticate(self) -> str:
         mesh = self.server.mesh
-        wait = mesh.limiter.blocked()
+        client = str(self.client_address[0])
+        wait = mesh.limiter.blocked(client)
         if wait:
             msg = "too many failed authentications; retry later"
             raise _Refusal(429, "rate_limited", msg, {"Retry-After": str(wait)})
         given = _bearer(self.headers.get_all("Authorization"))
         label = match_token(mesh.tokens, given) if given else None
         if label is None:
-            mesh.limiter.fail()
+            mesh.limiter.fail(client)
             auth = {"WWW-Authenticate": 'Bearer realm="heat-governor"'}
             raise _Refusal(401, "unauthorized", "a valid bearer token is required", auth)
         return label

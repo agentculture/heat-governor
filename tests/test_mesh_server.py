@@ -408,12 +408,30 @@ def test_failed_auth_is_rate_limited_with_429(tmp_path):
         assert code == 429
         assert int(h["retry-after"]) >= 1
         assert json.loads(out)["outcome"] == "rate_limited"
-        # even the right token waits until the window passes
+        # even the right token, from that address, waits until the window passes
         assert b.request("GET", "/api/boundaries/a")[0] == 429
         now[0] += mesh_server.AUTH_WINDOW_S + 1
         assert b.request("GET", "/api/boundaries/a")[0] == 200
     finally:
         b.stop()
+
+
+def test_rate_limit_is_per_client_address():
+    now = [0.0]
+    lim = mesh_server.AuthLimiter(max_failures=2, window_s=60, clock=lambda: now[0])
+    lim.fail("100.64.0.9")
+    lim.fail("100.64.0.9")
+    assert lim.blocked("100.64.0.9") >= 1
+    assert lim.blocked("100.64.0.1") == 0
+    now[0] = 61.0
+    assert lim.blocked("100.64.0.9") == 0
+
+
+def test_rate_limit_remembers_a_bounded_number_of_addresses():
+    lim = mesh_server.AuthLimiter(max_failures=1, window_s=60, clock=lambda: 0.0)
+    for n in range(lim.MAX_CLIENTS + 50):
+        lim.fail(f"client-{n}")
+    assert len(lim._fails) == lim.MAX_CLIENTS
 
 
 # list, preview, apply through the fake box
