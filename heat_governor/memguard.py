@@ -175,6 +175,8 @@ class MemGuard:
         self._errors: set[str] = set()
         self.polls = 0
         self._lock = threading.Lock()
+        self._forget: set[str] = set()  # rule names whose once-only marks set_rule() dropped
+        self._assessed = rule  # the rule the current scan was assessed with
         self._doc = self._build_doc(None)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -290,9 +292,8 @@ class MemGuard:
             total, avail = mem
             self._memory(mono, wall, total, avail)
         self._oom_counters(wall)
-        doc = self._build_doc(avail, mono)
-        with self._lock:
-            self._doc = doc
+        with self._lock:  # under the lock so a set_rule() swap is never overwritten by a stale doc
+            self._doc = self._build_doc(avail, mono)
 
     def _memory(self, mono: float, wall: float, total: float, avail: float) -> None:
         r = self.rule
@@ -365,15 +366,40 @@ class MemGuard:
     def _rules(self) -> tuple:
         return tuple(getattr(self.rule, "allow", ()) or ())
 
+    def set_rule(self, rule) -> None:
+        """Swap in a rule that differs from the current one only in ``allow``.
+
+        The trigger window, the tracker and the killer's budget and repeat history stay
+        exactly as they are, so a boundary save mid-runaway costs the guard nothing. The swap
+        is one step under the guard's lock: a scan in progress keeps the rule it started with
+        (its boundary doc is dropped) and the next poll uses the new one."""
+        with self._lock:
+            old = {r.name: r for r in self._rules()}
+            self.rule = rule
+            self.killer.rule = rule
+            new = {r.name: r for r in self._rules()}
+            # a changed or removed rule starts over: its next crossing is reported again
+            self._forget |= {n for n, r in old.items() if new.get(n) != r}
+            self._bounds_doc = memboundary.idle_doc(self._rules())
+            self._doc = self._build_doc(self._doc["avail_mib"])
+
     def _assess(self, procs: dict) -> memboundary.Assessment | None:
         """Classify the scan against ``[[memory.allow]]`` (None without rules)."""
-        rules = self._rules()
+        with self._lock:
+            rule = self.rule
+            forget, self._forget = self._forget, set()
+        self._assessed = rule
+        if forget:
+            self._watch.forget(forget)
+        rules = tuple(getattr(rule, "allow", ()) or ())
         if not rules:
             return None
         names = getattr(self.killer, "names", None)
-        pct = float(getattr(self.rule, "act_over_pct", 50.0))
+        pct = float(getattr(rule, "act_over_pct", 50.0))
         bounds = memboundary.assess(procs, rules, pct, names)
-        self._bounds_doc = bounds.doc()
+        with self._lock:
+            if self.rule is rule:  # not swapped mid-scan
+                self._bounds_doc = bounds.doc()
         return bounds
 
     def _crossings(self, bounds, wall: float, avail: float, blamed: list) -> None:
@@ -400,8 +426,8 @@ class MemGuard:
 
     def _far_over(self, procs, bounds, mono, wall, avail, blamed, acted: set) -> None:
         """Act once per process instance per rule on a far-over set, fire or no fire."""
-        if bounds is None:
-            return
+        if bounds is None or self._assessed is not self.rule:
+            return  # the rules were swapped mid-scan: never act on the set just replaced
         for s, victim in self._watch.due(bounds, lambda s: self._victim_of(procs, s)):
             if victim.pid in acted:
                 continue  # this poll's fire already acted on (or recorded) it

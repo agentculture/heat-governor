@@ -276,6 +276,11 @@ class Watch:
         self._crossed: set[tuple] = set()
         self._acted: set[tuple] = set()
 
+    def forget(self, names: set[str]) -> None:
+        """Drop the marks of the named rules (their definition changed)."""
+        self._crossed = {k for k in self._crossed if k[0] not in names}
+        self._acted = {k for k in self._acted if k[0] not in names}
+
     @staticmethod
     def _well_under(s: BoundSet | None) -> bool:
         """Gone, or back under its max by RESET_PCT: the next crossing is reported again."""

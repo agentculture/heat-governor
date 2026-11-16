@@ -71,7 +71,7 @@ RELOADS = ["[daemon]\ngpu_clock = true\n", "[daemon]\ngpu_ceiling_mhz = 1500\n"]
 def _reload(d: Daemon, path: Path, text: str) -> None:
     cfg = d.opts.config
     path.write_text(text)
-    os.utime(path, (cfg.mtime + 5, cfg.mtime + 5))
+    os.utime(path, (cfg.mtime[0] + 5, cfg.mtime[0] + 5))
     d.maybe_reload(d.clock())
 
 

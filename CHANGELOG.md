@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-11-16
+
+### Added
+
+- `boundaries.toml`: page-managed `[[memory.allow]]` rules in a file beside `config.toml`, merged by the config loader with config.toml rules, each tagged with its source; a name in both files and a match-all rule are rejected; the daemon watches both files and keeps the last good boundaries when the managed file is invalid.
+- `heat-governor boundaries` noun: `overview`, `list`, `add`, `set`, `rm`, `apply` (one JSON request on stdin) and `preview`, with `--machine M` to act on a fleet machine through the reader.
+- Locked, versioned, atomic writes of `boundaries.toml` with the five newest timestamped backups (`boundaries_file.py`).
+- On-box preview of a draft rule against running processes, and a kill check enforced on the box: a save that newly puts a killable own-user process far over its boundary is refused unless the request sets `allow_kill` (`mempreview.py`).
+- Reader-side boundaries service: version gate (daemons below 0.19.0 are refused), fixed remote command with the request on stdin, lost-response recovery, and an append-only audit log (`boundaries_service.py`); `bin` key in `fleet.toml`.
+- `mesh serve --token-file`: token-guarded `/api/boundaries/MACHINE` list, preview and write routes (bearer token, `If-Match`, Host/Origin/Content-Type checks, body cap, per-address failed-auth limit) and `--server-name`; an unauthenticated `/api/boundaries` probe.
+- Boundary editor in the dashboard: `#boundaries/MACHINE/RULE` sub-view with a live preview, and modal confirmations for delete, a change that would kill, and a conflict.
+- `memory_boundary_changed` event, recorded and shipped by the daemon on every change to the merged rules, including changes made while it was down.
+- `docs/contracts/boundaries.md`.
+
+### Changed
+
+- A change that touches only boundary rules is swapped into the running memory guard: the fill-rate window, kill budget and repeat history are kept.
+- `Config.mtime` is a pair (config.toml, boundaries.toml).
+- A rule with no `comm` whose globs match anything (`*`, `?*`, a cgroup of `/*`) is rejected in either file. A rule with a `comm` list is never match-all, because names are compared exactly.
+- After a write whose answer was lost, ssh's own failure (exit 255) goes through the same recovery as a timeout, and a timeout with the file unchanged is reported as `unknown`, not `not_saved`: the command on the box may still write.
+- Without `--token-file`, `mesh serve` is as read-only as before; every earlier route answers unchanged.
+
 ## [0.18.1] - 2026-11-16
 
 ### Added

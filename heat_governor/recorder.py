@@ -162,7 +162,13 @@ def iter_records(directory: Path) -> Iterator[dict]:
                     continue  # a torn last line after a power loss
 
 
-MEMORY_EVENTS = ("memory_kill", "oom_kill", "memory_budget_exhausted", "memory_boundary_exceeded")
+MEMORY_EVENTS = (
+    "memory_kill",
+    "oom_kill",
+    "memory_budget_exhausted",
+    "memory_boundary_exceeded",
+    "memory_boundary_changed",
+)
 EVENT_LOOKBACK_S = 600.0  # kills precede the final freeze: look 10 minutes back from the last tick
 
 

@@ -174,6 +174,10 @@ object in `/state`; admission stays thermal-only. Agents running heavy tests on 
 should still wrap them in `systemd-run --user --scope -p MemoryMax=...`. The guard is the
 backstop. See [`contracts/memory.md`](contracts/memory.md).
 
+A workload that legitimately holds a lot of memory can be given a boundary
+(`heat-governor boundaries add`, or the dashboard's Boundaries tab): within it the guard never
+blames or kills it. See [`contracts/boundaries.md`](contracts/boundaries.md).
+
 ## What it does not do
 
 - It does not change power modes (`nvpmodel`) or fans; those stay with NVIDIA's own tools.

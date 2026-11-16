@@ -37,7 +37,10 @@ def _clean_env(monkeypatch, tmp_path):
 # -- overview / bare noun ---------------------------------------------------------
 
 
-@pytest.mark.parametrize("noun,needle", [("memory", "memory replay"), ("ship", "ship fetch")])
+@pytest.mark.parametrize(
+    "noun,needle",
+    [("memory", "memory replay"), ("ship", "ship fetch"), ("boundaries", "boundaries apply")],
+)
 @pytest.mark.parametrize("json_mode", [False, True])
 def test_overview_and_bare_noun(capsys, noun, needle, json_mode):
     extra = ["--json"] if json_mode else []

@@ -48,6 +48,11 @@ Commands
                                    processes now; replay = when the trigger would have fired
                                    over a records .jsonl or a t,avail CSV (--total-mib).
                                    Try: memory replay <file>.
+  heat-governor boundaries <verb>  overview | list | add | set | rm | apply | preview: the
+                                   [[memory.allow]] rules in boundaries.toml beside --config.
+                                   apply/preview read a JSON request on stdin; --json results
+                                   carry an outcome (ok, saved, conflict, would_kill, invalid).
+                                   Try: boundaries list --json.
   heat-governor ship <verb>        overview | test | fetch --machine M [--boot B] [--out DIR]:
                                    S3 shipping ([ship] config). test = PUT+GET a probe;
                                    fetch = a boot's events, postmortem and black box.
@@ -114,6 +119,14 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["memory", "status"], "summary": "The daemon's memory guard state."},
             {"path": ["memory", "top"], "summary": "Biggest processes by anonymous memory."},
             {"path": ["memory", "replay"], "summary": "When the memory trigger would fire."},
+            {"path": ["boundaries"], "summary": "Page-managed memory boundaries."},
+            {"path": ["boundaries", "overview"], "summary": "Describe the boundaries noun."},
+            {"path": ["boundaries", "list"], "summary": "Rules from both files, with version."},
+            {"path": ["boundaries", "add"], "summary": "Add a boundaries.toml rule."},
+            {"path": ["boundaries", "set"], "summary": "Change a boundaries.toml rule."},
+            {"path": ["boundaries", "rm"], "summary": "Remove a boundaries.toml rule."},
+            {"path": ["boundaries", "apply"], "summary": "Apply a JSON request from stdin."},
+            {"path": ["boundaries", "preview"], "summary": "Preview a draft rule from stdin."},
             {"path": ["ship"], "summary": "Ship records to S3-compatible storage."},
             {"path": ["ship", "overview"], "summary": "Describe the ship noun."},
             {"path": ["ship", "test"], "summary": "PUT and GET a probe object."},

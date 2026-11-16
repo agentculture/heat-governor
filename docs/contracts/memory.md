@@ -119,6 +119,19 @@ scope = "process"                  # "process" (default) or "total" across all m
   So a rule whose `max_mib` is below `min_victim_mib` only kills a match once that process
   has grown past `min_victim_mib`.
 
+### When `memory_boundary_changed` fires
+
+The daemon is the only emitter (the CLI never records it), so a page save, a CLI edit and a
+hand edit are covered by one path. It fires once for every reload that changes the merged
+rules, whichever file the change came from and whether or not `[memory]` is set or the guard
+thread runs. The daemon keeps a digest of the rules it last applied, with the rules
+themselves, in `boundaries-applied.json` in its data directory. At startup a stored digest
+that differs from the rules being applied emits one event with `at_startup: true`, so an edit
+made while the daemon was down is still recorded and shipped. The first start after an
+upgrade has no stored digest: it emits one event with `old_rules: null` when there are rules
+(a baseline of what is in force), and nothing when there are none. A moved rule (same
+definition, other file) is not a change.
+
 ## Blame
 
 Every fire event (`memory_kill`, `memory_would_kill`) and every `memory_boundary_exceeded`
@@ -140,6 +153,7 @@ Rows in the daemon's records (`<data_dir>/records/YYYYMMDD.jsonl`), each with an
 | `memory_would_kill` | The guard fired but did not kill (record-only, budget, or refused), with `why_not` |
 | `memory_budget_exhausted` | The hourly kill budget is used up |
 | `memory_boundary_exceeded` | A process (or a rule's total) first went over its `[[memory.allow]]` boundary: rule, usage, max, `blamed` |
+| `memory_boundary_changed` | The merged `[[memory.allow]]` rules (config.toml plus boundaries.toml) differ from the ones last applied: `old_rules` (null on a first start), `new_rules` (each with its `source` file), `old_hash`, `new_hash`, `at_startup`. Rule definitions only, no process data |
 | `oom_kill` | The kernel or a cgroup OOM-killed something (from `/proc/vmstat` and `memory.events`), even when the guard did not act |
 
 Tick rows gain an optional `top` list (the biggest processes by anonymous memory), every
@@ -162,7 +176,7 @@ MinIO), signing requests itself (SigV4, no third-party library):
 
 | Object | When |
 |---|---|
-| `<prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json` | Each `memory_kill`, `memory_budget_exhausted`, `memory_boundary_exceeded` and `oom_kill`, immediately |
+| `<prefix>/<machine>/<boot_id>/events/<utc>-<kind>.json` | Each `memory_kill`, `memory_budget_exhausted`, `memory_boundary_exceeded`, `memory_boundary_changed` and `oom_kill`, immediately |
 | `<prefix>/<machine>/<boot_id>/blackbox.jsonl.gz` | The last `blackbox_minutes` (10) of records, every `blackbox_every_s` (60 s), every 10 s while memory is low |
 | `<prefix>/<machine>/<boot_id>/postmortem.json` | Once, on start after an unclean shutdown, under the **crashed** boot's id (next to that boot's events) |
 

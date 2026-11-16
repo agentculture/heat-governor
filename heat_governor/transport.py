@@ -15,6 +15,12 @@ Public API (both transports share it):
   python. Bounded by :func:`heat_governor.history.timeout_for` (10 s, 20 s over 26 h); raises
   :class:`Unreachable` on any failure.
 
+* Both also have ``boundaries(verb, body, *, config_path) -> BoundariesResult``: the fixed
+  command ``BIN boundaries VERB --config PATH --json`` (verb one of list, apply, preview; BIN
+  defaults to :data:`DEFAULT_BIN`, overridable by ``bin_path`` / the machine's ``bin`` key)
+  with ``body`` on stdin. The command never depends on the body. A non-zero exit comes back
+  as a result; deadline :data:`BOUNDARIES_TIMEOUT_S` (30 s), separate from the fetch timeout.
+
 The ssh command is always an argv list (never a shell). The host is re-validated with
 :func:`heat_governor.fleet.validate_host`, passed after ``--``, and the remote command is a fixed
 string whose only variable part is the numeric timeout: no user text reaches the remote shell.
@@ -38,12 +44,14 @@ import selectors
 import shlex
 import subprocess  # nosec B404
 import sys
+import threading
 import time
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 from heat_governor.cli._errors import EXIT_ENV_ERROR, CliError
-from heat_governor.fleet import validate_host
+from heat_governor.fleet import validate_bin, validate_host
 from heat_governor.history import HISTORY_SCRIPT, build_args, parse_output, run_local, timeout_for
 from heat_governor.state import default_data_dir
 
@@ -56,6 +64,21 @@ GRACE_S = 0.5
 PERSIST_S = 60
 ALIVE_S = 5
 PYTHON = sys.executable  # the interpreter LocalTransport.history runs the script with
+BOUNDARIES_TIMEOUT_S = 30.0  # the write's own deadline; never the 5 s fetch timeout
+MAX_BODY_BYTES = 1 << 20  # a boundaries body is a few KiB of rules; refuse anything absurd
+DEFAULT_BIN = "~/.local/bin/heat-governor"  # per-user local bin; fleet.toml ``bin`` overrides
+BOUNDARIES_VERBS = ("list", "apply", "preview")
+_CONFIG_PATH_MAX = 4096
+
+
+@dataclass(frozen=True)
+class BoundariesResult:
+    """What the remote ``boundaries`` command did: exit ``code``, ``stdout`` and ``stderr``
+    as text. A non-zero exit is a result (the command's own refusal), not Unreachable."""
+
+    code: int
+    stdout: str
+    stderr: str
 
 
 class Unreachable(CliError):
@@ -67,8 +90,44 @@ class Unreachable(CliError):
         )
 
 
+class TimedOut(Unreachable):
+    """The deadline passed with the command still running: what it was doing on the machine
+    may yet finish."""
+
+
 def _num(x: float) -> str:
     return f"{x:g}"
+
+
+def _boundaries_args(verb: str, body: bytes | str, config_path: str) -> tuple[str, bytes, str]:
+    """Validate the three inputs of a boundaries call; ``Unreachable`` (before any process
+    starts) for a verb outside :data:`BOUNDARIES_VERBS`, a config path that is not a plain
+    absolute path, or a body over :data:`MAX_BODY_BYTES`. Returns the verb, the body as bytes
+    and the config path."""
+    if verb not in BOUNDARIES_VERBS:
+        raise Unreachable(f"refused boundaries verb {verb!r}")
+    path_ok = (
+        isinstance(config_path, str)
+        and config_path.startswith("/")
+        and len(config_path) <= _CONFIG_PATH_MAX
+        and config_path.isprintable()
+    )
+    if not path_ok:
+        raise Unreachable("refused boundaries config path (need an absolute, printable path)")
+    data = body.encode("utf-8") if isinstance(body, str) else bytes(body)
+    if len(data) > MAX_BODY_BYTES:
+        raise Unreachable(f"refused boundaries body over {MAX_BODY_BYTES} bytes")
+    return verb, data, config_path
+
+
+def _boundaries_cmd(binary: str, verb: str, config_path: str) -> list[str]:
+    """``BIN boundaries VERB --config PATH --json`` as argv words; built from constants and
+    validated values only, never from the body."""
+    return [binary, "boundaries", verb, "--config", config_path, "--json"]
+
+
+def _text(raw: bytes) -> str:
+    return raw.decode("utf-8", "replace")
 
 
 def parse_state(raw: bytes | str) -> dict:
@@ -93,8 +152,10 @@ class SshTransport:
         timeout_s: float,
         state_dir: Path | str | None = None,
         ssh: str = "ssh",
+        bin_path: str | None = None,
     ) -> None:
         self.host = validate_host(host)
+        self.bin_path = validate_bin(bin_path) if bin_path else DEFAULT_BIN
         self.timeout_s = float(timeout_s)
         self.ssh = ssh
         base = Path(state_dir) if state_dir is not None else default_data_dir()
@@ -136,29 +197,43 @@ class SshTransport:
         remote = " ".join(["nice -n 19 python3 -c", shlex.quote(HISTORY_SCRIPT), *args])
         return [*self._base_argv(), "--", self.host, remote]
 
+    def boundaries_argv(self, verb: str, config_path: str) -> list[str]:
+        """The fixed remote command: the same ssh options and ControlPath as :meth:`argv`,
+        ``--``, the validated host, then ``BIN boundaries VERB --config PATH --json`` as one
+        string (``~/`` of the binary left for the remote shell to expand, the rest quoted)."""
+        verb, _, config_path = _boundaries_args(verb, b"", config_path)
+        binary = self.bin_path
+        head = "~/" + shlex.quote(binary[2:]) if binary.startswith("~/") else shlex.quote(binary)
+        words = _boundaries_cmd(head, verb, shlex.quote(config_path))
+        return [*self._base_argv(), "--", self.host, " ".join(words)]
+
     def _run(
         self,
         argv: list[str],
         deadline: float,
         label: float | None = None,
         cap: int | None = None,
+        body: bytes | None = None,
     ) -> tuple[int, bytes, bytes]:
         """Run ``argv``; return ``(code, stdout, stderr)``. The child is killed, and
         :class:`Unreachable` raised, on the deadline or once stdout exceeds ``cap`` bytes
         (a broken or hostile remote cannot make the reader buffer without bound);
-        ``cap`` defaults to :data:`MAX_DOC_BYTES`."""
+        ``cap`` defaults to :data:`MAX_DOC_BYTES`. stdin is ``/dev/null`` unless ``body`` is
+        given, in which case it is fed on a thread and closed."""
         cap = MAX_DOC_BYTES if cap is None else cap
         try:
             proc = (
                 subprocess.Popen(  # nosec B603  # NOSONAR python:S4721 -- argv list, validated host
                     argv,
-                    stdin=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL if body is None else subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
             )
         except OSError as exc:
             raise Unreachable(f"cannot run {self.ssh}: {exc}") from exc
+        if body is not None:
+            _feed(proc, body)
         end = time.monotonic() + deadline
         try:
             out, err = _collect(proc, end, cap)
@@ -166,7 +241,7 @@ class SshTransport:
         except subprocess.TimeoutExpired as exc:
             _kill(proc)
             shown = self.timeout_s if label is None else label
-            raise Unreachable(f"timed out after {_num(shown)}s") from exc
+            raise TimedOut(f"timed out after {_num(shown)}s") from exc
         except _TooLarge as exc:
             _kill(proc)
             raise Unreachable(f"output too large (over {cap} bytes)") from exc
@@ -207,6 +282,25 @@ class SshTransport:
             return parse_output(out)
         except ValueError as exc:
             raise Unreachable(f"bad history output: {exc}") from exc
+
+    def boundaries(self, verb: str, body: bytes | str, *, config_path: str) -> BoundariesResult:
+        """Run ``BIN boundaries VERB --config CONFIG_PATH --json`` on the machine with ``body``
+        on stdin. ``verb`` is one of :data:`BOUNDARIES_VERBS`; ``config_path`` is the path the
+        daemon reported in ``/state``. The remote argv never depends on ``body``. Returns
+        :class:`BoundariesResult` for any exit code (ssh's own failure is code 255 with its
+        stderr); raises :class:`Unreachable` only for refused arguments (before any process),
+        a missing ssh binary, the :data:`BOUNDARIES_TIMEOUT_S` deadline or oversized output."""
+        verb, data, config_path = _boundaries_args(verb, body, config_path)
+        argv = self.boundaries_argv(verb, config_path)
+        self._prepare()
+        code, out, err = self._run(
+            argv,
+            BOUNDARIES_TIMEOUT_S + GRACE_S,
+            label=BOUNDARIES_TIMEOUT_S,
+            cap=MAX_HISTORY_BYTES,
+            body=data,
+        )
+        return BoundariesResult(code, _text(out), _text(err))
 
     def close(self) -> None:
         if self._closed or not self._used:
@@ -268,6 +362,24 @@ def _drain(
         del buf[:-MAX_ERR_BYTES]
 
 
+def _feed(proc: subprocess.Popen, body: bytes) -> None:
+    """Write ``body`` to the child's stdin on a daemon thread, then close it, so a child
+    that never reads cannot stall the deadline loop. A closed pipe ends the write quietly."""
+
+    def write() -> None:
+        try:
+            proc.stdin.write(body)  # type: ignore[union-attr]
+        except (OSError, ValueError):
+            pass  # the child exited or was killed first
+        finally:
+            try:
+                proc.stdin.close()  # type: ignore[union-attr]
+            except (OSError, ValueError):
+                pass
+
+    threading.Thread(target=write, daemon=True).start()
+
+
 def _kill(proc: subprocess.Popen) -> None:
     proc.kill()
     for pipe in (proc.stdout, proc.stderr):
@@ -291,9 +403,12 @@ class LocalTransport:
     reason, rather than silently read from a stale file.
     """
 
-    def __init__(self, *, timeout_s: float, port: int = STATE_PORT) -> None:
+    def __init__(
+        self, *, timeout_s: float, port: int = STATE_PORT, bin_path: str | None = None
+    ) -> None:
         self.timeout_s = float(timeout_s)
         self.port = port
+        self.bin_path = validate_bin(bin_path) if bin_path else None
 
     def fetch(self) -> dict:
         url = f"http://127.0.0.1:{self.port}/state"  # NOSONAR python:S5332 -- loopback
@@ -315,6 +430,31 @@ class LocalTransport:
             raise Unreachable(f"local history timed out after {_num(exc.timeout)}s") from exc
         except (OSError, ValueError, RuntimeError) as exc:
             raise Unreachable(f"local history failed: {exc}") from exc
+
+    def boundaries(self, verb: str, body: bytes | str, *, config_path: str) -> BoundariesResult:
+        """The same command as :meth:`SshTransport.boundaries`, run on this machine: the
+        configured ``bin_path`` if any, else ``sys.executable -m heat_governor``. Same result,
+        same refusals, same :data:`BOUNDARIES_TIMEOUT_S`."""
+        verb, data, config_path = _boundaries_args(verb, body, config_path)
+        # no shell here, so a leading ~/ is expanded by hand (the ssh side leaves it to sh)
+        local_bin = os.path.expanduser(self.bin_path) if self.bin_path else None
+        prefix = [local_bin] if local_bin else [PYTHON, "-m", "heat_governor"]
+        argv = [*prefix, *_boundaries_cmd("", verb, config_path)[1:]]
+        try:
+            proc = (
+                subprocess.run(  # nosec B603  # NOSONAR python:S4721 -- fixed argv, body on stdin
+                    argv,
+                    input=data,
+                    capture_output=True,
+                    timeout=BOUNDARIES_TIMEOUT_S,
+                    check=False,
+                )
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimedOut(f"timed out after {_num(BOUNDARIES_TIMEOUT_S)}s") from exc
+        except OSError as exc:
+            raise Unreachable(f"cannot run {argv[0]}: {exc}") from exc
+        return BoundariesResult(proc.returncode, _text(proc.stdout), _text(proc.stderr))
 
     def close(self) -> None:
         return None

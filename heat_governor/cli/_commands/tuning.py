@@ -83,7 +83,7 @@ def cmd_config_show(args: argparse.Namespace) -> None:
     cfg = _config(args)
     prof = _profile(args, cfg)
     doc = {
-        "config": str(cfg.path) if cfg.path and cfg.mtime else None,
+        "config": str(cfg.path) if cfg.path and cfg.mtime[0] else None,
         "profile": _profile_dict(prof),
         "daemon": cfg.daemon,
         "containers": [c.__dict__ for c in cfg.containers],

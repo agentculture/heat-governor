@@ -31,6 +31,7 @@ _VERBS = [
     "overview — this descriptive snapshot",
     "doctor — check the agent-identity invariants",
     "memory overview | status | top | replay — the memory guard and its trigger replay",
+    "boundaries overview | list | add | set | rm | apply | preview — the memory boundaries",
     "ship overview | test | fetch — S3 shipping of events, postmortems and the black box",
     "mcp — read-only MCP server over stdio (mesh_status, machine_state, sense)",
     "mesh overview | status | serve — the fleet view (see 'heat-governor mesh overview')",

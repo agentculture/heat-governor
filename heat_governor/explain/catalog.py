@@ -33,6 +33,8 @@ declared from their trip points, unmeasured), and a generic fallback.
 - `heat-governor mcp` -- a read-only MCP server over stdio (fleet and sense tools).
 - `heat-governor mesh ...` -- the fleet view (`overview`, `status`, `serve`).
 - `heat-governor memory ...` -- the memory guard (`overview`, `status`, `top`, `replay`).
+- `heat-governor boundaries ...` -- the page-managed memory boundaries (`overview`, `list`,
+  `add`, `set`, `rm`, `apply`, `preview`).
 - `heat-governor ship ...` -- S3 shipping of events and black boxes (`overview`, `test`,
   `fetch`).
 
@@ -152,11 +154,16 @@ Machines come from `fleet.toml` beside `config.toml` (format:
   (about timeout_s + 1 s at most). `source` says which. Exit 0 when the read
   worked (an unreachable box is data); 2 when nothing could be read; 1 for a
   bad or missing fleet file.
-- `mesh serve [--fleet PATH] [--listen HOST:PORT]` -- the page and JSON API
-  on 127.0.0.1:9480; only an explicit `--listen` changes the address. The
-  server has no authentication: anyone who can reach a non-loopback address
-  can read the fleet and start history reads (at most 4 at once; more get
-  `503`), so bind one only on a network you trust.
+- `mesh serve [--fleet PATH] [--listen HOST:PORT] [--token-file PATH]
+  [--server-name NAME]` -- the page and JSON API on 127.0.0.1:9480; only an
+  explicit `--listen` changes the address. The read routes have no
+  authentication: anyone who can reach a non-loopback address can read the
+  fleet and start history reads (at most 4 at once; more get `503`), so bind
+  one only on a network you trust. Without `--token-file` the server is
+  read-only. With it (lines of `label = token`, mode 600, read once at start)
+  `/api/boundaries/MACHINE` lists, previews and writes a machine's boundaries
+  for requests carrying `Authorization: Bearer TOKEN` and this server's own
+  Host and Origin; a bad file exits 2 and a wildcard `--listen` exits 1.
 
 ## Usage
 
@@ -350,6 +357,42 @@ written once. Far over it (above `max_mib` x (1 + `act_over_pct`/100), default
 Exit codes: 0 ok, 1 bad flag or unreadable file, 2 no daemon state or /proc.
 """
 
+_BOUNDARIES = """\
+# heat-governor boundaries
+
+The `[[memory.allow]]` rules the boundaries tab manages live in `boundaries.toml`
+beside `config.toml` (the daemon merges both and reloads on change). Every verb acts
+on the file beside `--config` (default: the config path the other verbs use).
+Rules in `config.toml` are listed but read-only.
+
+- `boundaries overview` -- describe this noun.
+- `boundaries list` -- rules with `source`, `editable`, the file `version`, and
+  `error` when the file is rejected.
+- `boundaries add|set|rm --name N [--comm C]... [--cmdline G] [--cgroup G]
+  [--max-mib M] [--scope process|total] [--allow-kill]` -- build the same request
+  `apply` takes, reading the current version themselves. `set` keeps the fields
+  you do not pass.
+- `boundaries apply` -- one JSON request on stdin: `{"base_version", "operation":
+  "add|set|rm", "rule": {name, comm, cmdline, cgroup, max_mib, scope}, "allow_kill"}`.
+  Only those rule keys are accepted. `base_version` is the `list` version (`missing`
+  for no file).
+- `boundaries preview` -- `{"rule": {...}}` on stdin: the processes it would match
+  now, their state and whether the guard could kill them.
+
+A write is refused, whatever `[memory] action` is, when the would-be rule set puts
+a killable own-user process far over its boundary, unless `allow_kill` is set. With
+no `[memory]` section the guard defaults are used and `guard_configured` is false.
+
+With `--json` every result has an `outcome`: `ok` (list, preview), `saved`
+(exit 0), `conflict` (stale base_version; carries the current rules and version),
+`would_kill` (carries the processes), `invalid` (carries `problems`); the last
+three exit 1. Environment errors exit 2.
+
+    heat-governor boundaries list --json
+    heat-governor boundaries add --name hog --comm hog --max-mib 8192
+    echo '{"rule": {"comm": ["x"], "name": "x", "max_mib": 99}}' | heat-governor boundaries preview
+"""
+
 _SHIP = """\
 # heat-governor ship
 
@@ -504,6 +547,14 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("memory", "status"): _MEMORY,
     ("memory", "top"): _MEMORY,
     ("memory", "replay"): _MEMORY,
+    ("boundaries",): _BOUNDARIES,
+    ("boundaries", "overview"): _BOUNDARIES,
+    ("boundaries", "list"): _BOUNDARIES,
+    ("boundaries", "add"): _BOUNDARIES,
+    ("boundaries", "set"): _BOUNDARIES,
+    ("boundaries", "rm"): _BOUNDARIES,
+    ("boundaries", "apply"): _BOUNDARIES,
+    ("boundaries", "preview"): _BOUNDARIES,
     ("ship",): _SHIP,
     ("ship", "overview"): _SHIP,
     ("ship", "test"): _SHIP,

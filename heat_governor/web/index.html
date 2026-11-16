@@ -264,6 +264,66 @@ table.rules { width:100%; border-collapse:collapse; font-size:.84rem; font-varia
 .status.idle::before, .chip.idle::before { background:transparent; border:1.5px dashed var(--ink-faint); box-shadow:none }
 .bcard.unreachable, .bcard.stale, .bcard.unsupported { border-style:dashed; background:transparent }
 
+/* boundaries editor: buttons, icon buttons, form fields and the modal dialog (existing tokens only) */
+.sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0 }
+.ico { flex:none; display:inline-block; vertical-align:-3px }
+.btn { appearance:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:0 18px; border-radius:999px; border:1px solid var(--line-strong);
+  background:var(--surface); color:var(--ink); font-size:.88rem; font-weight:700; cursor:pointer; white-space:nowrap; transition:border-color .2s, background .2s }
+.btn:hover:not(:disabled) { border-color:var(--ink-faint) }
+.btn:disabled { opacity:.5; cursor:default }
+.btn.primary { background:var(--ink); border-color:var(--ink); color:var(--bg) }
+.btn.danger { background:var(--hot); border-color:var(--hot); color:#fff }
+html[data-mode="dark"] .btn.danger { color:var(--bg) }
+.btn.sm { min-height:32px; padding:0 13px; font-size:.8rem }
+.ibtn { appearance:none; display:inline-grid; place-items:center; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:var(--surface); color:var(--ink-soft); cursor:pointer }
+.ibtn:hover { color:var(--ink); border-color:var(--line-strong) }
+.back { display:inline-flex; align-items:center; gap:6px; font-size:.84rem; font-weight:700; color:var(--accent); text-decoration:none }
+.back:hover { color:var(--ink) }
+h1[tabindex="-1"]:focus { outline:none }
+.cardact { display:flex; align-items:center; gap:8px; flex-wrap:wrap }
+.ed-grid { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start }
+.ed-form { flex:1 1 380px; display:grid; gap:18px }
+.ed-preview { flex:999 1 420px }
+.ed-preview h2, .card h2.sub2 { margin:0 0 6px; font-size:1.05rem }
+.ed-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; align-items:start }
+@media (max-width:600px){ .ed-pair { grid-template-columns:1fr } }
+.field { display:grid; gap:6px; min-width:0 }
+.field > label { font-size:.82rem; font-weight:700; color:var(--ink) }
+.fset { border:0; margin:0; padding:0; display:grid; gap:12px; min-width:0 }
+.fset legend { font-size:.82rem; font-weight:700; margin-bottom:4px; padding:0 }
+.input { width:100%; min-width:0; min-height:40px; padding:0 12px; border-radius:12px; border:1px solid var(--line-strong); background:var(--bg); color:var(--ink); font:inherit; font-size:15px }
+.input.mono { font-family:var(--font-mono); font-size:14px }
+.input[readonly] { background:var(--surface-2); color:var(--ink-soft) }
+.input[aria-invalid="true"] { border-color:var(--hot); box-shadow:0 0 0 3px color-mix(in srgb,var(--hot) 15%,transparent) }
+.fhint { font-size:.76rem; color:var(--ink-faint) }
+.ferr { margin:0; padding:0; list-style:none; font-size:.78rem; font-weight:700; color:var(--hot); overflow-wrap:anywhere }
+.inrow { display:flex; gap:8px }
+.chips.plain { list-style:none; padding:0; margin:0 }
+.callout { display:flex; gap:10px; align-items:flex-start; margin:0; padding:12px 14px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); font-size:.84rem; color:var(--ink-soft) }
+.callout.warn { border-color:color-mix(in srgb,var(--hot) 40%,transparent) }
+.callout ul { margin:4px 0 0; padding-left:18px }
+.ed-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end }
+.ed-status { margin:0; min-height:1.4em; font-size:.84rem; color:var(--ink-soft) }
+.ed-status[data-state="saved"] { color:var(--cool) }
+.ed-status[data-state="not_saved"] { color:var(--hot) }
+.ed-status[data-state="conflict"] { color:var(--warm) }
+.flash { margin:0 0 14px; padding:10px 14px; border-radius:12px; border:1px solid var(--line-strong); background:var(--surface); color:var(--ink-soft); font-size:.86rem }
+.rules .cmd { max-width:22rem; overflow-wrap:anywhere; white-space:normal }
+.tokbox { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end }
+.tokbox .field { flex:1 1 14rem }
+.modal-scrim { position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:16px; background:rgba(0,0,0,.35); animation:fade .2s var(--ease) }
+.modal { --m:var(--ink-soft); width:min(34rem,100%); max-height:calc(100vh - 32px); overflow-y:auto; display:grid; gap:14px; padding:24px; border-radius:var(--radius);
+  background:var(--surface); border:1px solid var(--line-strong); box-shadow:0 24px 60px rgba(0,0,0,.3) }
+.modal.danger { --m:var(--hot); border-color:color-mix(in srgb,var(--hot) 45%,transparent) }
+.modal.warn { --m:var(--warm) }
+.modal h2 { margin:0; font-size:1.2rem }
+.modal p { margin:0; color:var(--ink-soft); font-size:.9rem }
+.mmark { display:inline-grid; place-items:center; width:40px; height:40px; border-radius:12px; background:color-mix(in srgb,var(--m) 14%,transparent); color:var(--m) }
+.modal .row { display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end }
+.plist { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:4px 14px; margin:0; padding:12px 14px; list-style:none; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); font-size:.82rem; font-variant-numeric:tabular-nums }
+.plist li { display:contents }
+.plist b { color:var(--hot) }
+
 /* heat aura: grows with level; only critical moves */
 .lane.warm, .tile.warm { box-shadow:0 0 26px -14px var(--warm) }
 .lane.hot, .tile.hot { border-color:color-mix(in srgb,var(--hot) 30%,transparent); box-shadow:0 0 34px -12px var(--hot) }
@@ -1333,11 +1393,11 @@ function Machines({ doc, err }) {
   </section>`;
 }
 
-// ---- Boundaries: each machine's memory guard and its [[memory.allow]] rules (read-only) ----
+// ---- Boundaries: each machine's memory guard and its [[memory.allow]] rules ----
 const TABS = [["machines", "Machines"], ["boundaries", "Boundaries"]];
-// the section named by the URL hash; an empty or unknown hash shows Machines
+// the section named by the URL hash (its first segment); an empty or unknown hash shows Machines
 function readTab(hash) {
-  const h = String(hash || "").replace(/^#/, "");
+  const h = String(hash || "").replace(/^#/, "").split("/")[0];
   return TABS.some(t => t[0] === h) ? h : "machines";
 }
 const RULE_STATES = ["within", "over", "far_over", "idle"];
@@ -1455,39 +1515,60 @@ function UsageBar({ r, marks }) {
       <span class="far" style=${{ left: marks.far.toFixed(2) + "%" }}></span>
     </div>`;
 }
-function RuleRow({ g, r, marks }) {
+function RuleRow({ g, r, marks, act }) {
   const s = ruleState(r), cls = ruleClass(s), m = matcherList(r), note = killNote(g, r);
   let matchers = "—";
   if (m === null) matchers = html`<span class="note">not reported</span>`;
   else if (m.length) matchers = m.map(x => html`<code key=${x}>${x}</code>`);
+  const actCell = act === undefined ? null : html`<td>${act}</td>`;
   return html`<tr>
       <td><div class="rn">${r.name}</div>${r.source && html`<span class="tag">${r.source}</span>`}</td>
       <td><div class="mt">${matchers}</div></td>
       <td><div>${mibText(r.max_mib)}</div><div class="note">${scopeText(r.scope)}</div></td>
       <td class=${"usage " + cls}><${UsageBar} r=${r} marks=${marks} /><div class="note">${usageText(r)}</div></td>
       <td><span class=${"status " + cls}>${ruleWord(s)}</span>${note && html`<div class="note">${note}</div>`}</td>
+      ${actCell}
     </tr>`;
 }
-function RulesTable({ row }) {
-  const rows = row.rules.map((r, i) => html`<${RuleRow} key=${String(r.name) + i} g=${row.g} r=${r} marks=${row.marks} />`);
+// what a rule row offers with a write token: edit a boundaries.toml rule; a config.toml rule is
+// read-only here. undefined (no column) without a token or when the machine cannot be changed.
+function ruleAction(row, r, edit) {
+  if (!edit || edit.gate) return undefined;
+  const label = "Edit " + r.name + " on " + row.b.name;
+  if (r.source === "boundaries.toml") {
+    return html`<button type="button" class="ibtn" aria-label=${label} title=${label} onClick=${() => edit.go(editPath(row.b.name, r.name))}><${Icon} n="pencil" /></button>`;
+  }
+  if (r.source === "config.toml") return html`<span class="note"><${Icon} n="lock" /> lives in config.toml, read-only here</span>`;
+  return null;
+}
+function RulesTable({ row, edit }) {
+  const acts = !!edit && !edit.gate;
+  const rows = row.rules.map((r, i) => html`<${RuleRow} key=${String(r.name) + i} g=${row.g} r=${r} marks=${row.marks} act=${ruleAction(row, r, edit)} />`);
+  const actHead = acts ? html`<th scope="col"><span class="sr">Actions</span></th>` : null;
   return html`<div class="tablewrap"><table class="rules">
       <thead><tr><th scope="col">Rule</th><th scope="col">Matches</th><th scope="col">Boundary</th>
-        <th scope="col" title=${HINT.anon}>Anonymous memory now</th><th scope="col">State</th></tr></thead>
+        <th scope="col" title=${HINT.anon}>Anonymous memory now</th><th scope="col">State</th>${actHead}</tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
 }
 // what sits under a machine's head: its rules, or why there are none to show
-function guardBody(row) {
+function guardBody(row, edit) {
   const { b, g, rules } = row;
   if (b.state === "unsupported") return html`<p class="srcnote">${whyText(b)}.</p>`;
   if (!b.hasReading) return html`<p class="srcnote">No reading yet: the guard shows after the first good read.</p>`;
   if (!g) return html`<p class="srcnote">No memory guard reported: the daemon is older than 0.17 or [memory] is off.</p>`;
   const record = g.action === "record" && html`<p class="srcnote">Action is record: the guard records, it never kills here.</p>`;
   const guessed = rules.length > 0 && !row.marks.known && html`<p class="srcnote">This daemon does not report act_over_pct: the far-over mark is drawn at the default, 50% over.</p>`;
-  const list = rules.length ? html`<${RulesTable} row=${row} />` : html`<p class="srcnote">No boundaries. Every process here is judged by growth alone.</p>`;
+  const list = rules.length ? html`<${RulesTable} row=${row} edit=${edit} />` : html`<p class="srcnote">No boundaries. Every process here is judged by growth alone.</p>`;
   return html`<${React.Fragment}>${record}${guessed}${list}</${React.Fragment}>`;
 }
-function BoundaryCard({ row }) {
+// the card's write affordance: "Add boundary", or why this machine cannot be changed from here
+function cardAction(row, edit) {
+  if (!edit) return null;
+  if (edit.gate) return html`<span class="note"><${Icon} n="lock" /> ${"Read-only: " + edit.gate}</span>`;
+  return html`<button type="button" class="btn sm" aria-label=${"Add boundary on " + row.b.name} onClick=${() => edit.go(editPath(row.b.name, null))}><${Icon} n="plus" />Add boundary</button>`;
+}
+function BoundaryCard({ row, edit }) {
   const { b, g } = row;
   const live = b.state !== "unreachable" && b.state !== "stale" && b.state !== "unsupported";
   const plat = b.state !== "unsupported" && b.hasReading && html`<span class="tag">${platLabel(b.pkey)}</span>`;
@@ -1495,6 +1576,8 @@ function BoundaryCard({ row }) {
   const status = !live && html`<span class="status">${statusText(b)}</span>`;
   const why = !live && b.hasReading && html`<span class="sub faint">${whyText(b)}${g ? " · the guard may not be running" : ""}</span>`;
   const facts = g && html`<dl class="facts"><dt>Kills</dt><dd>${killsText(g)}</dd><dt>Last kill</dt><dd>${lastKillText(g.last_kill)}</dd></dl>`;
+  const actEl = cardAction(row, edit);
+  const act = actEl ? html`<div class="cardact">${actEl}</div>` : null;
   return html`<section class=${"card bcard " + b.state} aria-label=${b.name}>
     <div class="drow">
       <div class="who">
@@ -1503,19 +1586,23 @@ function BoundaryCard({ row }) {
         ${why}
       </div>
       ${facts}
+      ${act}
     </div>
-    ${guardBody(row)}
+    ${guardBody(row, edit)}
   </section>`;
 }
-function boundaryList(rows, shown, doc) {
+function boundaryList(rows, shown, doc, editOf) {
   if (!rows.length) return html`<div class="empty">${doc ? "No machines in the fleet file." : "Waiting for the fleet reader…"}</div>`;
   if (!shown.length) return html`<div class="empty">No machine or rule matches these filters.</div>`;
-  const cards = shown.map(row => html`<${BoundaryCard} key=${row.b.name} row=${row} />`);
+  const cards = shown.map(row => html`<${BoundaryCard} key=${row.b.name} row=${row} edit=${editOf(row)} />`);
   return html`<div class="lanes">${cards}</div>`;
 }
 
-function Boundaries({ doc, err }) {
+function Boundaries({ doc, err, writes, go, flash }) {
   const rows = useMemo(() => ((doc && doc.machines) || []).map(toGuardRow).sort((x, y) => byName(x.b, y.b)), [doc]);
+  const mode = writesMode(writes.enabled, writes.token, writes.probeErr);
+  const editOf = row => (mode === "unlocked" ? { gate: machineGate(row.b), go } : null);
+  const flashEl = flash ? html`<p class="flash">${flash}</p>` : null;
   const reader = (doc && doc.reader) || {};
   const [states, setStates] = useState([]);
   const [q, setQ] = useState("");
@@ -1532,6 +1619,8 @@ function Boundaries({ doc, err }) {
       <div><span class=${"eyebrow livebar" + (err ? " down" : "")} role="status">${eyebrowText(doc, err, rows.length, updated)}</span><h1>Boundaries</h1></div>
     </div>
     <p class="lede">How much memory a known process may use. Within its boundary a process is never blamed or killed. Over it, it is blamed first and is the first kill candidate. Far over it, the guard acts before memory runs low.</p>
+    <div role="status">${flashEl}</div>
+    <${WritesPanel} writes=${writes} mode=${mode} id="tok-list" />
     <div class="summary" role="group" aria-label="Filter by rule state">
       ${chips}
     </div>
@@ -1539,8 +1628,740 @@ function Boundaries({ doc, err }) {
       <input id="boundary-search" class="search" type="search" placeholder="Find a machine or rule" value=${q} onInput=${e => setQ(e.target.value)} aria-label="Find a machine or rule" />
       <span class="count">${ruleTotal(shown)} of ${total} rules · ${shown.length} of ${rows.length} machines${clear}</span>
     </div>
-    ${boundaryList(rows, shown, doc)}
+    ${boundaryList(rows, shown, doc, editOf)}
     <p class="srcnote">Bar: anonymous memory against the boundary (solid mark) and the far-over line (dashed, at that machine's act_over_pct). ${HINT.anon}</p>
+  </section>`;
+}
+
+// ---- Boundaries editor (issue #18, PR 2): routes, write token, requests and outcomes ----
+// Routes: #boundaries/MACHINE/RULE edits a rule (RULE percent-encoded), #boundaries/MACHINE/+new
+// adds one. encodeURIComponent turns a rule named "+new" into "%2Bnew", so the two never collide.
+const MACHINE_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
+const NEW_RULE = "+new";
+function decodeSeg(s) {
+  try { return decodeURIComponent(s); } catch (e) { return null; }
+}
+function readRoute(hash) {
+  const tab = readTab(hash);
+  const parts = String(hash || "").replace(/^#/, "").split("/");
+  const none = { tab, machine: null, rule: null, isNew: false };
+  if (tab !== "boundaries" || parts.length !== 3 || !MACHINE_RE.test(parts[1]) || !parts[2]) return none;
+  if (parts[2] === NEW_RULE) return { tab, machine: parts[1], rule: null, isNew: true };
+  const rule = decodeSeg(parts[2]);
+  return rule ? { tab, machine: parts[1], rule, isNew: false } : none;
+}
+// the hash (without "#") of a rule's editor; rule null is the new-rule route
+const editPath = (machine, rule) => "boundaries/" + machine + "/" + (rule == null ? NEW_RULE : encodeURIComponent(rule));
+
+// The write token lives in this tab's sessionStorage only (never localStorage, never a URL) and
+// travels only as the bearer header that requestInit builds.
+const TOKEN_KEY = "hg-boundaries-token";
+const tokenStore = {
+  get() { try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } },
+  set(v) { try { sessionStorage.setItem(TOKEN_KEY, v); } catch (e) { /* kept in memory only */ } },
+  clear() { try { sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* nothing kept */ } },
+};
+// checking: the probe has not answered; unknown: it failed; disabled: the server has no token file
+function writesMode(enabled, token, probeErr) {
+  if (enabled === false) return "disabled";
+  if (enabled !== true) return probeErr ? "unknown" : "checking";
+  return token ? "unlocked" : "locked";
+}
+const TOKEN_REFUSED = "The token was refused. Enter it again.";
+function useWrites() {
+  const [enabled, setEnabled] = useState(null);
+  const [probeErr, setProbeErr] = useState("");
+  const [token, setToken] = useState(() => tokenStore.get());
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    let alive = true;
+    // the probe takes no token: a tokenless list would count as a failed login
+    fetch("/api/boundaries", { cache: "no-store" })
+      .then(r => r.json())
+      .then(d => { if (alive) setEnabled(d.writes_enabled === true); })
+      .catch(e => { if (alive) setProbeErr(String((e && e.message) || e)); });
+    return () => { alive = false; };
+  }, []);
+  const save = t => { tokenStore.set(t); setToken(t); setNote(""); };
+  const refuse = msg => { tokenStore.clear(); setToken(""); setNote(msg || TOKEN_REFUSED); };
+  const forget = () => { tokenStore.clear(); setToken(""); setNote(""); };
+  return { enabled, probeErr, token, note, save, refuse, forget };
+}
+
+// ---- requests: the machine name is checked by readRoute; the token never enters a URL ----
+const READ_TIMEOUT_MS = 35000;
+const SAVE_TIMEOUT_MS = 70000; // an apply lists, then writes, over SSH: up to about 60 s
+const bPath = (machine, preview) => "/api/boundaries/" + machine + (preview ? "/preview" : "");
+function requestInit(token, body, version) {
+  const headers = { Authorization: "Bearer " + token };
+  if (version) headers["If-Match"] = '"' + version + '"';
+  const init = { method: "GET", headers, cache: "no-store" };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.method = "POST";
+    init.body = JSON.stringify(body);
+  }
+  return init;
+}
+// {status, data} for an answer, {status: 0, lost: true, data: {error}} for a timeout or network error
+async function call(path, init, ms) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(path, { ...init, signal: ctl.signal });
+    const data = await r.json().catch(() => ({}));
+    return { status: r.status, data };
+  } catch (e) {
+    const why = ctl.signal.aborted ? "no answer in " + Math.round(ms / 1000) + " s" : String((e && e.message) || e);
+    return { status: 0, lost: true, data: { error: why } };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function boundaryApi(machine, token) {
+  return {
+    list: () => call(bPath(machine, false), requestInit(token), READ_TIMEOUT_MS),
+    preview: rule => call(bPath(machine, true), requestInit(token, { rule }), READ_TIMEOUT_MS),
+    apply: (body, version) => call(bPath(machine, false), requestInit(token, body, version), SAVE_TIMEOUT_MS),
+  };
+}
+function errText(res) {
+  const d = (res && res.data) || {};
+  const msg = d.message || d.error || (Array.isArray(d.problems) ? d.problems.join("; ") : "");
+  if (msg) return String(msg);
+  return res && res.status ? "HTTP " + res.status : "no answer";
+}
+function listState(res) {
+  const d = res.data || {};
+  if (res.status === 200 && d.outcome === "ok" && Array.isArray(d.rules)) return { kind: "ok", data: d };
+  if (res.status === 401) return { kind: "unauthorized" };
+  return { kind: "error", text: errText(res) };
+}
+function previewState(res) {
+  const d = res.data || {};
+  if (res.status === 200 && d.outcome === "ok") return { kind: "ok", data: d };
+  if (res.status === 400 && Array.isArray(d.problems)) return { kind: "invalid", problems: d.problems };
+  if (res.status === 401) return { kind: "unauthorized" };
+  return { kind: "error", text: errText(res) };
+}
+
+// ---- the form <-> one [[memory.allow]] rule (comm is a TOML list of strings) ----
+const blankForm = () => ({ name: "", comm: [], commDraft: "", cmdline: "", cgroup: "", max: "", scope: "process" });
+function formFromRule(r) {
+  if (!r) return blankForm();
+  return { name: String(r.name || ""), comm: Array.isArray(r.comm) ? r.comm.map(String) : [], commDraft: "",
+    cmdline: r.cmdline || "", cgroup: r.cgroup || "", max: fin(r.max_mib) ? String(r.max_mib) : "",
+    scope: r.scope === "total" ? "total" : "process" };
+}
+// the names in the list plus a typed name not yet added with the button
+function commList(f) {
+  const draft = String(f.commDraft || "").trim();
+  return draft && !f.comm.includes(draft) ? [...f.comm, draft] : f.comm.slice();
+}
+const addComm = f => ({ ...f, comm: commList(f), commDraft: "" });
+const removeComm = (f, c) => ({ ...f, comm: f.comm.filter(x => x !== c) });
+// empty fields are left out, so the validator on the box names what is missing
+function ruleFromForm(f) {
+  const rule = { name: String(f.name || "").trim(), scope: f.scope === "total" ? "total" : "process" };
+  const comm = commList(f);
+  if (comm.length) rule.comm = comm;
+  for (const k of ["cmdline", "cgroup"]) {
+    const v = String(f[k] || "").trim();
+    if (v) rule[k] = v;
+  }
+  const max = String(f.max || "").trim();
+  if (max !== "") rule.max_mib = Number(max);
+  return rule;
+}
+const applyBody = (op, rule, allowKill) => ({ operation: op, rule: op === "rm" ? { name: rule.name } : rule, allow_kill: !!allowKill });
+
+// the validator's messages ("memory.allow[0].max_mib must be at least 64") placed by the field they name
+function problemField(p) {
+  const s = String(p);
+  if (/needs at least one of|matches every process/.test(s)) return "matchers";
+  if (/already exists/.test(s)) return "name";
+  const m = /(?:^|[.\s])(name|comm|cmdline|cgroup|max_mib|scope)\b/.exec(s);
+  return m ? m[1] : "general";
+}
+function problemsByField(problems) {
+  const out = {};
+  for (const p of problems || []) {
+    const k = problemField(p);
+    out[k] = (out[k] || []).concat(String(p));
+  }
+  return out;
+}
+
+// ---- saving: every attempt ends saved, not saved (with the reason) or conflict ----
+const fileRules = listing => (listing.rules || []).filter(r => r && r.source === "boundaries.toml");
+const canonRule = r => JSON.stringify([r.name, (r.comm || []).slice(), r.cmdline || null, r.cgroup || null, r.max_mib, r.scope || "process"]);
+// true when the rules on disk already hold the requested state
+function reflects(op, rule, rules) {
+  const cur = rules.find(r => r.name === rule.name);
+  if (op === "rm") return !cur;
+  return !!cur && canonRule(cur) === canonRule(rule);
+}
+function saveOutcome(res) {
+  const d = res.data || {};
+  if (res.lost || res.status === 504) return { kind: "lost", why: errText(res) };
+  if (res.status === 200 && d.outcome === "saved") return { kind: "saved", data: d };
+  if (d.outcome === "would_kill") return { kind: "would_kill", processes: Array.isArray(d.processes) ? d.processes : [] };
+  if (d.outcome === "conflict") return { kind: "conflict", version: d.version };
+  if (d.outcome === "invalid") return { kind: "invalid", problems: Array.isArray(d.problems) ? d.problems : [errText(res)] };
+  if (res.status === 401) return { kind: "unauthorized" };
+  return { kind: "not_saved", text: errText(res) };
+}
+// after a lost answer, the file as it is now decides: unchanged, holding the request, or changed otherwise
+function lostOutcome(req, listing) {
+  if (listing.version === req.version) return { kind: "not_saved", text: "the request got no answer and the file on the box is unchanged" };
+  if (reflects(req.op, req.rule, fileRules(listing))) return { kind: "saved", data: listing, recovered: true };
+  return { kind: "conflict", version: listing.version };
+}
+async function recheck(api, req, why) {
+  const again = listState(await api.list());
+  if (again.kind === "ok") return lostOutcome(req, again.data);
+  return { kind: "not_saved", text: "the answer was lost (" + why + ") and re-reading the file failed (" + (again.text || "token refused") + "); the write may still have landed, so reload the rules before trying again" };
+}
+// req: { op, rule, version, allowKill }
+async function runSave(api, req) {
+  const out = saveOutcome(await api.apply(applyBody(req.op, req.rule, req.allowKill), req.version));
+  return out.kind === "lost" ? recheck(api, req, out.why) : out;
+}
+const NOT_SAVED_WHY = {
+  invalid: "the box rejected the rule; see the messages beside the form",
+  unauthorized: "the token was refused",
+  would_kill: "the change would kill a running process and the kill was not allowed",
+};
+function finalStatus(out) {
+  if (out.kind === "saved") return { state: "saved", text: "Saved." };
+  if (out.kind === "conflict") return { state: "conflict", text: "Conflict: boundaries.toml changed on the box since you opened it, so your change was not written." };
+  return { state: "not_saved", text: "Not saved: " + (NOT_SAVED_WHY[out.kind] || out.text || "unknown reason") + "." };
+}
+function savedText(op, name, machine, out) {
+  const verb = op === "rm" ? "Deleted " : "Saved ";
+  const recovered = out.recovered || (out.data && out.data.recovered) ? " (confirmed by re-reading the file after the answer was lost)" : "";
+  const forced = out.data && out.data.forced ? " A process was far over when it was saved: the guard may kill it." : "";
+  return verb + name + " on " + machine + recovered + ". The daemon reloads it within about 2 s; this page shows it on the next poll." + forced;
+}
+const progressText = (op, machine) => (op === "rm" ? "Deleting on " : "Saving to ") + machine + "… over SSH this can take up to a minute.";
+const shortVer = v => (v === "missing" ? "no file yet" : String(v || "?").slice(0, 7));
+
+// ---- which machines can be changed, and what the guard would do ----
+const MIN_EDIT_VERSION = [0, 19, 0];
+const MIN_EDIT_TEXT = "0.19.0";
+function parseVer(text) {
+  const m = /^\s*v?(\d+)\.(\d+)\.(\d+)/.exec(String(text || ""));
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function verBefore(a, b) {
+  const i = a.findIndex((x, k) => x !== b[k]);
+  return i >= 0 && a[i] < b[i];
+}
+const GATE_STATE = {
+  unsupported: "heat-governor can't read this machine",
+  unreachable: "the machine is unreachable",
+  stale: "the machine's reading is stale",
+};
+// why this machine's boundaries cannot be changed from the page, "" when they can
+function machineGate(b) {
+  if (!b) return "the machine is not in the fleet file";
+  if (GATE_STATE[b.state]) return GATE_STATE[b.state];
+  if (!b.hasReading) return "no reading yet";
+  const v = parseVer(b.version);
+  if (!v) return "the daemon does not report its version; changing boundaries needs " + MIN_EDIT_TEXT + " or newer";
+  return verBefore(v, MIN_EDIT_VERSION) ? "it runs heat-governor " + b.version + "; changing boundaries needs " + MIN_EDIT_TEXT + " or newer" : "";
+}
+// the killer's real conditions, with this machine's values where its mem_guard reports them
+function killConditions(g) {
+  const gg = g || {};
+  const victim = fin(gg.min_victim_mib) ? mibText(gg.min_victim_mib) : "min_victim_mib";
+  const pct = fin(gg.act_over_pct) ? fmt(gg.act_over_pct, 0) + "%" : "act_over_pct percent";
+  return [
+    "it runs as the daemon's own user (a daemon running as root kills nothing)",
+    "its name is not on the protect list",
+    "it holds at least " + victim + " of anonymous memory itself (min_victim_mib)",
+    "the guard's action is kill" + (gg.action ? " (here it is " + gg.action + ")" : ""),
+    "it is far over: more than " + pct + " over its boundary (act_over_pct)",
+  ];
+}
+const KILL_WHEN = "It acts within about 12 s of the save: up to 2 s to reload the file, then its next scan.";
+function procNote(p) {
+  if (p.far_over_killable) return "the guard would kill it";
+  if (p.killable) return "killable, but not far over";
+  return "never killed: " + (p.reason || "refused by the guard");
+}
+function previewLine(d, rule) {
+  const n = fin(d.matching) ? d.matching : (d.processes || []).length;
+  if (!n) return "No running process matches this rule now.";
+  const head = n === 1 ? "1 process matches" : n + " processes match";
+  const scope = rule.scope === "total" ? "; together they are judged against " : "; each is judged on its own against ";
+  const kills = d.far_over_killable ? " " + d.far_over_killable + " would be killed." : "";
+  return head + scope + mibText(rule.max_mib) + "." + kills;
+}
+function farText(form, g, machine) {
+  const max = Number(form.max);
+  if (!String(form.max).trim() || !fin(max) || max <= 0) return "";
+  const known = !!g && fin(g.act_over_pct);
+  const pct = known ? g.act_over_pct : 50;
+  const why = known ? "act_over_pct " + fmt(pct, 0) + " on " + machine : "assumed 50%: this daemon does not report act_over_pct";
+  return "Far over above " + mibText(max * (1 + pct / 100)) + " (" + why + "): there the guard acts even while memory is fine.";
+}
+const maxHint = form => {
+  const v = Number(form.max);
+  const size = String(form.max).trim() && fin(v) ? " That is " + mibText(v) + "." : "";
+  return "MiB of anonymous memory, at least 64." + size;
+};
+function editState(listing, ruleName, isNew) {
+  if (listing.error) return { mode: "rejected" };
+  if (isNew) return { mode: "new", rule: null };
+  const rule = listing.rules.find(r => r && r.name === ruleName);
+  if (!rule) return { mode: "missing" };
+  if (rule.source !== "boundaries.toml" || rule.editable === false) return { mode: "readonly", rule };
+  return { mode: "edit", rule };
+}
+function editorEyebrow(machine, view, isNew) {
+  if (isNew) return "New boundary · " + machine + " · saved to boundaries.toml";
+  if (view && view.mode === "readonly") return "Boundary · " + machine + " · from config.toml, read-only";
+  return "Change boundary · " + machine + " · from boundaries.toml";
+}
+
+// ---- small views ----
+const ICONS = {
+  plus: ["M12 5v14", "M5 12h14"],
+  pencil: ["M4 20h4L19 9l-4-4L4 16z", "M13.5 6.5l4 4"],
+  bin: ["M5 7h14", "M10 7V5h4v2", "M7 7l1 13h8l1-13"],
+  lock: ["M7 11h10a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2z", "M8 11V8a4 4 0 0 1 8 0v3"],
+  warn: ["M12 3l9 16H3z", "M12 10v4", "M12 17h.01"],
+  refresh: ["M4 12a8 8 0 0 1 14-5.3L20 9", "M20 4v5h-5", "M20 12a8 8 0 0 1-14 5.3L4 15", "M4 20v-5h5"],
+  info: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M12 8v5", "M12 16h.01"],
+};
+function Icon({ n, size = 16 }) {
+  const paths = (ICONS[n] || []).map(d => html`<path key=${d} d=${d}></path>`);
+  return html`<svg class="ico" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
+}
+function TokenForm({ writes, id }) {
+  const submit = e => {
+    e.preventDefault();
+    const el = e.currentTarget.elements.namedItem(id);
+    const v = el ? el.value.trim() : "";
+    if (!v) return;
+    el.value = "";
+    writes.save(v);
+  };
+  const note = writes.note ? html`<p class="ferr" role="alert">${writes.note}</p>` : null;
+  return html`<form class="card tokform" onSubmit=${submit} aria-label="Write token">
+    <p class="srcnote"><${Icon} n="lock" /> Boundaries are read-only until you enter the write token from mesh serve's token file. It is kept for this browser tab only and sent only in the request header.</p>
+    ${note}
+    <div class="tokbox">
+      <div class="field"><label htmlFor=${id}>Write token</label>
+        <input id=${id} name=${id} class="input mono" type="password" autoComplete="off" spellCheck="false" autoCapitalize="off" required /></div>
+      <button class="btn primary" type="submit">Enable editing</button>
+    </div>
+  </form>`;
+}
+const WRITES_TEXT = {
+  checking: "Checking whether this server accepts boundary changes…",
+  disabled: "Boundary changes are not enabled on this server, so the page is read-only. Reading every machine's boundaries still works.",
+};
+function WritesPanel({ writes, mode, id }) {
+  if (mode === "locked") return html`<${TokenForm} writes=${writes} id=${id} />`;
+  if (mode === "unlocked") {
+    return html`<p class="srcnote">Editing is on for this tab. <button type="button" class="linkbtn" onClick=${writes.forget}>Forget the token</button></p>`;
+  }
+  const text = WRITES_TEXT[mode] || "Could not ask the server whether it accepts boundary changes (" + writes.probeErr + "), so the page is read-only.";
+  return html`<p class="srcnote">${text}</p>`;
+}
+// aria wiring for one field: its hint and its validator messages describe the input
+function fieldAria(id, errs, hasHint) {
+  const bad = !!(errs && errs.length);
+  const ids = [hasHint ? id + "-h" : "", bad ? id + "-e" : ""].filter(Boolean).join(" ");
+  return { "aria-describedby": ids || undefined, "aria-invalid": bad ? "true" : undefined };
+}
+function Errs({ id, list }) {
+  if (!list || !list.length) return null;
+  const items = list.map((p, i) => html`<li key=${i}>${p}</li>`);
+  return html`<ul id=${id} class="ferr">${items}</ul>`;
+}
+function Field({ id, label, hint, errs, children }) {
+  const hintEl = hint ? html`<span id=${id + "-h"} class="fhint">${hint}</span>` : null;
+  return html`<div class="field"><label htmlFor=${id}>${label}</label>${children}${hintEl}<${Errs} id=${id + "-e"} list=${errs} /></div>`;
+}
+function TextField({ id, label, hint, errs, value, onText, mono, readOnly }) {
+  return html`<${Field} id=${id} label=${label} hint=${hint} errs=${errs}>
+    <input id=${id} class=${mono ? "input mono" : "input"} value=${value} readOnly=${!!readOnly} autoComplete="off" spellCheck="false"
+      ...${fieldAria(id, errs, !!hint)} onInput=${e => onText(e.target.value)} />
+  </${Field}>`;
+}
+function CommInput({ form, upd, errs }) {
+  const add = () => upd(f => addComm(f));
+  const onKey = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+  const chips = form.comm.map(c => html`<li class="mchip" key=${c}><code>${c}</code>
+      <button type="button" aria-label=${"Remove process name " + c} onClick=${() => upd(f => removeComm(f, c))}>×</button></li>`);
+  const list = chips.length ? html`<ul class="chips plain" aria-label="Process names in the rule">${chips}</ul>` : null;
+  return html`<div class="field">
+    <label htmlFor="f-comm">Process names</label>
+    <div class="inrow">
+      <input id="f-comm" class="input mono" value=${form.commDraft} placeholder="python3" autoComplete="off" spellCheck="false"
+        ...${fieldAria("f-comm", errs, true)} onInput=${e => { const v = e.target.value; upd(f => ({ ...f, commDraft: v })); }} onKeyDown=${onKey} />
+      <button type="button" class="btn" onClick=${add} disabled=${!form.commDraft.trim()}>Add name</button>
+    </div>
+    ${list}
+    <span id="f-comm-h" class="fhint">Exact names, one at a time; each is matched against comm, the argv[0] name and the executable name.</span>
+    <${Errs} id="f-comm-e" list=${errs} />
+  </div>`;
+}
+function ScopeField({ form, upd, errs }) {
+  return html`<${Field} id="f-scope" label="Counted" errs=${errs}>
+    <select id="f-scope" class="input" value=${form.scope} ...${fieldAria("f-scope", errs, false)}
+      onChange=${e => { const v = e.target.value; upd(f => ({ ...f, scope: v })); }}>
+      <option value="process">Per process</option>
+      <option value="total">Total of all matches</option>
+    </select>
+  </${Field}>`;
+}
+function Matchers({ form, upd, errs }) {
+  const set = k => v => upd(f => ({ ...f, [k]: v }));
+  return html`<fieldset class="fset" aria-describedby=${errs.matchers ? "f-match-e" : undefined}>
+    <legend>Matches processes where all of these hold</legend>
+    <${CommInput} form=${form} upd=${upd} errs=${errs.comm} />
+    <${TextField} id="f-cmdline" label="Command line" mono=${true} value=${form.cmdline} onText=${set("cmdline")} errs=${errs.cmdline}
+      hint="Shell-style glob over the whole command line, for example *vllm*worker*." />
+    <${TextField} id="f-cgroup" label="Cgroup" mono=${true} value=${form.cgroup} onText=${set("cgroup")} errs=${errs.cgroup}
+      hint="Shell-style glob over the cgroup path. Leave a field empty to skip it; at least one is required." />
+    <${Errs} id="f-match-e" list=${errs.matchers} />
+  </fieldset>`;
+}
+function RuleForm({ form, upd, isNew, errs, g, machine, busy, status, onSave, onDelete, onCancel }) {
+  const nameHint = isNew ? "A unique name on this machine." : "An existing rule keeps its name; to rename, add a new rule and delete this one.";
+  const far = farText(form, g, machine);
+  const farEl = far ? html`<p class="callout"><${Icon} n="info" /><span>${far}</span></p>` : null;
+  const del = isNew ? null : html`<button type="button" class="btn" onClick=${onDelete} disabled=${busy}><${Icon} n="bin" />Delete boundary</button>`;
+  const saveLabel = isNew ? "Add boundary" : "Save boundary";
+  const st = status || { state: "", text: "" };
+  return html`<form class="card ed-form" aria-label="Boundary rule" noValidate onSubmit=${e => { e.preventDefault(); onSave(); }}>
+    <${TextField} id="f-name" label="Name" value=${form.name} readOnly=${!isNew} hint=${nameHint} errs=${errs.name}
+      onText=${v => upd(f => ({ ...f, name: v }))} />
+    <${Matchers} form=${form} upd=${upd} errs=${errs} />
+    <div class="ed-pair">
+      <${Field} id="f-max" label="Boundary (MiB)" hint=${maxHint(form)} errs=${errs.max_mib}>
+        <input id="f-max" class="input" type="number" min="64" step="1" inputMode="numeric" value=${form.max}
+          ...${fieldAria("f-max", errs.max_mib, true)} onInput=${e => { const v = e.target.value; upd(f => ({ ...f, max: v })); }} />
+      </${Field}>
+      <${ScopeField} form=${form} upd=${upd} errs=${errs.scope} />
+    </div>
+    ${farEl}
+    <${Errs} id="f-general-e" list=${errs.general} />
+    <div class="ed-actions">
+      <button type="button" class="btn" onClick=${onCancel}>Cancel</button>
+      ${del}
+      <button type="submit" class="btn primary" disabled=${busy}>${busy ? "Saving…" : saveLabel}</button>
+    </div>
+    <p class="ed-status" role="status" aria-live="polite" data-state=${st.state}>${st.text}</p>
+  </form>`;
+}
+function ProcRow({ p }) {
+  const s = ruleState(p);
+  return html`<tr>
+    <td>${p.pid}</td>
+    <td>${p.user || "uid " + p.uid}</td>
+    <td class="cmd"><code>${p.comm}</code><div class="note">${p.cmdline}</div></td>
+    <td><code>${p.container || "—"}</code></td>
+    <td>${mibText(p.rss_anon_mib)}</td>
+    <td><span class=${"status " + ruleClass(s)}>${ruleWord(s)}</span><div class="note">${procNote(p)}</div></td>
+  </tr>`;
+}
+function ProcTable({ procs }) {
+  const rows = procs.map(p => html`<${ProcRow} key=${p.pid} p=${p} />`);
+  return html`<div class="tablewrap"><table class="rules">
+    <thead><tr><th scope="col">PID</th><th scope="col">User</th><th scope="col">Process</th><th scope="col">Container</th>
+      <th scope="col" title=${HINT.anon}>Anonymous memory</th><th scope="col">Under this rule</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+function KillConditions({ g }) {
+  const items = killConditions(g).map(t => html`<li key=${t}>${t}</li>`);
+  return html`<div class="callout warn"><${Icon} n="warn" /><div>The guard kills a process under this rule only when all of these hold:
+    <ul>${items}</ul>${KILL_WHEN}</div></div>`;
+}
+function previewBody(pv, rule) {
+  if (!pv) return html`<p class="srcnote">Change the rule to see which running processes it matches.</p>`;
+  if (pv.kind === "invalid") return html`<p class="srcnote">Fix the messages beside the form to see what the rule matches.</p>`;
+  if (pv.kind !== "ok") return html`<p class="srcnote">${"Preview unavailable: " + (pv.text || TOKEN_REFUSED)}</p>`;
+  const d = pv.data, procs = Array.isArray(d.processes) ? d.processes : [];
+  const table = procs.length ? html`<${ProcTable} procs=${procs} />` : null;
+  const noGuard = d.guard_configured === false ? html`<p class="srcnote">This machine has no [memory] section: the guard's defaults are used.</p>` : null;
+  return html`<${React.Fragment}><p class="srcnote">${previewLine(d, rule)} Guard action: ${d.action || "unknown"}.</p>${noGuard}${table}</${React.Fragment}>`;
+}
+function PreviewPanel({ machine, pv, scanning, rule, g }) {
+  const live = scanning ? "Scanning " + machine + "…" : "Live scan on " + machine;
+  return html`<section class="card ed-preview" aria-label="Preview" aria-busy=${scanning ? "true" : "false"}>
+    <div class="drow"><h2>Matches now</h2><span class="eyebrow">${live}</span></div>
+    ${previewBody(pv, rule)}
+    <${KillConditions} g=${g} />
+  </section>`;
+}
+
+// ---- modal dialogs: focus moves in on open and back on close, Tab stays inside, Escape closes ----
+const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
+const focusables = box => Array.from(box.querySelectorAll(FOCUSABLE));
+// where Tab (or Shift+Tab) from position i of n moves focus to keep it inside; -1: leave it to the browser
+function trapIndex(n, i, back) {
+  if (!n) return -1;
+  if (i < 0) return back ? n - 1 : 0;
+  if (back && i === 0) return n - 1;
+  if (!back && i === n - 1) return 0;
+  return -1;
+}
+function modalKey(e, box, onClose) {
+  if (!box) return;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    onClose();
+    return;
+  }
+  if (e.key !== "Tab") return;
+  const els = focusables(box);
+  const j = trapIndex(els.length, els.indexOf(document.activeElement), e.shiftKey);
+  if (j >= 0) { e.preventDefault(); els[j].focus(); }
+}
+function useModalFocus(boxRef, onClose) {
+  const cb = useRef(onClose);
+  cb.current = onClose;
+  useEffect(() => {
+    const prev = document.activeElement;
+    const box = boxRef.current;
+    const first = box && (box.querySelector("[data-autofocus]") || focusables(box)[0]);
+    if (first) first.focus();
+    else if (box) box.focus();
+    // capture on document, so the Machines drawer's Escape listener never sees this key
+    const on = e => modalKey(e, boxRef.current, () => cb.current());
+    document.addEventListener("keydown", on, true);
+    return () => {
+      document.removeEventListener("keydown", on, true);
+      if (prev && prev.focus) prev.focus();
+    };
+  }, []);
+}
+function ModalFrame({ id, title, tone, icon, boxRef, children }) {
+  return html`<div class="modal-scrim">
+    <div class=${"modal " + (tone || "")} role="dialog" aria-modal="true" aria-labelledby=${id + "-t"} tabIndex="-1" ref=${boxRef}>
+      <span class="mmark" aria-hidden="true"><${Icon} n=${icon} size=${20} /></span>
+      <h2 id=${id + "-t"}>${title}</h2>
+      ${children}
+    </div>
+  </div>`;
+}
+function Modal(props) {
+  const ref = useRef(null);
+  useModalFocus(ref, props.onClose);
+  return html`<${ModalFrame} ...${props} boxRef=${ref} />`;
+}
+function DeleteBody({ name, machine, path, pv, onCancel, onConfirm }) {
+  const n = pv && pv.kind === "ok" && fin(pv.data.matching) ? pv.data.matching : null;
+  const noun = n === 1 ? " running process" : " running processes";
+  const now = n == null ? "" : " It matches " + n + noun + " now.";
+  return html`<${React.Fragment}>
+    <p>${"Without this boundary, the processes it matches are judged by growth alone, like any other process." + now}</p>
+    <p class="callout">${"Removes " + name + " from " + (path || "boundaries.toml") + " on " + machine + ". The previous file is kept as a backup."}</p>
+    <div class="row"><button type="button" class="btn" data-autofocus="true" onClick=${onCancel}>Keep it</button>
+      <button type="button" class="btn danger" onClick=${onConfirm}><${Icon} n="bin" />Delete boundary</button></div>
+  </${React.Fragment}>`;
+}
+function killBudget(g, machine) {
+  if (!g || !fin(g.max_kills_per_hour)) return "";
+  const used = fin(g.kills_last_hour) ? " (" + g.kills_last_hour + " used)" : "";
+  return "A kill counts against the budget of " + g.max_kills_per_hour + " per hour on " + machine + used + ".";
+}
+function KillBody({ procs, g, machine, onCancel, onConfirm }) {
+  const n = procs.length;
+  const lead = n === 1 ? "One running process would be far over its boundary after this change, and the guard could kill it:" : n + " running processes would be far over their boundary after this change, and the guard could kill them:";
+  const items = procs.map(p => html`<li key=${p.pid}><code>${"pid " + p.pid}</code><span class="cmd">${(p.user || "uid " + p.uid) + " · " + (p.cmdline || p.comm)}</span><b>${mibText(p.usage_mib)}</b></li>`);
+  const budget = killBudget(g, machine);
+  const budgetEl = budget ? html`<p>${budget}</p>` : null;
+  return html`<${React.Fragment}>
+    <p>${lead}</p>
+    <ul class="plist" aria-label="Processes that could be killed">${items}</ul>
+    <${KillConditions} g=${g} />
+    ${budgetEl}
+    <div class="row"><button type="button" class="btn" data-autofocus="true" onClick=${onCancel}>Back to the rule</button>
+      <button type="button" class="btn danger" onClick=${onConfirm}>Save and allow the kill</button></div>
+  </${React.Fragment}>`;
+}
+function ConflictBody({ machine, base, now, isNew, onCancel, onReload }) {
+  const after = isNew ? "Reloading keeps your form and takes the file as it is now as the base." : "Reloading replaces the form with the rule as it is on the box now; your edits are discarded.";
+  return html`<${React.Fragment}>
+    <p>${"boundaries.toml on " + machine + " was saved after you opened this rule, so your change was not written."}</p>
+    <p class="callout">${"You started from " + shortVer(base) + " · " + machine + " now has " + shortVer(now) + "."}</p>
+    <p>${after}</p>
+    <div class="row"><button type="button" class="btn" onClick=${onCancel}>Close</button>
+      <button type="button" class="btn primary" data-autofocus="true" onClick=${onReload}><${Icon} n="refresh" />Reload the current rules</button></div>
+  </${React.Fragment}>`;
+}
+
+// ---- editor views that are not the form ----
+function RejectedView({ machine, error, row }) {
+  const list = row && row.rules.length ? html`<${RulesTable} row=${row} />` : html`<p class="srcnote">The daemon reports no rules in use.</p>`;
+  return html`<div class="card">
+    <p class="callout warn" role="alert"><${Icon} n="warn" /><span>${"boundaries.toml on " + machine + " is rejected: " + error + ". Editing is disabled until the file is fixed on the box."}</span></p>
+    <h2 class="sub2">Last good rules, still live</h2>
+    <p class="srcnote">The daemon keeps running the rules it last loaded; these come from its state, not from the file.</p>
+    ${list}
+  </div>`;
+}
+function ReadOnlyRule({ machine, rule }) {
+  const comm = Array.isArray(rule.comm) && rule.comm.length ? rule.comm.join(", ") : "—";
+  return html`<div class="card">
+    <p class="callout"><${Icon} n="lock" /><span>${"This rule lives in config.toml on " + machine + ". The page changes only boundaries.toml rules; change this one in config.toml on the box."}</span></p>
+    <dl class="facts">
+      <dt>Process names</dt><dd>${comm}</dd>
+      <dt>Command line</dt><dd>${rule.cmdline || "—"}</dd>
+      <dt>Cgroup</dt><dd>${rule.cgroup || "—"}</dd>
+      <dt>Boundary</dt><dd>${mibText(rule.max_mib)}</dd>
+      <dt>Counted</dt><dd>${scopeText(rule.scope)}</dd>
+    </dl>
+  </div>`;
+}
+function Notice({ text, children }) {
+  return html`<div class="card"><p class="srcnote">${text}</p>${children}</div>`;
+}
+
+// ---- the editor ----
+function useListing(machine, token, live, onUnauthorized) {
+  const [st, setSt] = useState({ kind: "loading" });
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!live || !token) return undefined;
+    let alive = true;
+    setSt({ kind: "loading" });
+    boundaryApi(machine, token).list().then(res => { if (alive) setSt(listState(res)); });
+    return () => { alive = false; };
+  }, [machine, token, live, n]);
+  useEffect(() => { if (st.kind === "unauthorized") onUnauthorized(); }, [st]);
+  return [st, () => setN(x => x + 1)];
+}
+const PREVIEW_DEBOUNCE_MS = 700;
+function usePreview(machine, token, rule, on) {
+  const [pv, setPv] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const key = JSON.stringify(rule);
+  useEffect(() => {
+    if (!on) return undefined;
+    let alive = true;
+    const timer = setTimeout(() => {
+      setScanning(true);
+      boundaryApi(machine, token).preview(rule).then(res => { if (alive) { setPv(previewState(res)); setScanning(false); } });
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => { alive = false; clearTimeout(timer); setScanning(false); };
+  }, [key, on, token]);
+  return [pv, scanning];
+}
+function useSaver({ machine, token, version, writes, onSaved, go }) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [problems, setProblems] = useState(null);
+  const settle = (out, req) => {
+    if (out.kind === "saved") { onSaved(savedText(req.op, req.rule.name, machine, out)); go("boundaries"); return; }
+    if (out.kind === "would_kill") setModal({ kind: "kill", req, procs: out.processes });
+    if (out.kind === "conflict") setModal({ kind: "conflict", version: out.version });
+    if (out.kind === "invalid") setProblems(out.problems);
+    setStatus(finalStatus(out));
+    if (out.kind === "unauthorized") writes.refuse("The token was refused, so nothing was saved. Enter it again.");
+  };
+  const attempt = async (op, rule, allowKill) => {
+    const req = { op, rule, version, allowKill };
+    setModal(null);
+    setProblems(null);
+    setBusy(true);
+    setStatus({ state: "progress", text: progressText(op, machine) });
+    const out = await runSave(boundaryApi(machine, token), req);
+    setBusy(false);
+    settle(out, req);
+  };
+  return { busy, status, modal, setModal, problems, setProblems, attempt };
+}
+function editorModal(s, ctx) {
+  const m = s.modal;
+  if (!m) return null;
+  const close = () => s.setModal(null);
+  if (m.kind === "delete") {
+    return html`<${Modal} id="dlg-del" tone="danger" icon="bin" title=${"Delete " + ctx.name + " on " + ctx.machine + "?"} onClose=${close}>
+      <${DeleteBody} name=${ctx.name} machine=${ctx.machine} path=${ctx.path} pv=${ctx.pv} onCancel=${close} onConfirm=${() => s.attempt("rm", { name: ctx.name }, false)} /></${Modal}>`;
+  }
+  if (m.kind === "kill") {
+    const title = m.procs.length === 1 ? "This change would kill a running process" : "This change would kill running processes";
+    return html`<${Modal} id="dlg-kill" tone="danger" icon="warn" title=${title} onClose=${close}>
+      <${KillBody} procs=${m.procs} g=${ctx.g} machine=${ctx.machine} onCancel=${close} onConfirm=${() => s.attempt(m.req.op, m.req.rule, true)} /></${Modal}>`;
+  }
+  const reload = () => { close(); ctx.onReload(); };
+  return html`<${Modal} id="dlg-conflict" tone="warn" icon="refresh" title=${ctx.machine + "'s boundaries changed while you were editing"} onClose=${close}>
+    <${ConflictBody} machine=${ctx.machine} base=${ctx.version} now=${m.version} isNew=${ctx.isNew} onCancel=${close} onReload=${reload} /></${Modal}>`;
+}
+function RuleEditor({ machine, data, view, form, upd, touched, isNew, g, writes, go, onSaved, onReload }) {
+  const rule = ruleFromForm(form);
+  const [pv, scanning] = usePreview(machine, writes.token, rule, touched || !isNew);
+  const s = useSaver({ machine, token: writes.token, version: data.version, writes, onSaved, go });
+  useEffect(() => { if (pv && pv.kind === "unauthorized") writes.refuse(); }, [pv]);
+  const errs = problemsByField(s.problems || (pv && pv.kind === "invalid" ? pv.problems : []));
+  const edit = fn => { s.setProblems(null); upd(fn); };
+  const name = view.rule ? view.rule.name : rule.name;
+  const ctx = { machine, name, path: data.boundaries_path, pv, g, version: data.version, isNew, onReload };
+  return html`<${React.Fragment}>
+    <div class="ed-grid">
+      <${RuleForm} form=${form} upd=${edit} isNew=${isNew} errs=${errs} g=${g} machine=${machine} busy=${s.busy} status=${s.status}
+        onSave=${() => s.attempt(isNew ? "add" : "set", rule, false)} onDelete=${() => s.setModal({ kind: "delete" })} onCancel=${() => go("boundaries")} />
+      <${PreviewPanel} machine=${machine} pv=${pv} scanning=${scanning} rule=${rule} g=${g} />
+    </div>
+    <p class="srcnote">${"Saves to " + (data.boundaries_path || "boundaries.toml") + " on " + machine + ", based on version " + shortVer(data.version) + ". Validated on the box and written with a backup; the daemon reloads it within about 2 s."}</p>
+    ${editorModal(s, ctx)}
+  </${React.Fragment}>`;
+}
+// what fills the editor below its heading, from the gate, the token and the file read on the box
+function editorMain(p) {
+  const { mode, gate, listing, view, machine } = p;
+  if (mode !== "unlocked") return html`<${WritesPanel} writes=${p.writes} mode=${mode} id="tok-edit" />`;
+  if (gate) return html`<${Notice} text=${"This machine's boundaries cannot be changed from here: " + gate + "."} />`;
+  if (listing.kind === "loading") return html`<${Notice} text=${"Reading boundaries.toml on " + machine + "…"} />`;
+  if (listing.kind !== "ok") {
+    const retry = html`<button type="button" class="btn sm" onClick=${p.reload}><${Icon} n="refresh" />Try again</button>`;
+    return html`<${Notice} text=${"Cannot read the boundaries on " + machine + ": " + (listing.text || TOKEN_REFUSED)}>${retry}</${Notice}>`;
+  }
+  if (view.mode === "rejected") return html`<${RejectedView} machine=${machine} error=${listing.data.error} row=${p.row} />`;
+  if (view.mode === "missing") return html`<${Notice} text=${"No rule named " + p.ruleName + " in boundaries.toml on " + machine + ". It may have been deleted."} />`;
+  if (view.mode === "readonly") return html`<${ReadOnlyRule} machine=${machine} rule=${view.rule} />`;
+  return html`<${RuleEditor} ...${p.editor} data=${listing.data} view=${view} />`;
+}
+// the fleet machine an editor route names, and why it cannot be changed ("" when it can)
+function routeMachine(doc, machine) {
+  const m = ((doc && doc.machines) || []).find(x => x && x.name === machine) || null;
+  if (!doc) return { m, g: null, row: null, gate: "waiting for the fleet reader" };
+  const g = m ? guardOf(m.thermal) : null;
+  return { m, g, row: g ? toGuardRow(m) : null, gate: machineGate(m ? toBox(m) : null) };
+}
+function Editor({ route, doc, writes, go, onSaved }) {
+  const { machine, rule: ruleName, isNew } = route;
+  const { g, row, gate } = routeMachine(doc, machine);
+  const mode = writesMode(writes.enabled, writes.token, writes.probeErr);
+  const [listing, reload] = useListing(machine, writes.token, mode === "unlocked" && !gate, writes.refuse);
+  const view = listing.kind === "ok" ? editState(listing.data, ruleName, isNew) : null;
+  // null: the form shows the rule as read on the box; set on the first edit
+  const [form, setForm] = useState(null);
+  const base = () => formFromRule(view && view.rule);
+  const upd = fn => setForm(f => fn(f || base()));
+  const onReload = () => {
+    if (!isNew) { setForm(null); }
+    reload();
+  };
+  const head = useRef(null);
+  useEffect(() => { if (head.current) head.current.focus(); }, []);
+  const editor = { machine, form: form || base(), upd, touched: form !== null, isNew, g, writes, go, onSaved, onReload };
+  const main = editorMain({ mode, gate, listing, view, machine, ruleName, writes, reload, editor, row });
+  return html`<section aria-labelledby="ed-title">
+    <a class="back" href="#boundaries"><span aria-hidden="true">←</span> Boundaries</a>
+    <div class="titlebar"><div><span class="eyebrow">${editorEyebrow(machine, view, isNew)}</span>
+      <h1 id="ed-title" tabIndex="-1" ref=${head}>${isNew ? "New boundary" : ruleName}</h1></div></div>
+    ${main}
   </section>`;
 }
 
@@ -1550,10 +2371,20 @@ function App() {
   const { doc, err } = useFleet();
   const setPref = k => { setPrefS(k); store.set("hg-mode", k); };
   useEffect(() => { document.documentElement.dataset.mode = mode; }, [mode]);
-  const [tab, setTab] = useState(() => readTab(location.hash));
-  useEffect(() => { const on = () => setTab(readTab(location.hash)); addEventListener("hashchange", on); return () => removeEventListener("hashchange", on); }, []);
-  // setting the hash adds a history entry (Back returns to the previous tab) and fires hashchange
-  const go = t => { setTab(t); if (location.hash !== "#" + t) location.hash = t; };
+  const [route, setRoute] = useState(() => readRoute(location.hash));
+  useEffect(() => { const on = () => setRoute(readRoute(location.hash)); addEventListener("hashchange", on); return () => removeEventListener("hashchange", on); }, []);
+  // setting the hash adds a history entry (Back returns to the previous view) and fires hashchange
+  const go = t => { setRoute(readRoute("#" + t)); if (location.hash !== "#" + t) location.hash = t; };
+  const tab = route.tab;
+  const writes = useWrites();
+  const [flash, setFlash] = useState("");
+  useEffect(() => {
+    if (!flash) { return undefined; }
+    const t = setTimeout(() => setFlash(""), 15000);
+    return () => clearTimeout(t);
+  }, [flash]);
+  const editKey = route.machine + "/" + (route.isNew ? NEW_RULE : route.rule);
+  const editor = route.machine ? html`<${Editor} key=${editKey} route=${route} doc=${doc} writes=${writes} go=${go} onSaved=${setFlash} />` : null;
   const rules = useMemo(() => fleetRuleTotal(doc), [doc]);
   const ruleCount = doc && html`<span class="n">${rules}</span>`;
   const tabs = TABS.map(([k, l]) => html`<button key=${k} aria-current=${tab === k ? "page" : undefined} onClick=${() => go(k)}>${l}${k === "boundaries" && ruleCount}</button>`);
@@ -1569,7 +2400,10 @@ function App() {
     </header>
     <main>
       <div hidden=${tab !== "machines"}><${Machines} doc=${doc} err=${err} /></div>
-      <div hidden=${tab !== "boundaries"}><${Boundaries} doc=${doc} err=${err} /></div>
+      <div hidden=${tab !== "boundaries"}>
+        <div hidden=${!!route.machine}><${Boundaries} doc=${doc} err=${err} writes=${writes} go=${go} flash=${flash} /></div>
+        ${editor}
+      </div>
     </main>
   </${React.Fragment}>`;
 }

@@ -13,6 +13,7 @@ Public API::
     reader.snapshot() -> dict         # JSON-serialisable, see below
     reader.history(name, since_s=86400, max_points=300) -> list[dict]   # in-memory buffer only
     reader.trend(name, since_s=86400, max_points=300) -> {"source", "samples"}
+    reader.transport(name)            # the machine's transport (mesh serve's boundaries calls)
 
 Threads: one daemon thread per machine (``fleet-reader:<name>``), so a hung or slow box
 never delays the others. :meth:`stop` sets an event and joins with a bounded deadline; a
@@ -115,8 +116,10 @@ def default_transport(fleet: Fleet, state_dir: Path | str | None = None) -> Tran
 
     def make(m: Machine) -> Transport:
         if m.transport == "local":
-            return LocalTransport(timeout_s=fleet.timeout_s)
-        return SshTransport(m.host, timeout_s=fleet.timeout_s, state_dir=state_dir)
+            return LocalTransport(timeout_s=fleet.timeout_s, bin_path=m.bin or None)
+        return SshTransport(
+            m.host, timeout_s=fleet.timeout_s, state_dir=state_dir, bin_path=m.bin or None
+        )
 
     return make
 
@@ -570,6 +573,14 @@ class FleetReader:
         with self._lock:
             rows = box.ring.samples(since)
         return [_sample_dict(s) for s in downsample(rows, max_points)]
+
+    def transport(self, name: str) -> Transport:
+        """The machine's own transport, for a caller that runs its own command over it (the
+        mesh server's boundaries service calls ``boundaries`` on it from an HTTP thread, the way
+        :meth:`trend` calls ``history``). Every call there starts its own process, so it never
+        blocks the polling thread; the reader still owns and closes it. ``KeyError`` for an
+        unknown name."""
+        return self._boxes[name].transport
 
     def trend(
         self, name: str, since_s: float = HISTORY_S, max_points: int = DEFAULT_MAX_POINTS
