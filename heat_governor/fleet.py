@@ -18,7 +18,7 @@ from heat_governor.config import ENV_CONFIG
 
 TRANSPORTS = ("ssh", "local")
 TOP_KEYS = frozenset({"poll_s", "timeout_s", "machines"})
-MACHINE_KEYS = frozenset({"name", "host", "transport"})
+MACHINE_KEYS = frozenset({"name", "host", "transport", "bin"})
 POLL_BOUNDS = (1.0, 3600.0)
 TIMEOUT_BOUNDS = (0.5, 120.0)
 DEFAULT_POLL_S = 10.0
@@ -28,6 +28,7 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
 _LABEL_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _USER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,31}$")
 _V6_RE = re.compile(r"^[0-9A-Fa-f:]+$")
+_BIN_RE = re.compile(r"^(~/|/)[A-Za-z0-9_+@%=:,.-]+(/[A-Za-z0-9_+@%=:,.-]+)*$")
 _HINT = "see docs/fleet.example.toml for the fleet.toml format"
 
 
@@ -36,6 +37,7 @@ class Machine:
     name: str
     transport: str = "ssh"
     host: str = ""
+    bin: str = ""  # heat-governor binary on that machine; "" means the default path
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,20 @@ def _bounded(top: dict, key: str, bounds: tuple[float, float], default: float) -
     return float(v)
 
 
+def validate_bin(path: object) -> str:
+    """Return ``path`` if it is a safe heat-governor binary path (absolute, or ``~/`` then a
+    relative path; plain path characters only, no ``..``), else raise CliError."""
+    ok = isinstance(path, str) and len(path) <= 512 and bool(_BIN_RE.match(path))
+    if ok:
+        ok = ".." not in path.split("/")
+    if not ok:
+        raise _fail(
+            f"invalid bin {path!r}",
+            "use an absolute path or ~/relative path with letters, digits and . _ - + only",
+        )
+    return path
+
+
 def _machine(raw: object, index: int) -> Machine:
     where = f"machines[{index}]"
     if not isinstance(raw, dict):
@@ -111,13 +127,14 @@ def _machine(raw: object, index: int) -> Machine:
     transport = raw.get("transport", "ssh")
     if transport not in TRANSPORTS:
         raise _fail(f"{where}: transport must be one of {', '.join(TRANSPORTS)}")
+    bin_path = validate_bin(raw["bin"]) if "bin" in raw else ""
     if transport == "local":
         if raw.get("host"):
             raise _fail(f"{where}: a local machine takes no host")
-        return Machine(name=name, transport="local")
+        return Machine(name=name, transport="local", bin=bin_path)
     if "host" not in raw:
         raise _fail(f"{where}: an ssh machine needs a host")
-    return Machine(name=name, transport="ssh", host=validate_host(raw["host"]))
+    return Machine(name=name, transport="ssh", host=validate_host(raw["host"]), bin=bin_path)
 
 
 def parse_fleet(data: dict) -> Fleet:

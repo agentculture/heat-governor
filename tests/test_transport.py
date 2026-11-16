@@ -33,6 +33,16 @@ elif mode == "empty":
     sys.exit(0)
 elif mode == "junk":
     print("not json")
+elif mode == "echo":
+    # stdin-echo: keep what arrived on stdin, answer with its size
+    data = sys.stdin.buffer.read()
+    with open(os.environ["FAKE_SSH_STDIN"], "wb") as f:
+        f.write(data)
+    print(json.dumps({{"stdin_len": len(data)}}))
+elif mode == "exit3":
+    sys.stdout.write("partial out\\n")
+    sys.stderr.write("rule rejected: bad name\\n")
+    sys.exit(3)
 elif mode == "flood":
     # a broken or hostile remote: stream output until killed
     chunk = b"x" * 65536
@@ -267,3 +277,214 @@ def test_output_at_the_cap_is_accepted(exec_fake, tmp_path, monkeypatch):
     monkeypatch.setattr(transport, "MAX_DOC_BYTES", len(body))
     with pytest.raises(Unreachable, match="too large"):
         t.fetch()
+
+
+# -- boundaries commands with a body on stdin (t13) -------------------------------
+
+BIN_DEFAULT = "~/.local/bin/heat-governor"
+CFG = "/home/u/.config/heat-governor/config.toml"
+
+
+def remote_of(argv: list[str]) -> str:
+    return argv[argv.index("--") + 2]
+
+
+@pytest.mark.parametrize("verb", ["list", "apply", "preview"])
+def test_boundaries_remote_argv_is_fixed_and_body_free(fake, tmp_path, monkeypatch, verb):
+    monkeypatch.setenv("FAKE_SSH_MODE", "echo")
+    monkeypatch.setenv("FAKE_SSH_STDIN", str(tmp_path / "stdin"))
+    t = make(fake, tmp_path)
+    t.boundaries(verb, b'{"rules": []}', config_path=CFG)
+    t.boundaries(verb, b'{"name": "$(rm -rf /); `x` \'; evil"}', config_path=CFG)
+    first, second = calls(fake[1])
+    assert first == second
+    i = first.index("--")
+    assert first[i + 1] == "spark"
+    expected = f"~/.local/bin/heat-governor boundaries {verb} --config {shlex.quote(CFG)} --json"
+    assert first[i + 2] == expected
+    assert "evil" not in " ".join(first)
+
+
+def test_boundaries_body_arrives_on_stdin(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SSH_MODE", "echo")
+    monkeypatch.setenv("FAKE_SSH_STDIN", str(tmp_path / "stdin"))
+    body = ('{"rules": [{"name": "caf\u00e9\\n"}]}' + " " * 300_000).encode()
+    res = make(fake, tmp_path).boundaries("apply", body, config_path=CFG)
+    assert res.code == 0
+    assert json.loads(res.stdout) == {"stdin_len": len(body)}
+    assert (tmp_path / "stdin").read_bytes() == body
+
+
+def test_boundaries_nonzero_exit_returns_code_stdout_stderr(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SSH_MODE", "exit3")
+    res = make(fake, tmp_path).boundaries("apply", b"{}", config_path=CFG)
+    assert res.code == 3
+    assert res.stdout == "partial out\n"
+    assert res.stderr == "rule rejected: bad name\n"
+
+
+@pytest.mark.parametrize("mode", ["hang"])
+def test_boundaries_timeout_is_its_own_and_raises_unreachable(fake, tmp_path, monkeypatch, mode):
+    import heat_governor.transport as transport
+
+    monkeypatch.setenv("FAKE_SSH_MODE", mode)
+    monkeypatch.setattr(transport, "BOUNDARIES_TIMEOUT_S", 0.5)
+    t = make(fake, tmp_path, timeout_s=30.0)  # the fetch timeout must not apply
+    start = time.monotonic()
+    with pytest.raises(Unreachable, match="timed out"):
+        t.boundaries("list", b"", config_path=CFG)
+    assert time.monotonic() - start < 3.0
+
+
+def test_boundaries_timeout_constant_is_separate_from_fetch():
+    import heat_governor.transport as transport
+
+    assert transport.BOUNDARIES_TIMEOUT_S > 5.0
+
+
+def test_boundaries_default_and_custom_bin(fake, tmp_path):
+    t = make(fake, tmp_path)
+    t.boundaries("list", b"", config_path=CFG)
+    custom = SshTransport(
+        "spark",
+        timeout_s=2.0,
+        state_dir=tmp_path / "state",
+        ssh=fake[0],
+        bin_path="/opt/hg/bin/heat-governor",
+    )
+    custom.boundaries("list", b"", config_path=CFG)
+    a, b = (remote_of(c) for c in calls(fake[1]))
+    assert a.startswith(BIN_DEFAULT + " boundaries list --config ")
+    assert b.startswith("/opt/hg/bin/heat-governor boundaries list --config ")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"verb": "delete"},
+        {"verb": "list; id"},
+        {"verb": "list", "config_path": "relative/config.toml"},
+        {"verb": "list", "config_path": "/etc/x\nrm"},
+        {"verb": "list", "config_path": ""},
+        {"verb": "list", "body": "x" * (2 << 20)},
+    ],
+)
+def test_boundaries_refuses_bad_input_before_any_process(fake, tmp_path, kwargs):
+    args = {"verb": "list", "body": b"", "config_path": CFG, **kwargs}
+    with pytest.raises(Unreachable):
+        make(fake, tmp_path).boundaries(args["verb"], args["body"], config_path=args["config_path"])
+    assert not fake[1].exists()
+
+
+@pytest.mark.parametrize("bad", ["-oProxyCommand=x", "a b", "x;y", "$(x)", "../x", "rel/bin"])
+def test_bad_bin_is_rejected_at_construction(fake, tmp_path, bad):
+    with pytest.raises(CliError):
+        SshTransport("spark", timeout_s=2.0, state_dir=tmp_path, ssh=fake[0], bin_path=bad)
+
+
+def test_fetch_and_history_still_use_devnull_stdin(fake, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SSH_MODE", "echo")
+    monkeypatch.setenv("FAKE_SSH_STDIN", str(tmp_path / "stdin"))
+    t = make(fake, tmp_path)
+    t.fetch()
+    assert (tmp_path / "stdin").read_bytes() == b""
+    with pytest.raises(Unreachable):  # the echo answer is not a history document
+        t.history(1.0, 100.0, 10)
+    assert (tmp_path / "stdin").read_bytes() == b""
+
+
+def test_boundaries_runs_the_real_remote_shell_string(exec_fake, tmp_path):
+    """sshd hands the string to a shell: the tilde bin expands and a spaced config path
+    stays one argument."""
+    bin_dir = tmp_path / "home" / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    tool = bin_dir / "heat-governor"
+    tool.write_text(
+        f"#!{sys.executable}\nimport json, sys\n"
+        "print(json.dumps({'argv': sys.argv[1:], 'stdin': sys.stdin.read()}))\n"
+    )
+    tool.chmod(0o755)
+    import os
+
+    os.environ["HOME"] = str(tmp_path / "home")
+    try:
+        res = make(exec_fake, tmp_path).boundaries(
+            "preview", b"BODY", config_path="/tmp/a dir/config.toml"
+        )
+    finally:
+        os.environ.pop("HOME", None)
+    got = json.loads(res.stdout)
+    assert got["argv"] == ["boundaries", "preview", "--config", "/tmp/a dir/config.toml", "--json"]
+    assert got["stdin"] == "BODY"
+
+
+# -- LocalTransport.boundaries ----------------------------------------------------
+
+
+def test_local_boundaries_runs_the_same_command_with_stdin(tmp_path):
+    from heat_governor.transport import LocalTransport
+
+    tool = tmp_path / "hg"
+    tool.write_text(
+        f"#!{sys.executable}\nimport json, sys\n"
+        "print(json.dumps({'argv': sys.argv[1:], 'stdin': sys.stdin.read()}))\n"
+        "sys.stderr.write('warn\\n')\nsys.exit(4)\n"
+    )
+    tool.chmod(0o755)
+    t = LocalTransport(timeout_s=2.0, bin_path=str(tool))
+    res = t.boundaries("apply", b"hello", config_path=CFG)
+    got = json.loads(res.stdout)
+    assert got == {"argv": ["boundaries", "apply", "--config", CFG, "--json"], "stdin": "hello"}
+    assert res.code == 4
+    assert res.stderr == "warn\n"
+
+
+def test_local_boundaries_defaults_to_this_python(monkeypatch):
+    import heat_governor.transport as transport
+
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["argv"] = argv
+        seen["input"] = kw["input"]
+
+        class P:
+            returncode = 0
+            stdout = b"{}"
+            stderr = b""
+
+        return P()
+
+    monkeypatch.setattr(transport.subprocess, "run", fake_run)
+    transport.LocalTransport(timeout_s=1.0).boundaries("list", b"x", config_path=CFG)
+    assert seen["argv"][:3] == [sys.executable, "-m", "heat_governor"]
+    assert seen["argv"][3:] == ["boundaries", "list", "--config", CFG, "--json"]
+    assert seen["input"] == b"x"
+
+
+def test_local_boundaries_timeout_is_unreachable(tmp_path, monkeypatch):
+    import heat_governor.transport as transport
+    from heat_governor.transport import LocalTransport
+
+    tool = tmp_path / "hg"
+    tool.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(30)\n")
+    tool.chmod(0o755)
+    monkeypatch.setattr(transport, "BOUNDARIES_TIMEOUT_S", 0.4)
+    with pytest.raises(Unreachable, match="timed out"):
+        LocalTransport(timeout_s=1.0, bin_path=str(tool)).boundaries("list", b"", config_path=CFG)
+
+
+def test_fleet_toml_bin_key(tmp_path):
+    from heat_governor.fleet import load_fleet
+
+    f = tmp_path / "fleet.toml"
+    f.write_text(
+        '[[machines]]\nname = "a"\nhost = "a.example"\nbin = "/opt/hg/heat-governor"\n'
+        '[[machines]]\nname = "b"\nhost = "b.example"\n'
+    )
+    a, b = load_fleet(f).machines
+    assert a.bin == "/opt/hg/heat-governor"
+    assert b.bin == ""
+    f.write_text('[[machines]]\nname = "a"\nhost = "a.example"\nbin = ""\n')
+    with pytest.raises(CliError):
+        load_fleet(f)
