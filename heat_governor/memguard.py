@@ -290,9 +290,8 @@ class MemGuard:
             total, avail = mem
             self._memory(mono, wall, total, avail)
         self._oom_counters(wall)
-        doc = self._build_doc(avail, mono)
-        with self._lock:
-            self._doc = doc
+        with self._lock:  # under the lock so a set_rule() swap is never overwritten by a stale doc
+            self._doc = self._build_doc(avail, mono)
 
     def _memory(self, mono: float, wall: float, total: float, avail: float) -> None:
         r = self.rule
@@ -365,15 +364,31 @@ class MemGuard:
     def _rules(self) -> tuple:
         return tuple(getattr(self.rule, "allow", ()) or ())
 
+    def set_rule(self, rule) -> None:
+        """Swap in a rule that differs from the current one only in ``allow``.
+
+        The trigger window, the tracker and the killer's budget and repeat history stay
+        exactly as they are, so a boundary save mid-runaway costs the guard nothing. The swap
+        is one step under the guard's lock: a scan in progress keeps the rule it started with
+        (its boundary doc is dropped) and the next poll uses the new one."""
+        with self._lock:
+            self.rule = rule
+            self.killer.rule = rule
+            self._bounds_doc = memboundary.idle_doc(self._rules())
+            self._doc = self._build_doc(self._doc["avail_mib"])
+
     def _assess(self, procs: dict) -> memboundary.Assessment | None:
         """Classify the scan against ``[[memory.allow]]`` (None without rules)."""
-        rules = self._rules()
+        rule = self.rule
+        rules = tuple(getattr(rule, "allow", ()) or ())
         if not rules:
             return None
         names = getattr(self.killer, "names", None)
-        pct = float(getattr(self.rule, "act_over_pct", 50.0))
+        pct = float(getattr(rule, "act_over_pct", 50.0))
         bounds = memboundary.assess(procs, rules, pct, names)
-        self._bounds_doc = bounds.doc()
+        with self._lock:
+            if self.rule is rule:  # not swapped mid-scan
+                self._bounds_doc = bounds.doc()
         return bounds
 
     def _crossings(self, bounds, wall: float, avail: float, blamed: list) -> None:

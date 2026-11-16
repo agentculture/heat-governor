@@ -37,7 +37,7 @@ import socket
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
@@ -769,10 +769,14 @@ class Daemon:
     # -- the memory guard and the shipper (their own threads; the tick never waits on them)
     def set_memory(self, rule: MemoryRule | None) -> None:
         """A reload: start, rebuild (any change) or stop the guard."""
-        if rule == self.opts.memory:
+        old = self.opts.memory
+        if rule == old:
             return
         self.opts.memory = rule
-        if self._started:
+        if self._started and self._boundary_only(old, rule):
+            self._fenced("memory guard rules", lambda: self.guard.set_rule(rule))
+            self._log("memory guard: boundaries updated, window and kill budget kept")
+        elif self._started:
             # carry the rolling kill budget and repeat history across the rebuild (review #6):
             # an unrelated edit must not re-open a budget that was meant as a safety stop
             state = self.guard.killer.export_state() if self.guard is not None else None
@@ -782,6 +786,13 @@ class Daemon:
                 self._fenced("memory guard state", lambda: self.guard.killer.import_state(state))
             if rule is None:
                 self._log("memory guard: off")
+
+    def _boundary_only(self, old: MemoryRule | None, new: MemoryRule | None) -> bool:
+        """True when the running guard can take ``new`` by swapping its rules: both set and
+        equal in every field but ``allow``."""
+        if old is None or new is None or self.guard is None:
+            return False
+        return replace(old, allow=()) == replace(new, allow=())
 
     def set_ship(self, rule: ShipRule | None) -> None:
         """A reload: start, rebuild (any change) or stop the shipper."""

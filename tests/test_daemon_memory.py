@@ -558,3 +558,96 @@ def test_reload_keeps_the_kill_budget_and_repeat_history(tmp_path):
     assert rig.daemon.guard is not old  # rebuilt
     assert rig.daemon.guard.rule.top_n == 5
     assert rig.daemon.guard.killer.kills_last_hour(now) == 3
+
+
+# -- a boundary-only save keeps the guard's window and budget (t9) -----------------------------
+
+ALLOW = '\n[[memory.allow]]\nname = "vllm"\nmax_mib = 90000\ncomm = ["vllm"]\n'
+ALLOW_OTHER = '\n[[memory.allow]]\nname = "db"\nmax_mib = 1000\ncomm = ["db"]\n'
+ALLOW2 = ALLOW + '\n[[memory.allow]]\nname = "hog"\nmax_mib = 30000\ncomm = ["hog"]\n'
+
+
+def _poll_to(rig: Rig, avail: float, polls: int) -> float:
+    for _ in range(polls):
+        write_meminfo(rig.proc, avail)
+        rig.guard.step()
+        rig.clock.mono += rig.guard.rule.poll_s
+        avail -= RATE_MIB_S * rig.guard.rule.poll_s
+    return avail
+
+
+def test_boundary_only_save_keeps_the_trigger_window(tmp_path):
+    rig = Rig(tmp_path, MEMORY + ALLOW)
+    rig.daemon.start()
+    _poll_to(rig, 40_000.0, 6)
+    guard, trigger = rig.guard, rig.guard._trigger
+    window = list(trigger._win)
+    assert window
+    rig.rewrite(MEMORY + ALLOW2)
+    assert len(rig.guards) == 1
+    assert rig.guard is guard
+    assert guard._trigger is trigger
+    assert list(trigger._win) == window
+    assert [a.name for a in guard.rule.allow] == ["vllm", "hog"]
+    assert [a.name for a in guard.killer.rule.allow] == ["vllm", "hog"]
+    assert [b["name"] for b in guard.doc()["boundaries"]] == ["vllm", "hog"]
+    rig.daemon.shutdown()
+
+
+def test_boundary_only_save_keeps_the_kill_budget(tmp_path):
+    rig = Rig(tmp_path, MEMORY + ALLOW)
+    rig.daemon.start()
+    rig.wave()
+    assert len(rig.pidfd.sent) == 1
+    guard = rig.guard
+    before = guard.killer.export_state()
+    assert before["kills"]
+    rig.rewrite(MEMORY + ALLOW2)
+    assert rig.guard is guard
+    assert guard.killer.export_state() == before
+    assert guard.killer.kills_last_hour(rig.clock.monotonic()) == 1
+    rig.daemon.shutdown()
+
+
+def _first_kill_avail(tmp_path, save_mid: bool) -> float:
+    rig = Rig(tmp_path, MEMORY + ALLOW)
+    rig.daemon.start()
+    seen: dict = {}
+    rig.pidfd.on_send = lambda: seen.setdefault("avail", cur["avail"])
+    cur = {"avail": 40_000.0}
+    for i in range(400):
+        if seen:
+            break
+        if save_mid and i == 4:
+            rig.rewrite(MEMORY + ALLOW + ALLOW_OTHER)
+        write_meminfo(rig.proc, cur["avail"])
+        rig.guard.step()
+        rig.clock.mono += rig.guard.rule.poll_s
+        cur["avail"] -= RATE_MIB_S * rig.guard.rule.poll_s
+    rig.daemon.shutdown()
+    return seen["avail"]
+
+
+def test_runaway_fires_no_later_with_a_boundary_save_midway(tmp_path):
+    plain = _first_kill_avail(tmp_path / "a", False)
+    saved = _first_kill_avail(tmp_path / "b", True)
+    assert saved >= plain
+
+
+def test_other_memory_field_change_still_rebuilds_the_guard(tmp_path):
+    rig = Rig(tmp_path, MEMORY + ALLOW)
+    rig.daemon.start()
+    first = rig.guard
+    rig.rewrite(MEMORY + "poll_s = 0.5\n" + ALLOW2)
+    assert len(rig.guards) == 2
+    assert rig.guard is not first
+    assert rig.guard.rule.poll_s == 0.5
+    rig.daemon.shutdown()
+
+
+def test_boundary_change_with_another_field_changed_rebuilds(tmp_path):
+    rig = Rig(tmp_path, MEMORY + ALLOW)
+    rig.daemon.start()
+    rig.rewrite(MEMORY.replace("kill", "record") + ALLOW2)
+    assert len(rig.guards) == 2
+    rig.daemon.shutdown()
