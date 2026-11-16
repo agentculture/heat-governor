@@ -10,6 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - `docs/evidence/2026-11-17-boundaries-write-live.md`: live check of the boundaries write side on the EliteMini and orin. State rows in `CLAUDE.md` and the three other harness files updated.
+- `docs/deliveries/2026-11-15-boundaries-tab.md`: delivery summary of the Boundaries tab plan, with devague evidence and deltas for its obligations.
 
 ## [0.19.0] - 2026-11-16
 
