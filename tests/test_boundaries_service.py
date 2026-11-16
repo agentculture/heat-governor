@@ -14,7 +14,13 @@ from heat_governor.cli import main
 from heat_governor.cli._commands import mesh
 from heat_governor.fleet import Fleet, Machine
 from heat_governor.fleet_reader import FleetReader, default_transport
-from heat_governor.transport import BoundariesResult, LocalTransport, SshTransport, Unreachable
+from heat_governor.transport import (
+    BoundariesResult,
+    LocalTransport,
+    SshTransport,
+    TimedOut,
+    Unreachable,
+)
 from tests.test_fleet_reader import FakeTransport, doc
 
 CFG = "/etc/hg/config.toml"
@@ -353,6 +359,44 @@ def test_lost_response_before_delivery_reports_not_saved(tmp_path):
     assert box.rules == []
 
 
+def test_a_timeout_with_the_file_unchanged_is_unknown_not_not_saved(tmp_path):
+    # the local call was cut off but the command on the box was not: it may still write
+    service, box = make(tmp_path)
+
+    def slow(req):
+        raise TimedOut("timed out after 30s")
+
+    box._apply = slow
+    out = service.apply("a", req(), "x")
+    assert out["outcome"] == svc.UNKNOWN
+    assert "may still" in out["message"]
+    assert audit_lines(tmp_path)[-1]["outcome"] == svc.UNKNOWN
+
+
+def test_ssh_failing_after_delivery_is_recovered_like_a_lost_response(tmp_path):
+    service, box = make(tmp_path)
+    real = box._apply
+
+    def dropped(req):
+        real(req)  # the box wrote, then the link went
+        return BoundariesResult(255, "", "ssh: connection to a.example closed")
+
+    box._apply = dropped
+    out = service.apply("a", req(), "x")
+    assert out["outcome"] == "saved"
+    assert out["recovered"] is True
+
+
+def test_ssh_failing_is_machine_unreachable_not_a_bad_reply(tmp_path):
+    service, box = make(tmp_path)
+    box._apply = lambda req: BoundariesResult(255, "", "ssh: no route to host")
+    out = service.apply("a", req(), "x")
+    assert out["outcome"] == svc.NOT_SAVED
+    assert "no route" in out["message"]
+    box.boundaries = lambda verb, body, *, config_path: BoundariesResult(255, "", "ssh: no route")
+    assert service.list("a")["outcome"] == svc.MACHINE_UNREACHABLE
+
+
 def test_lost_response_and_unreadable_file_is_unknown(tmp_path):
     service, box = make(tmp_path)
     box.apply_fail = "after"
@@ -530,3 +574,12 @@ def test_cli_unknown_machine(cli, tmp_path, monkeypatch, capsys):
     )
     assert rc == 1
     assert "zzz" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("extra", [{"idempotent": True}, {"recovered": True}])
+def test_text_output_of_a_saved_result_from_the_service(extra):
+    # the service's own saved results carry no "forced" or "processes"
+    from heat_governor.cli._commands import boundaries as cmd
+
+    lines = cmd._text_saved({"outcome": "saved", "version": "v1", "rules": [HOG], **extra})
+    assert lines == ["saved 1 rule(s), version v1"]

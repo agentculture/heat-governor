@@ -187,7 +187,7 @@ def test_an_invalid_boundaries_file_at_startup_is_an_error(tmp_path):
 
 @pytest.mark.parametrize(
     "matchers",
-    ['cmdline = "*"', 'cgroup = "**"', 'comm = ["*"]', 'comm = ["*"]\ncmdline = "?*"'],
+    ['cmdline = "*"', 'cgroup = "**"', 'cgroup = "/*"', 'cmdline = "*[!x]*"', 'cmdline = "?*"'],
 )
 @pytest.mark.parametrize("where", ["config", "boundaries"])
 def test_a_match_all_rule_is_rejected_in_either_file(tmp_path, matchers, where):
@@ -200,6 +200,42 @@ def test_a_match_all_rule_is_rejected_in_either_file(tmp_path, matchers, where):
     with pytest.raises(cfgmod.ConfigError) as exc:
         cfgmod.load(path)
     assert "matches every process" in str(exc.value)
+
+
+def test_a_comm_list_is_never_match_all_because_names_are_compared_exactly():
+    # memboundary.matches() intersects comm with the process's names: "*" is a literal name
+    for extra in ({}, {"cmdline": "*"}, {"cgroup": "/*"}):
+        items = [{"name": "x", "comm": ["*"], "max_mib": 100, **extra}]
+        assert cfgmod.allow_problems(items) == []
+
+
+def test_a_rejected_boundaries_file_never_doubles_a_name_config_now_defines(tmp_path):
+    rule = '[[memory.allow]]\nname = "{}"\ncomm = ["a"]\nmax_mib = 100\n'
+    path = _write(tmp_path, "[memory]\n", rule.format("hog") + rule.format("other"))
+    good = cfgmod.load(path)
+    path.write_text("[memory]\n" + rule.format("hog"))
+    cfg = cfgmod.load(path, last_good=good)
+    assert cfg.boundaries_error
+    assert [r.name for r in cfg.memory.allow] == ["hog", "other"]
+    assert [r.source for r in cfg.memory.allow] == [cfgmod.CONFIG_FILE, cfgmod.BOUNDARIES_FILE]
+
+
+def test_a_write_that_lands_during_the_read_is_seen_as_a_change(tmp_path, monkeypatch):
+    rule = '[[memory.allow]]\nname = "a"\ncomm = ["a"]\nmax_mib = 100\n'
+    path = _write(tmp_path, "[memory]\n", rule)
+    bpath = path.parent / cfgmod.BOUNDARIES_FILE
+    real = cfgmod.load_boundaries
+
+    def racing(p, data=None):
+        out = real(p, data)
+        bpath.write_text(rule.replace("100", "200"))  # lands after the read
+        os.utime(bpath, (10**9, 10**9))
+        return out
+
+    monkeypatch.setattr(cfgmod, "load_boundaries", racing)
+    cfg = cfgmod.load(path)
+    assert cfg.memory.allow[0].max_mib == 100
+    assert cfgmod.changed(cfg)
 
 
 def test_a_wildcard_next_to_a_real_matcher_is_fine():

@@ -23,6 +23,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A change that touches only boundary rules is swapped into the running memory guard: the fill-rate window, kill budget and repeat history are kept.
 - `Config.mtime` is a pair (config.toml, boundaries.toml).
+- A rule with no `comm` whose globs match anything (`*`, `?*`, a cgroup of `/*`) is rejected in either file. A rule with a `comm` list is never match-all, because names are compared exactly.
+- After a write whose answer was lost, ssh's own failure (exit 255) goes through the same recovery as a timeout, and a timeout with the file unchanged is reported as `unknown`, not `not_saved`: the command on the box may still write.
 - Without `--token-file`, `mesh serve` is as read-only as before; every earlier route answers unchanged.
 
 ## [0.18.1] - 2026-11-16

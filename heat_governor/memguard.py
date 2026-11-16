@@ -175,6 +175,8 @@ class MemGuard:
         self._errors: set[str] = set()
         self.polls = 0
         self._lock = threading.Lock()
+        self._forget: set[str] = set()  # rule names whose once-only marks set_rule() dropped
+        self._assessed = rule  # the rule the current scan was assessed with
         self._doc = self._build_doc(None)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -372,14 +374,23 @@ class MemGuard:
         is one step under the guard's lock: a scan in progress keeps the rule it started with
         (its boundary doc is dropped) and the next poll uses the new one."""
         with self._lock:
+            old = {r.name: r for r in self._rules()}
             self.rule = rule
             self.killer.rule = rule
+            new = {r.name: r for r in self._rules()}
+            # a changed or removed rule starts over: its next crossing is reported again
+            self._forget |= {n for n, r in old.items() if new.get(n) != r}
             self._bounds_doc = memboundary.idle_doc(self._rules())
             self._doc = self._build_doc(self._doc["avail_mib"])
 
     def _assess(self, procs: dict) -> memboundary.Assessment | None:
         """Classify the scan against ``[[memory.allow]]`` (None without rules)."""
-        rule = self.rule
+        with self._lock:
+            rule = self.rule
+            forget, self._forget = self._forget, set()
+        self._assessed = rule
+        if forget:
+            self._watch.forget(forget)
         rules = tuple(getattr(rule, "allow", ()) or ())
         if not rules:
             return None
@@ -415,8 +426,8 @@ class MemGuard:
 
     def _far_over(self, procs, bounds, mono, wall, avail, blamed, acted: set) -> None:
         """Act once per process instance per rule on a far-over set, fire or no fire."""
-        if bounds is None:
-            return
+        if bounds is None or self._assessed is not self.rule:
+            return  # the rules were swapped mid-scan: never act on the set just replaced
         for s, victim in self._watch.due(bounds, lambda s: self._victim_of(procs, s)):
             if victim.pid in acted:
                 continue  # this poll's fire already acted on (or recorded) it

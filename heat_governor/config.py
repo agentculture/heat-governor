@@ -627,21 +627,24 @@ def _validate_allow_fields(where: str, item: dict, ok: set, problems: list[str])
         )
 
 
-def _bare_wildcard(pattern: object) -> bool:
-    return isinstance(pattern, str) and bool(pattern) and not pattern.strip("*?")
+# Unlikely strings a glob is tried on: one that matches them all matches every process. A cgroup
+# path always starts with "/", so its probes do too ("/*" is a match-all cgroup glob).
+_PROBES = ("a", "Zq 7", "x-y_z.9 --k=v", "\u00e9[1]")
+
+
+def _glob_matches_all(pattern: object, prefix: str = "") -> bool:
+    if not isinstance(pattern, str) or not pattern:
+        return False
+    return all(fnmatch.fnmatchcase(prefix + probe, pattern) for probe in _PROBES)
 
 
 def _matches_everything(item: dict, ok: set) -> bool:
-    """True when every matcher given is a bare wildcard (a rule that would hit all processes)."""
-    bare = []
-    for key in ALLOW_MATCHERS:
-        if key not in item or key not in ok:
-            continue
-        if key == "comm":
-            bare.append(any(_bare_wildcard(x) for x in item[key]))
-        else:
-            bare.append(_bare_wildcard(item[key]))
-    return bool(bare) and all(bare)
+    """True when the rule would hit all processes: no ``comm`` (names are compared exactly, so
+    a ``comm`` list always narrows) and every glob given matches anything."""
+    if "comm" in item:
+        return False
+    globs = [(k, "/" if k == "cgroup" else "") for k in ("cmdline", "cgroup") if k in item]
+    return bool(globs) and all(k in ok and _glob_matches_all(item[k], pre) for k, pre in globs)
 
 
 def allow_problems(items: list) -> list[str]:
@@ -1002,6 +1005,7 @@ def load(path: Path | None, *, required: bool = False, last_good: Config | None 
         if required:
             raise ConfigError([f"no config file at {path}"])
         return Config(path=path)
+    seen = mtimes(path)  # before the reads: a write landing meanwhile is reloaded, not missed
     data = _read_toml(path)
     problems = validate(data)
     if problems:
@@ -1015,12 +1019,14 @@ def load(path: Path | None, *, required: bool = False, last_good: Config | None 
         except ConfigError as exc:
             if last_good is None:
                 raise
-            boundaries = last_good.boundaries
+            # config.toml wins a name: a kept rule it now also defines is dropped, never doubled
+            mine = {a.get("name") for a in data.get("memory", {}).get("allow", [])}
+            boundaries = tuple(b for b in last_good.boundaries if b.get("name") not in mine)
             error = f"{bpath} rejected, keeping the last good boundaries: {exc}"
     return Config(
         data=data,
         path=path,
-        mtime=mtimes(path),
+        mtime=seen,
         boundaries=boundaries,
         boundaries_error=error,
     )

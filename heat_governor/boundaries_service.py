@@ -16,12 +16,13 @@ fails nothing is sent: outcome ``audit_failed``), applies, and appends the final
 The request sent to the box is rebuilt from validated fields (``base_version``, ``operation``,
 ``rule`` with only the six rule keys, ``allow_kill``); nothing is forwarded raw.
 
-Lost response: if ``apply`` raises ``Unreachable`` (the body may have been delivered) the file
-is listed again. A changed version whose rules reflect the request is ``saved`` with
-``recovered: true``; an unchanged version is ``not_saved``; a changed version that does not
-reflect the request is ``conflict``; an unreadable file is ``unknown``. Repeating a request whose
-requested state already holds gets a conflict from the box, which the service reports as
-``saved`` with ``idempotent: true`` (nothing is written).
+Lost response: if ``apply`` raises ``Unreachable`` or ssh itself fails (exit 255; the body may
+have been delivered) the file is listed again. A changed version whose rules reflect the request
+is ``saved`` with ``recovered: true``; an unchanged version is ``not_saved``, or ``unknown``
+after a timeout (the command on the box was not stopped and may still write); a changed version
+that does not reflect the request is ``conflict``; an unreadable file is ``unknown``. Repeating
+a request whose requested state already holds gets a conflict from the box, which the service
+reports as ``saved`` with ``idempotent: true`` (nothing is written).
 
 Audit log (``boundaries-audit.jsonl`` in the reader state dir, mode 0600, append-only): one JSON
 object per line with ``time``, ``label``, ``machine``, ``operation``, ``old``, ``new`` and
@@ -43,7 +44,7 @@ from typing import Any, Callable
 
 from heat_governor.cli._errors import CliError
 from heat_governor.state import default_data_dir
-from heat_governor.transport import Unreachable
+from heat_governor.transport import TimedOut, Unreachable
 
 MIN_VERSION = (0, 19, 0)  # the first release with the boundaries command
 MIN_VERSION_TEXT = ".".join(str(n) for n in MIN_VERSION)
@@ -60,8 +61,9 @@ NO_CONFIG_PATH = "no_config_path"
 BAD_REPLY = "bad_reply"
 BOX_ERROR = "box_error"  # the box's command exited 2 (environment error)
 AUDIT_FAILED = "audit_failed"
+SSH_FAILED = 255  # the exit code ssh uses for its own failures
 NOT_SAVED = "not_saved"  # lost response, and the file is unchanged
-UNKNOWN = "unknown"  # lost response, and the file could not be read afterwards
+UNKNOWN = "unknown"  # lost response: the file is unreadable, or a timed-out write may still land
 
 # a suggested HTTP status per outcome, for the mesh server
 HTTP_STATUS = {
@@ -274,7 +276,8 @@ class BoundariesService:
         try:
             res = self._transport_for(machine).boundaries(verb, data, config_path=config_path)
         except Unreachable as exc:
-            return _msg(MACHINE_UNREACHABLE, _clip(exc.message), machine, lost=True)
+            late = isinstance(exc, TimedOut)
+            return _msg(MACHINE_UNREACHABLE, _clip(exc.message), machine, lost=True, timed_out=late)
         except CliError as exc:
             return _msg(MACHINE_UNREACHABLE, _clip(exc.message), machine)
         return self._parse(machine, res)
@@ -285,8 +288,13 @@ class BoundariesService:
             doc = json.loads(res.stdout)
         except ValueError:
             doc = None
+        lines = res.stderr.strip().splitlines()
+        if res.code == SSH_FAILED and not isinstance(doc, dict):
+            # ssh itself failed (no route, or the link dropped mid-call): the command may or
+            # may not have run, so an apply goes through lost-response recovery
+            why = _clip(lines[-1] if lines else "ssh failed")
+            return _msg(MACHINE_UNREACHABLE, why, machine, lost=True)
         if res.code == 2 and not isinstance(doc, dict):
-            lines = res.stderr.strip().splitlines()
             return _msg(BOX_ERROR, _clip(lines[-1] if lines else "exit 2"), machine)
         if not isinstance(doc, dict) or doc.get("outcome") not in BOX_OUTCOMES:
             return _msg(BAD_REPLY, f"unexpected reply from {machine} (exit {res.code})", machine)
@@ -336,15 +344,6 @@ class BoundariesService:
             return before
         return _msg(BAD_REPLY, f"cannot read the rules of {machine} before the write", machine)
 
-    @staticmethod
-    def _boxes_rules(listing: dict) -> list[dict]:
-        rules = listing.get("rules")
-        return [
-            {k: r[k] for k in RULE_KEYS if k in r}
-            for r in (rules if isinstance(rules, list) else [])
-            if isinstance(r, dict) and r.get("source") == BOUNDARIES_SOURCE
-        ]
-
     # apply, lost response, idempotence
     def _apply_remote(self, machine: str, clean: dict, path: str) -> dict:
         out = self._call(machine, "apply", clean, path)
@@ -362,6 +361,10 @@ class BoundariesService:
             return _msg(UNKNOWN, "no answer to the write and the file cannot be read", machine)
         rules = boundaries_rules(after)
         version = after["version"]
+        if version == clean["base_version"] and lost.get("timed_out"):
+            # the local call was cut off, the command on the box was not: it can still write
+            text = "no answer in time; the file is unchanged so far, but the box may still write it"
+            return _msg(UNKNOWN, text, machine)
         if version == clean["base_version"]:
             return _msg(NOT_SAVED, f"{_clip(lost.get('message'))}; the file is unchanged", machine)
         if reflects(clean["operation"], clean["rule"], rules):

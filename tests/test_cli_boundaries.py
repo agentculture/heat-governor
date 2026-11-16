@@ -171,7 +171,7 @@ def test_apply_rejects_unknown_rule_keys_with_validator_message(capsys, monkeypa
 @pytest.mark.parametrize(
     "rule,needle",
     [
-        ({"name": "x", "comm": ["*"], "max_mib": 500}, "matches every process"),
+        ({"name": "x", "cgroup": "/*", "max_mib": 500}, "matches every process"),
         ({"name": "x", "comm": ["a"], "max_mib": 1}, "at least"),
         ({"name": "x", "max_mib": 500}, "needs at least one"),
     ],
@@ -438,3 +438,25 @@ def test_exit_code_helper():
     assert bnd.exit_code({"outcome": "ok"}) == 0
     for name in ("conflict", "would_kill", "invalid"):
         assert bnd.exit_code({"outcome": name}) == 1
+
+
+# -- review fixes ------------------------------------------------------------------------
+
+
+def test_list_reports_a_name_the_loader_rejects_across_the_two_files(capsys, monkeypatch, env):
+    cfg, _ = env
+    rule = '[[memory.allow]]\nname = "hog"\ncomm = ["hog"]\nmax_mib = 100000\n'
+    cfg.write_text("[memory]\n" + rule)
+    (cfg.parent / "boundaries.toml").write_text(rule)
+    rc, out, _ = go(capsys, monkeypatch, env, "list")
+    assert rc == 0
+    assert "hog" in out["error"]  # the daemon rejects the file whole; the list must say so
+
+
+def test_the_kill_check_scans_the_process_table_once(capsys, monkeypatch, env):
+    scans = []
+    real = bnd.memprocs.scan
+    monkeypatch.setattr(bnd.memprocs, "scan", lambda root: scans.append(root) or real(root))
+    rc, out, _ = go(capsys, monkeypatch, env, "apply", body=req("add", OK_RULE))
+    assert rc == 0
+    assert len(scans) == 1

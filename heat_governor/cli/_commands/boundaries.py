@@ -136,7 +136,7 @@ def run_list(config_path: Path) -> dict:
         "rules": rules,
         "version": snap.version,
         "exists": snap.exists,
-        "error": snap.error,
+        "error": snap.error or cfg.boundaries_error,
         "config_path": str(config_path),
         "boundaries_path": str(bpath),
     }
@@ -148,10 +148,9 @@ def _scan(proc_root: Path) -> dict:
     return memprocs.scan(Path(proc_root))
 
 
-def _preview(cfg: cfgmod.Config, rules: list, proc_root: Path, uid, self_pid) -> dict:
-    out = mempreview.preview(
-        _scan(proc_root), rules, cfg.memory, Path(proc_root), uid=uid, self_pid=self_pid
-    )
+def _preview(cfg: cfgmod.Config, rules: list, proc_root: Path, uid, self_pid, procs=None) -> dict:
+    procs = _scan(proc_root) if procs is None else procs
+    out = mempreview.preview(procs, rules, cfg.memory, Path(proc_root), uid=uid, self_pid=self_pid)
     out["guard_configured"] = "memory" in cfg.data
     return out
 
@@ -247,9 +246,10 @@ def _kill_check(request, cfg, snap, new, proc_root, uid, self_pid) -> tuple[dict
     rules on disk is the guard's business already and must not block an unrelated edit."""
     base = _config_rules(cfg)
     as_rules = [cfgmod._allow_rule(r, cfgmod.BOUNDARIES_FILE) for r in new]
-    pv = _preview(cfg, base + as_rules, proc_root, uid, self_pid)
+    procs = _scan(proc_root)  # one process table for both, so the two sets are comparable
+    pv = _preview(cfg, base + as_rules, proc_root, uid, self_pid, procs)
     before = [cfgmod._allow_rule(r, cfgmod.BOUNDARIES_FILE) for r in snap.rules]
-    already = _far_over_pids(_preview(cfg, base + before, proc_root, uid, self_pid))
+    already = _far_over_pids(_preview(cfg, base + before, proc_root, uid, self_pid, procs))
     victims = [p for p in pv["processes"] if p["far_over_killable"] and p["pid"] not in already]
     pv["newly_far_over"] = victims
     if not victims or request.get("allow_kill", False):
@@ -347,7 +347,7 @@ def _text_would_kill(r: dict) -> list[str]:
 
 def _text_saved(r: dict) -> list[str]:
     lines = [f"saved {len(r['rules'])} rule(s), version {r['version']}"]
-    if r["forced"]:
+    if r.get("forced"):
         lines.append(f"forced: {len(r['processes'])} process(es) far over")
     return lines + _guard_note(r)
 

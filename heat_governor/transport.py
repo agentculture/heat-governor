@@ -90,6 +90,11 @@ class Unreachable(CliError):
         )
 
 
+class TimedOut(Unreachable):
+    """The deadline passed with the command still running: what it was doing on the machine
+    may yet finish."""
+
+
 def _num(x: float) -> str:
     return f"{x:g}"
 
@@ -236,7 +241,7 @@ class SshTransport:
         except subprocess.TimeoutExpired as exc:
             _kill(proc)
             shown = self.timeout_s if label is None else label
-            raise Unreachable(f"timed out after {_num(shown)}s") from exc
+            raise TimedOut(f"timed out after {_num(shown)}s") from exc
         except _TooLarge as exc:
             _kill(proc)
             raise Unreachable(f"output too large (over {cap} bytes)") from exc
@@ -446,7 +451,7 @@ class LocalTransport:
                 )
             )
         except subprocess.TimeoutExpired as exc:
-            raise Unreachable(f"timed out after {_num(BOUNDARIES_TIMEOUT_S)}s") from exc
+            raise TimedOut(f"timed out after {_num(BOUNDARIES_TIMEOUT_S)}s") from exc
         except OSError as exc:
             raise Unreachable(f"cannot run {argv[0]}: {exc}") from exc
         return BoundariesResult(proc.returncode, _text(proc.stdout), _text(proc.stderr))

@@ -6,6 +6,8 @@ Fake /proc + /sys under ``tmp_path``, fake pidfd, fake clock; nothing real is si
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from heat_governor.config import AllowRule
 from tests.fakes_proc import add_proc
 from tests.test_memguard import EPOCH, MIB, falling_wave, make, named, write_meminfo
@@ -310,3 +312,41 @@ def test_doc_thresholds_are_none_when_the_rule_does_not_carry_them():
     assert _num(True, int) is None
     assert _num(33, float) == 33.0
     assert _num(2048.0, int) == 2048
+
+
+# --- a rule swap while the guard runs ---------------------------------------------------------
+
+
+def test_a_changed_rule_reports_its_crossing_again(tmp_path):
+    loose = AllowRule(name="hog", max_mib=18_000, comm=("hog",))
+    guard, clock, _, events, _, _, _ = make(tmp_path, action="record", allow=(loose,))
+    calm_steps(guard, clock)
+    assert len(named(events, BOUND_EV)) == 1
+    guard.set_rule(replace(guard.rule, allow=(replace(loose, max_mib=19_000),)))
+    calm_steps(guard, clock)
+    assert [e["max_mib"] for e in named(events, BOUND_EV)] == [18_000, 19_000]
+
+
+def test_an_unchanged_rule_keeps_its_once_only_marks_across_a_swap(tmp_path):
+    other = AllowRule(name="other", max_mib=500, comm=("nobody",))
+    guard, clock, _, events, _, _, _ = make(tmp_path, action="record", allow=(HOG,))
+    calm_steps(guard, clock)
+    guard.set_rule(replace(guard.rule, allow=(HOG, other)))
+    calm_steps(guard, clock)
+    assert len(named(events, BOUND_EV)) == 1
+    assert len(named(events, "memory_would_kill")) == 1
+
+
+def test_a_scan_in_progress_never_acts_on_rules_swapped_out_under_it(tmp_path, monkeypatch):
+    guard, _, fake, events, _, _, _ = make(tmp_path, allow=(HOG,))
+    roomy = replace(guard.rule, allow=(replace(HOG, max_mib=40_000),))
+    real = guard._crossings
+
+    def swap_then(*args):  # the save lands after the assessment, before the far-over step
+        guard.set_rule(roomy)
+        return real(*args)
+
+    monkeypatch.setattr(guard, "_crossings", swap_then)
+    guard.step()
+    assert fake.opened == []
+    assert named(events, "memory_kill") == []

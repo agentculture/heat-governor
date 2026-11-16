@@ -38,12 +38,13 @@ the limits, or any other setting.
 - The loader merges the rules of both files (config.toml's first) before validation, and
   tags each with its source file.
 - A name present in both files is an error that names both files.
-- A rule whose matchers are all bare wildcards (only `*` and `?`) is rejected in either file:
-  it would match every process.
+- A rule with no `comm` whose globs match anything (`*`, `?*`, a cgroup of `/*`) is rejected
+  in either file: it would match every process. `comm` names are compared exactly, so a rule
+  with a `comm` list is never match-all.
 - The daemon watches both files and reloads within `reload_every_s` (2 s by default) when
   either changes. Deleting `boundaries.toml` means no page-managed rules.
-- An invalid `boundaries.toml` on reload keeps the last good boundaries and publishes the
-  message in `config_error`; a valid `config.toml` edit made at the same time still applies.
+- An invalid `boundaries.toml` on reload keeps the last good boundaries (minus any whose
+  name `config.toml` now defines) and publishes the message in `config_error`; a valid `config.toml` edit made at the same time still applies.
   At daemon start an invalid `boundaries.toml` is a start-up error, like an invalid config.
 - A change that touches only the rules swaps them inside the running guard: the fill-rate
   window, the kill budget and the repeat history are kept. Any other `[memory]` change
@@ -139,10 +140,12 @@ through the reader's boundaries service:
    `fleet.toml`. The call has its own 30 s deadline.
 3. **Rebuilt request.** The request sent to the box is rebuilt from validated fields, never
    forwarded as received.
-4. **Lost response.** If the call fails after the request may have been delivered, the
-   service reads the file again: a changed version whose rules reflect the request is
-   `saved` (`recovered: true`), an unchanged file is `not_saved`, an unreadable one is
-   `unknown`. Repeating a request whose result already holds is `saved`
+4. **Lost response.** If the call fails after the request may have been delivered (the
+   deadline, or ssh itself failing with exit 255), the service reads the file again: a
+   changed version whose rules reflect the request is `saved` (`recovered: true`), an
+   unchanged file is `not_saved`, an unreadable one is `unknown`. After a timeout an
+   unchanged file is also `unknown`: the command on the box was not stopped and may still
+   write, so read the list again before retrying. Repeating a request whose result already holds is `saved`
    (`idempotent: true`) and writes nothing.
 
 The CLI path needs no token: its authority is the SSH access the reader already has.
