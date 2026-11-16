@@ -154,11 +154,16 @@ Machines come from `fleet.toml` beside `config.toml` (format:
   (about timeout_s + 1 s at most). `source` says which. Exit 0 when the read
   worked (an unreachable box is data); 2 when nothing could be read; 1 for a
   bad or missing fleet file.
-- `mesh serve [--fleet PATH] [--listen HOST:PORT]` -- the page and JSON API
-  on 127.0.0.1:9480; only an explicit `--listen` changes the address. The
-  server has no authentication: anyone who can reach a non-loopback address
-  can read the fleet and start history reads (at most 4 at once; more get
-  `503`), so bind one only on a network you trust.
+- `mesh serve [--fleet PATH] [--listen HOST:PORT] [--token-file PATH]
+  [--server-name NAME]` -- the page and JSON API on 127.0.0.1:9480; only an
+  explicit `--listen` changes the address. The read routes have no
+  authentication: anyone who can reach a non-loopback address can read the
+  fleet and start history reads (at most 4 at once; more get `503`), so bind
+  one only on a network you trust. Without `--token-file` the server is
+  read-only. With it (lines of `label = token`, mode 600, read once at start)
+  `/api/boundaries/MACHINE` lists, previews and writes a machine's boundaries
+  for requests carrying `Authorization: Bearer TOKEN` and this server's own
+  Host and Origin; a bad file exits 2 and a wildcard `--listen` exits 1.
 
 ## Usage
 
