@@ -321,10 +321,23 @@ def test_apply_allow_kill_writes(capsys, monkeypatch, env):
 
 def test_apply_checks_whole_would_be_set_with_config_rules(capsys, monkeypatch, env):
     cfg, _ = env
-    cfg.write_text('[[memory.allow]]\nname = "tight"\ncomm = ["hog"]\nmax_mib = 1000\n')
-    rc, out, _ = go(capsys, monkeypatch, env, "apply", body=req("add", OK_RULE))
+    cfg.write_text(
+        '[memory]\nact_over_pct = 50\n[[memory.allow]]\nname = "big"\ncomm = ["x"]\nmax_mib = 99\n'
+    )
+    rc, out, _ = go(capsys, monkeypatch, env, "apply", body=req("add", TIGHT))
     assert rc == 1
     assert out["outcome"] == "would_kill"
+
+
+def test_a_process_already_far_over_does_not_block_an_unrelated_change(capsys, monkeypatch, env):
+    cfg, _ = env
+    cfg.write_text('[[memory.allow]]\nname = "tight"\ncomm = ["hog"]\nmax_mib = 1000\n')
+    other = {"name": "other", "comm": ["nothing-runs-this"], "max_mib": 4096}
+    rc, out, _ = go(capsys, monkeypatch, env, "apply", body=req("add", other))
+    assert rc == 0
+    assert out["outcome"] == "saved"
+    assert out["forced"] is False
+    assert out["processes"] == []
 
 
 # -- preview -----------------------------------------------------------------------------

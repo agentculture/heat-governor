@@ -228,17 +228,28 @@ def _conflict(version: str, rules: list[dict]) -> dict:
     return {"outcome": "conflict", "version": version, "rules": rules}
 
 
-def _kill_check(request, cfg, new, version, proc_root, uid, self_pid) -> tuple[dict | None, dict]:
-    """(a would_kill result or None, the preview) for the whole would-be rule set."""
-    rules = _config_rules(cfg) + [cfgmod._allow_rule(r, cfgmod.BOUNDARIES_FILE) for r in new]
-    pv = _preview(cfg, rules, proc_root, uid, self_pid)
-    if not pv["far_over_killable"] or request.get("allow_kill", False):
+def _far_over_pids(pv: dict) -> set:
+    return {p["pid"] for p in pv["processes"] if p["far_over_killable"]}
+
+
+def _kill_check(request, cfg, snap, new, proc_root, uid, self_pid) -> tuple[dict | None, dict]:
+    """(a would_kill result or None, the preview) for the whole would-be rule set.
+
+    Only processes the change *puts* far over count: one that is already far over under the
+    rules on disk is the guard's business already and must not block an unrelated edit."""
+    base = _config_rules(cfg)
+    as_rules = [cfgmod._allow_rule(r, cfgmod.BOUNDARIES_FILE) for r in new]
+    pv = _preview(cfg, base + as_rules, proc_root, uid, self_pid)
+    before = [cfgmod._allow_rule(r, cfgmod.BOUNDARIES_FILE) for r in snap.rules]
+    already = _far_over_pids(_preview(cfg, base + before, proc_root, uid, self_pid))
+    victims = [p for p in pv["processes"] if p["far_over_killable"] and p["pid"] not in already]
+    pv["newly_far_over"] = victims
+    if not victims or request.get("allow_kill", False):
         return None, pv
-    victims = [p for p in pv["processes"] if p["far_over_killable"]]
     return {
         "outcome": "would_kill",
-        "version": version,
-        "far_over_killable": pv["far_over_killable"],
+        "version": snap.version,
+        "far_over_killable": len(victims),
         "processes": victims,
         "guard_configured": pv["guard_configured"],
         "action": pv["action"],
@@ -246,7 +257,7 @@ def _kill_check(request, cfg, new, version, proc_root, uid, self_pid) -> tuple[d
 
 
 def _saved(res: boundaries_file.WriteResult, pv: dict) -> dict:
-    victims = [p for p in pv["processes"] if p["far_over_killable"]]
+    victims = pv["newly_far_over"]
     return {
         "outcome": "saved",
         "version": res.version,
@@ -274,7 +285,7 @@ def run_apply(
     new, problems = _plan(request, cfg, snap.rules)
     if problems:
         return _invalid(problems, snap.version)
-    refused, pv = _kill_check(request, cfg, new, snap.version, proc_root, uid, self_pid)
+    refused, pv = _kill_check(request, cfg, snap, new, proc_root, uid, self_pid)
     if refused:
         return refused
     try:
