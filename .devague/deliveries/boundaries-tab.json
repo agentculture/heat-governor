@@ -2,7 +2,7 @@
   "plan_slug": "boundaries-tab",
   "schema_version": 2,
   "created": "2026-11-15T21:25:02Z",
-  "updated": "2026-11-16T18:20:26Z",
+  "updated": "2026-11-16T21:43:30Z",
   "deviations": [
     {
       "id": "d1",
@@ -36,7 +36,7 @@
       "reason": "the plan makes Config.mtime a pair, which breaks every existing reader of the scalar; the edits are one line each and mechanical",
       "affects": [],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "classification": "acceptable",
       "seq": 4
     },
@@ -47,7 +47,7 @@
       "reason": "the audit line must exist before a write is sent, so a failed audit can refuse the write; the outcome is only known afterwards",
       "affects": [],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "classification": "acceptable",
       "seq": 5
     },
@@ -60,7 +60,7 @@
         "t12"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "classification": "acceptable",
       "seq": 6
     }
