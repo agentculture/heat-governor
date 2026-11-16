@@ -2,7 +2,7 @@
   "plan_slug": "boundaries-tab",
   "schema_version": 2,
   "created": "2026-11-15T21:25:02Z",
-  "updated": "2026-11-16T21:43:30Z",
+  "updated": "2026-11-16T23:14:18Z",
   "deviations": [
     {
       "id": "d1",
@@ -84,6 +84,25 @@
       "status": "approved",
       "superseded": false,
       "seq": 3
+    },
+    {
+      "id": "e2",
+      "obligation_ref": "o17",
+      "test_ref": "docs/evidence/2026-11-17-boundaries-write-live.md (live saves on the EliteMini and on orin over SSH, from the CLI and through the token routes with curl)",
+      "behavior_text": "a rule saved through POST /api/boundaries/MACHINE was in that machine's mem_guard.boundaries 2.4 s (EliteMini) and 1.9 s (orin) after the request; a write with no token and with a wrong token got 401; a stale version got 409 with the file's SHA-256 unchanged; the saves were sent with curl to the routes the page calls, not from the page itself",
+      "contract_text": "After PR 2, a rule saved from the page on a local and on an SSH machine appears in that machine's mem_guard.boundaries in under 15 s, a write with no or a wrong token gets 403 or 401, and a stale version gets 409 with nothing written",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "one live run on 2026-11-16 23:10-23:20 UTC against daemons on 0.19.0 with a rule that matches no process; the HTTP routes were exercised on a loopback copy of mesh serve with a throwaway token; the editor in a browser with a token was not used",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:20:00Z",
+        "commit": "1129a2e"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 7
     }
   ],
   "deltas": [],
