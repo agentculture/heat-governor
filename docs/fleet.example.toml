@@ -17,3 +17,9 @@ transport = "local"
 name = "box-a"
 host = "box-a.example.ts.net"
 transport = "ssh"
+# Optional bin: where the heat-governor binary lives on that machine. Boundary writes run it
+# by this explicit path, because a non-interactive ssh shell often has no PATH entry for it.
+# The default is heat-governor in the per-user local bin directory of the ssh user's home.
+# Use an absolute path, or a path starting with "~/" then a relative path; plain path
+# characters only.
+# bin = "/opt/heat-governor/bin/heat-governor"
