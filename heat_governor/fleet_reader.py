@@ -115,8 +115,10 @@ def default_transport(fleet: Fleet, state_dir: Path | str | None = None) -> Tran
 
     def make(m: Machine) -> Transport:
         if m.transport == "local":
-            return LocalTransport(timeout_s=fleet.timeout_s)
-        return SshTransport(m.host, timeout_s=fleet.timeout_s, state_dir=state_dir)
+            return LocalTransport(timeout_s=fleet.timeout_s, bin_path=m.bin or None)
+        return SshTransport(
+            m.host, timeout_s=fleet.timeout_s, state_dir=state_dir, bin_path=m.bin or None
+        )
 
     return make
 
