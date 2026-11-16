@@ -330,10 +330,11 @@ def test_boundaries_styles_are_limited_and_tokens_unchanged():
     assert "fonts.googleapis" not in PAGE
 
 
-def test_boundaries_tab_is_read_only():
+def test_without_a_token_the_boundaries_view_offers_no_write_controls():
+    """PR 2: write controls appear only in the unlocked mode (writes enabled and a token)."""
     script = _script()
-    for banned in ("Add boundary", "Writes enabled", "token", "Delete", "Edit ", "POST", "method:"):
-        assert banned not in script, banned
+    assert 'mode === "unlocked" ? { gate: machineGate(row.b), go } : null' in script
+    assert "Writes enabled" not in script
 
 
 def test_csp_and_dependencies_unchanged():
@@ -448,10 +449,13 @@ const { hash, expr, data } = JSON.parse(fs.readFileSync(input, "utf8"));
 const src = fs.readFileSync(page, "utf8");
 const script = [...src.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).join("\n");
 const noop = () => {};
-const ctx = { console, setTimeout, clearTimeout, location: { hash },
+// recording web storage fakes, so tests can see where the page keeps what
+const mkStore = () => { const m = {}; return { _m: m, getItem: k => (k in m ? m[k] : null),
+  setItem: (k, v) => { m[k] = String(v); }, removeItem: k => { delete m[k]; } }; };
+const ctx = { console, setTimeout, clearTimeout, AbortController, location: { hash },
   history: { replaceState: noop },
   addEventListener: noop, removeEventListener: noop, fetch: () => new Promise(noop),
-  localStorage: { getItem: () => null, setItem: noop },
+  localStorage: mkStore(), sessionStorage: mkStore(),
   document: { getElementById: () => ({}), documentElement: { dataset: {} } },
   ReactDOM: { createRoot: () => ({ render: noop }) } };
 ctx.self = ctx; ctx.window = ctx;
@@ -482,7 +486,9 @@ vm.runInContext(`
 `, ctx);
 ctx.__data = data;
 const out = vm.runInContext("(() => { const data = __data; return (" + expr + "); })()", ctx);
-process.stdout.write(JSON.stringify(out === undefined ? null : out));
+// an async expression is awaited, so request flows can run against a fake fetch
+Promise.resolve(out).then(v => process.stdout.write(JSON.stringify(v === undefined ? null : v)),
+  e => { process.stderr.write(String((e && e.stack) || e)); process.exit(1); });
 """
 
 
@@ -722,3 +728,852 @@ def test_nav_rule_count_and_tabs_keep_their_state(tmp_path):
     # the tab change goes through the hash, so Back returns to the previous tab
     assert "location.hash = t" in PAGE
     assert "replaceState" not in PAGE
+
+
+# -- Boundaries tab (issue #18, PR 2: the editor sub-view, token, modals) ---------------------
+
+_LISTING = {
+    "outcome": "ok",
+    "rules": [
+        {
+            "name": "vllm-worker",
+            "cmdline": "*vllm*worker*",
+            "max_mib": 92160,
+            "scope": "process",
+            "source": "config.toml",
+            "editable": False,
+        },
+        {
+            "name": "node-tests",
+            "comm": ["node"],
+            "max_mib": 8192,
+            "scope": "total",
+            "source": "boundaries.toml",
+            "editable": True,
+        },
+    ],
+    "version": "3f9c2e1aa0",
+    "exists": True,
+    "error": None,
+    "config_path": "/home/u/.config/heat-governor/config.toml",
+    "boundaries_path": "/home/u/.config/heat-governor/boundaries.toml",
+}
+
+
+def _editor_block() -> str:
+    script = _script()
+    return script[script.index("// ---- Boundaries editor") : script.index("function App() {")]
+
+
+def test_edit_routes_parse_and_build(tmp_path):
+    got = _node(
+        tmp_path,
+        "({ r: ['#boundaries/elitemini/+new', '#boundaries/elitemini/vllm%20worker',"
+        " '#boundaries/elitemini/%2Bnew', '#boundaries/elitemini/a%2Fb', '#boundaries/bad name/x',"
+        " '#boundaries/elitemini/%E0%A4%A', '#boundaries/elitemini', '#boundaries/m/x/y',"
+        " '#machines/elitemini/x', '#boundaries/elitemini/'].map(readRoute),"
+        " paths: [editPath('thor', null), editPath('thor', '+new'), editPath('thor', 'a/b c')],"
+        " trip: ['+new', 'a/b c', 'ü', '%x', 'x#y'].map(n => readRoute('#' + "
+        "editPath('thor', n)).rule),"
+        " tabs: ['#boundaries/elitemini/+new', '#machines/x'].map(readTab) })",
+    )
+    r = got["r"]
+    assert r[0] == {"tab": "boundaries", "machine": "elitemini", "rule": None, "isNew": True}
+    assert r[1] == {
+        "tab": "boundaries",
+        "machine": "elitemini",
+        "rule": "vllm worker",
+        "isNew": False,
+    }
+    assert r[2]["rule"] == "+new"  # a rule really named "+new" is not the new-rule route
+    assert r[2]["isNew"] is False
+    assert r[3]["rule"] == "a/b"
+    for bad in r[4:]:
+        assert bad["machine"] is None
+        assert bad["isNew"] is False
+    assert r[8]["tab"] == "machines"
+    assert got["paths"] == [
+        "boundaries/thor/+new",
+        "boundaries/thor/%2Bnew",
+        "boundaries/thor/a%2Fb%20c",
+    ]
+    assert got["trip"] == ["+new", "a/b c", "ü", "%x", "x#y"]
+    assert got["tabs"] == ["boundaries", "machines"]
+
+
+def test_editor_is_a_sub_view_of_the_boundaries_tab_with_a_back_link():
+    script = _script()
+    assert 'hidden=${tab !== "boundaries"}' in script
+    assert "<div hidden=${!!route.machine}><${Boundaries}" in script
+    assert "<${Editor} key=${editKey}" in script
+    assert '<a class="back" href="#boundaries">' in script
+    assert 'go("boundaries")' in script  # after a save and on Cancel
+
+
+def test_form_to_rule_and_back(tmp_path):
+    got = _node(
+        tmp_path,
+        "(() => { const f = formFromRule(data);"
+        " const typed = { ...f, commDraft: ' vllm ', cmdline: '  ', cgroup: '*docker-*', "
+        "max: '4096' };"
+        " return { f, rule: ruleFromForm(typed), blank: ruleFromForm(blankForm()),"
+        " added: addComm({ ...f, commDraft: 'node' }).comm, removed: removeComm(f, 'node').comm,"
+        " rm: applyBody('rm', ruleFromForm(f), true), set: applyBody('set', { name: 'a' }, "
+        "false) }; })()",
+        data=_LISTING["rules"][1],
+    )
+    assert got["f"] == {
+        "name": "node-tests",
+        "comm": ["node"],
+        "commDraft": "",
+        "cmdline": "",
+        "cgroup": "",
+        "max": "8192",
+        "scope": "total",
+    }
+    # comm is a list; a typed name not yet added still counts; empty matchers are left out
+    assert got["rule"] == {
+        "name": "node-tests",
+        "scope": "total",
+        "comm": ["node", "vllm"],
+        "cgroup": "*docker-*",
+        "max_mib": 4096,
+    }
+    assert got["blank"] == {"name": "", "scope": "process"}
+    assert got["added"] == ["node"]  # no duplicate
+    assert got["removed"] == []
+    assert got["rm"] == {"operation": "rm", "rule": {"name": "node-tests"}, "allow_kill": True}
+    assert got["set"] == {"operation": "set", "rule": {"name": "a"}, "allow_kill": False}
+
+
+def test_requests_carry_the_token_only_in_the_authorization_header(tmp_path):
+    got = _node(
+        tmp_path,
+        "(async () => { const seen = [];"
+        " fetch = (url, init) => { seen.push({ url, init: { ...init, signal: !!init.signal } });"
+        " return Promise.resolve({ status: 200, json: () => Promise.resolve({ outcome: 'ok' "
+        "}) }); };"
+        " const api = boundaryApi('thor', 's3cret-token');"
+        " await api.list(); await api.preview({ name: 'a' });"
+        " await api.apply(applyBody('add', { name: 'a' }, false), 'v1');"
+        " return seen; })()",
+    )
+    assert [s["url"] for s in got] == [
+        "/api/boundaries/thor",
+        "/api/boundaries/thor/preview",
+        "/api/boundaries/thor",
+    ]
+    for s in got:
+        assert "s3cret" not in s["url"]
+        assert "s3cret" not in s["init"].get("body", "")
+        assert s["init"]["headers"]["Authorization"] == "Bearer s3cret-token"
+        assert s["init"]["signal"] is True  # every request has a timeout
+    assert got[0]["init"]["method"] == "GET"
+    assert "If-Match" not in got[0]["init"]["headers"]
+    assert got[1]["init"]["method"] == "POST"
+    assert got[1]["init"]["headers"]["Content-Type"] == "application/json"
+    assert got[2]["init"]["headers"]["If-Match"] == '"v1"'
+    assert '"operation":"add"' in got[2]["init"]["body"]
+
+
+def test_token_lives_in_session_storage_only(tmp_path):
+    got = _node(
+        tmp_path,
+        "(() => { const before = tokenStore.get(); tokenStore.set('tok'); const mid = "
+        "tokenStore.get();"
+        " const kept = { ...sessionStorage._m }; tokenStore.clear();"
+        " return { before, mid, kept, after: tokenStore.get(), local: { ...localStorage._m "
+        "} }; })()",
+    )
+    assert got["before"] == ""
+    assert got["mid"] == "tok"
+    assert got["kept"] == {"hg-boundaries-token": "tok"}
+    assert got["after"] == ""
+    assert got["local"] == {}
+    script = _script()
+    # sessionStorage is touched only through tokenStore; localStorage only by the old store
+    assert script.count("sessionStorage.") == 3
+    assert len(re.findall(r"sessionStorage\.\w+Item\(TOKEN_KEY", script)) == 3
+    assert script.count("localStorage.") == 2
+    assert "TOKEN_KEY" not in script[: script.index("const TOKEN_KEY")]
+    # the token travels in one place: the Authorization header; never in a URL
+    assert script.count("Authorization") == 1
+    assert '{ Authorization: "Bearer " + token }' in script
+    for banned in ("token=", "?token", "#token", "encodeURIComponent(token", 'store.set("hg-token'):
+        assert banned not in script, banned
+    # a refused token is cleared and asked for again
+    assert "const refuse = msg => { tokenStore.clear();" in script
+    assert 'res.status === 401) return { kind: "unauthorized" }' in script
+
+
+def test_token_field_is_a_password_input_and_disabled_writes_show_none(tmp_path):
+    got = _node(
+        tmp_path,
+        "(() => { const w = { note: 'The token was refused. Enter it again.', probeErr: "
+        "'boom', save: () => {}, forget: () => {} };"
+        " const r = mode => renderHTML(html`<${WritesPanel} writes=${w} mode=${mode}"
+        ' id="tok-x" />`);'
+        " return { locked: r('locked'), disabled: r('disabled'), unknown: r('unknown'),"
+        " checking: r('checking'), unlocked: r('unlocked') }; })()",
+    )
+    locked = got["locked"]
+    assert 'type="password"' in locked
+    assert 'autoComplete="off"' in locked
+    assert 'htmlFor="tok-x"' in locked
+    assert 'id="tok-x"' in locked
+    assert "Write token" in locked
+    assert "Enter it again" in locked
+    assert "for this browser tab only" in locked
+    for mode in ("disabled", "unknown", "checking"):
+        assert "<input" not in got[mode], mode
+    assert "not enabled on this server" in got["disabled"]
+    assert "boom" in got["unknown"]
+    assert "Forget the token" in got["unlocked"]
+    assert "<input" not in got["unlocked"]
+
+
+def test_writes_mode(tmp_path):
+    got = _node(
+        tmp_path,
+        "[writesMode(null, '', ''), writesMode(null, 't', 'down'), writesMode(false, 't', ''),"
+        " writesMode(true, '', ''), writesMode(true, 't', '')]",
+    )
+    assert got == ["checking", "unknown", "disabled", "locked", "unlocked"]
+
+
+def test_validator_messages_map_to_their_fields(tmp_path):
+    problems = [
+        "memory.allow[0].name is required",
+        "rule.name must be a non-empty string",
+        "a rule named 'x' already exists; use set",
+        "memory.allow[0].comm must be a non-empty list of process names",
+        "memory.allow[0].cmdline must be a non-empty glob",
+        "memory.allow[0].cgroup must be a non-empty glob",
+        "memory.allow[0].max_mib must be at least 64",
+        "memory.allow[0].scope must be one of process, total",
+        "memory.allow[0] needs at least one of comm, cmdline, cgroup",
+        "memory.allow[0] matches every process: give a matcher that is not a bare wildcard",
+        "no rule named 'x' in boundaries.toml (it is read-only in config.toml)",
+        "unknown rule key 'colour'",
+    ]
+    got = _node(tmp_path, "problemsByField(data)", data=problems)
+    assert got["name"] == problems[0:3]
+    assert got["comm"] == [problems[3]]
+    assert got["cmdline"] == [problems[4]]
+    assert got["cgroup"] == [problems[5]]
+    assert got["max_mib"] == [problems[6]]
+    assert got["scope"] == [problems[7]]
+    assert got["matchers"] == problems[8:10]
+    assert got["general"] == problems[10:]
+
+
+def test_rule_form_labels_every_field_and_shows_messages_for_any_field(tmp_path):
+    errs = {
+        k: [f"{k} problem"]
+        for k in ("name", "comm", "cmdline", "cgroup", "max_mib", "scope", "matchers", "general")
+    }
+    got = _node(
+        tmp_path,
+        "(() => { const f = { ...formFromRule(data.rule), commDraft: '' };"
+        " const out = renderHTML(html`<${RuleForm} form=${f} upd=${() => {}} isNew=${false} "
+        "errs=${data.errs}"
+        " g=${data.g} machine=\"thor\" busy=${false} status=${{ state: 'not_saved', text: "
+        "'Not saved: x.' }}"
+        " onSave=${() => {}} onDelete=${() => {}} onCancel=${() => {}} />`);"
+        " const fresh = renderHTML(html`<${RuleForm} form=${blankForm()} upd=${() => {}} "
+        "isNew=${true} errs=${{}}"
+        ' g=${null} machine="thor" busy=${true} status=${null} onSave=${() => {}}'
+        " onDelete=${() => {}}"
+        " onCancel=${() => {}} />`);"
+        " return { out, text: textOf(out), fresh, freshText: textOf(fresh) }; })()",
+        data={"rule": _LISTING["rules"][1], "errs": errs, "g": _GUARD},
+    )
+    out = got["out"]
+    ids = re.findall(r'<(?:input|select)[^>]*\sid="([^"]+)"', out)
+    assert sorted(ids) == ["f-cgroup", "f-cmdline", "f-comm", "f-max", "f-name", "f-scope"]
+    for i in ids:
+        assert f'htmlFor="{i}"' in out, i
+    for k in errs:
+        assert f"{k} problem" in got["text"], k
+    assert out.count('aria-invalid="true"') == 6
+    assert 'aria-describedby="f-max-h f-max-e"' in out
+    assert 'min="64"' in out
+    assert 'readOnly="true"' in out  # an existing rule keeps its name
+    assert "Delete boundary" in got["text"]
+    assert "Save boundary" in got["text"]
+    assert 'role="status"' in out
+    assert "Not saved: x." in got["text"]
+    assert "Remove process name node" in out
+    # far over at 8 GiB x 1.5 from this machine's act_over_pct
+    assert "Far over above 12.0\u00a0GiB (act_over_pct 50 on thor)" in got["text"]
+    assert 'value="total"' in out
+    # a new rule: editable name, no delete, saving in progress
+    assert 'readOnly="true"' not in got["fresh"]
+    assert "Delete boundary" not in got["freshText"]
+    assert "Saving…" in got["freshText"]
+    assert 'disabled="true"' in got["fresh"]
+
+
+_BUTTONS_NAMED = r"""
+(s => [...s.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)]
+  .filter(m => !/aria-label="[^"]+"/.test(m[1]) && !textOf(m[2]))
+  .map(m => m[0]))
+"""
+
+
+def test_every_editor_button_has_an_accessible_name(tmp_path):
+    got = _node(
+        tmp_path,
+        "(() => { const f = formFromRule(data.rule); const no = () => {};"
+        " const pv = { kind: 'ok', data: { matching: 1, processes: [] } };"
+        " const parts = [html`<${RuleForm} form=${f} upd=${no} isNew=${false} errs=${{}} g=${null}"
+        ' machine="thor" busy=${false} status=${null} onSave=${no} onDelete=${no}'
+        " onCancel=${no} />`,"
+        ' html`<${DeleteBody} name="a" machine="thor" pv=${pv} onCancel=${no} onConfirm=${no} />`,'
+        ' html`<${KillBody} procs=${[]} g=${null} machine="thor"'
+        " onCancel=${no} onConfirm=${no} />`,"
+        ' html`<${ConflictBody} machine="thor" base="a" now="b" onCancel=${no} onReload=${no} />`,'
+        " html`<${BoundaryCard} row=${toGuardRow(data.m)} edit=${{ gate: '', go: no }} />`,"
+        ' html`<${WritesPanel} writes=${{ forget: no }} mode="unlocked" id="t" />`];'
+        " const out = parts.map(renderHTML).join('');"
+        " return { unnamed: ("
+        + _BUTTONS_NAMED
+        + ")(out), n: (out.match(/<button/g) || []).length }; })()",
+        data={"rule": _LISTING["rules"][1], "m": _machine("elitemini", guard=_FILE_GUARD)},
+    )
+    assert got["unnamed"] == []
+    assert got["n"] >= 12
+
+
+def test_editor_actions_are_real_controls_without_div_click_handlers():
+    block = _editor_block()
+    assert not re.search(r"<(?:div|span|section|p|li|tr|td|ul)\b[^>]*\bonClick=", block)
+    assert not re.search(r"<(?:div|span|section|p|li|tr|td|ul)\b[^>]*\bonKeyDown=", block)
+    assert 'role="button"' not in block
+    for tag in ("<button", "<input", "<select", "<label"):
+        assert tag in block, tag
+    for asset in (
+        "data:image",
+        "data:font",
+        "url(",
+        "/vendor/",
+    ):  # no new asset; stroke SVG icons only
+        assert asset not in block, asset
+    assert 'stroke="currentColor"' in block
+
+
+def test_editor_code_has_no_nested_template_literals():
+    """SonarCloud rejects a template literal inside another one's ${} in this file."""
+    block = _editor_block()
+    depth, i, found = [], 0, []
+    while i < len(block):
+        c = block[i]
+        if depth and depth[-1] == "t":
+            if c == "\\":
+                i += 2
+                continue
+            if c == "`":
+                depth.pop()
+            elif block.startswith("${", i):
+                depth.append(0)
+                i += 1
+        elif c in "\"'":
+            j = i + 1
+            while block[j] != c:
+                j += 2 if block[j] == "\\" else 1
+            i = j
+        elif block.startswith("//", i):
+            i = block.index("\n", i)
+        elif c == "`":
+            if depth:
+                found.append(block[max(0, i - 60) : i + 20])
+            depth.append("t")
+        elif c == "{" and depth:
+            depth[-1] += 1
+        elif c == "}" and depth:
+            if depth[-1] == 0:
+                depth.pop()
+            else:
+                depth[-1] -= 1
+        i += 1
+    assert found == []
+
+
+_FILE_GUARD = dict(
+    _GUARD,
+    boundaries=[
+        dict(_GUARD["boundaries"][0]),
+        {
+            "name": "node-tests",
+            "max_mib": 8192,
+            "scope": "total",
+            "usage_mib": 13400.0,
+            "state": "over",
+            "comm": ["node"],
+            "cmdline": None,
+            "cgroup": None,
+            "source": "boundaries.toml",
+        },
+    ],
+)
+
+
+def _edit_machine(version="0.19.0", **kw):
+    m = _machine("elitemini", guard=_FILE_GUARD, **kw)
+    if m["thermal"]:
+        m["thermal"]["version"] = version
+    return m
+
+
+def test_with_a_token_cards_offer_add_and_edit_and_config_rules_stay_read_only(tmp_path):
+    got = _node(
+        tmp_path,
+        "(() => { const row = toGuardRow(data); const go = () => {};"
+        " const r = edit => renderHTML(html`<${BoundaryCard} row=${row} edit=${edit} />`);"
+        " return { on: r({ gate: '', go }), off: r(null),"
+        " gate: machineGate(row.b) }; })()",
+        data=_edit_machine(),
+    )
+    on = got["on"]
+    assert got["gate"] == ""
+    assert 'aria-label="Add boundary on elitemini"' in on
+    assert 'aria-label="Edit node-tests on elitemini"' in on
+    assert "Edit vllm-worker" not in on  # its source is config.toml
+    assert "lives in config.toml, read-only here" in on
+    assert "Actions" in on
+    assert "Add boundary" not in got["off"]
+    assert "Edit " not in got["off"]
+    assert "Actions" not in got["off"]
+
+
+@pytest.mark.parametrize(
+    ("version", "state", "thermal", "want"),
+    [
+        ("0.19.0", "ok", True, ""),
+        ("0.19.0.dev3", "ok", True, ""),
+        ("1.0.0", "ok", True, ""),
+        (
+            "0.18.2",
+            "ok",
+            True,
+            "it runs heat-governor 0.18.2; changing boundaries needs 0.19.0 or newer",
+        ),
+        ("", "ok", True, "does not report its version"),
+        ("0.19.0", "unreachable", False, "the machine is unreachable"),
+        ("0.19.0", "stale", True, "the machine's reading is stale"),
+        ("0.19.0", "unsupported", True, "heat-governor can't read this machine"),
+    ],
+)
+def test_machine_gate_names_why_a_machine_cannot_be_changed(
+    tmp_path, version, state, thermal, want
+):
+    m = _edit_machine(version, state=state, thermal=thermal)
+    got = _node(tmp_path, "machineGate(toBox(data))", data=m)
+    if want:
+        assert want in got
+    else:
+        assert got == ""
+    gated = _node(
+        tmp_path,
+        "renderHTML(html`<${BoundaryCard} row=${toGuardRow(data)} edit=${{ gate: "
+        "machineGate(toBox(data)), go: () => {} }} />`)",
+        data=m,
+    )
+    assert ("Add boundary" in gated) == (not want)
+    assert ("Read-only: " in gated) == bool(want)
+
+
+def test_machine_not_in_the_fleet_is_gated(tmp_path):
+    assert _node(tmp_path, "machineGate(null)") == "the machine is not in the fleet file"
+
+
+def test_edit_state_comes_from_the_file_read_on_the_box(tmp_path):
+    got = _node(
+        tmp_path,
+        "[editState(data, 'node-tests', false).mode, editState(data, 'vllm-worker', false).mode,"
+        " editState(data, 'gone', false).mode, editState(data, null, true).mode,"
+        " editState({ ...data, error: 'line 3: bad' }, 'node-tests', false).mode,"
+        " editState(data, 'node-tests', false).rule.comm]",
+        data=_LISTING,
+    )
+    assert got == ["edit", "readonly", "missing", "new", "rejected", ["node"]]
+    script = _script()
+    # the editor's rules and base version come from GET /api/boundaries/MACHINE, not /api/fleet
+    assert "editState(listing.data, ruleName, isNew)" in script
+    assert "version: data.version" in script
+
+
+def test_rejected_file_shows_its_message_and_the_last_good_rules_as_live(tmp_path):
+    text = _node(
+        tmp_path,
+        'textOf(renderHTML(html`<${RejectedView} machine="elitemini" error="line 3: expected \']\'"'
+        " row=${toGuardRow(data)} />`))",
+        data=_edit_machine(),
+    )
+    assert "boundaries.toml on elitemini is rejected: line 3: expected ']'" in text
+    assert "Editing is disabled" in text
+    assert "Last good rules, still live" in text
+    assert "node-tests" in text
+    assert "vllm-worker" in text
+    assert "Edit " not in text
+
+
+def test_config_rule_opened_by_hash_is_read_only(tmp_path):
+    text = _node(
+        tmp_path,
+        'textOf(renderHTML(html`<${ReadOnlyRule} machine="elitemini" rule=${data} />`))',
+        data=_LISTING["rules"][0],
+    )
+    assert "lives in config.toml on elitemini" in text
+    assert "*vllm*worker*" in text
+    assert "90.0\u00a0GiB" in text
+
+
+def test_save_outcomes_from_each_answer(tmp_path):
+    got = _node(
+        tmp_path,
+        "data.map(([status, d, lost]) => saveOutcome({ status, data: d, lost }).kind)",
+        data=[
+            [200, {"outcome": "saved", "version": "v2"}, False],
+            [409, {"outcome": "conflict", "version": "v3"}, False],
+            [409, {"outcome": "would_kill", "processes": [{"pid": 1}]}, False],
+            [400, {"outcome": "invalid", "problems": ["x"]}, False],
+            [400, {"outcome": "invalid", "error": "If-Match must be one version"}, False],
+            [401, {"outcome": "unauthorized", "error": "a valid bearer token is required"}, False],
+            [502, {"outcome": "not_saved", "message": "lost; the file is unchanged"}, False],
+            [422, {"outcome": "version_too_old", "message": "needs 0.19.0"}, False],
+            [403, {"outcome": "writes_disabled", "error": "not enabled"}, False],
+            [504, {"outcome": "unknown", "message": "may or may not"}, False],
+            [0, {"error": "no answer in 70 s"}, True],
+        ],
+    )
+    assert got == [
+        "saved",
+        "conflict",
+        "would_kill",
+        "invalid",
+        "invalid",
+        "unauthorized",
+        "not_saved",
+        "not_saved",
+        "not_saved",
+        "lost",
+        "lost",
+    ]
+
+
+_RUN_SAVE = r"""
+(async () => {
+  const rule = { name: "node-tests", comm: ["node"], max_mib: 4096, scope: "total" };
+  const req = { op: "set", rule, version: "v1", allowKill: false };
+  const listing = (version, rules) => ({ status: 200, data: { outcome: "ok", version, error: null,
+    rules: rules.map(r => ({ ...r, source: "boundaries.toml", editable: true })) } });
+  const lost = { status: 0, lost: true, data: { error: "no answer in 70 s" } };
+  const run = async (applyRes, listRes, r) => {
+    let lists = 0;
+    const api = { apply: async () => applyRes, list: async () => { lists++; return listRes; } };
+    const out = await runSave(api, r || req);
+    return { kind: out.kind, state: finalStatus(out).state, text: finalStatus(out).text, lists,
+      recovered: !!out.recovered };
+  };
+  return {
+    landed: await run(lost, listing("v2", [rule])),
+    unchanged: await run(lost, listing("v1", [{ ...rule, max_mib: 8192 }])),
+    other: await run(lost, listing("v2", [{ ...rule, max_mib: 9999 }])),
+    gateway: await run({ status: 504, data: { outcome: "unknown" } }, listing("v2", [rule])),
+    rmLanded: await run(lost, listing("v2", []), { ...req, op: "rm" }),
+    unreadable: await run(lost, { status: 0, lost: true, data: { error: "down" } }),
+    saved: await run({ status: 200, data: { outcome: "saved", version: "v2" } }, null),
+    conflict: await run({ status: 409, data: { outcome: "conflict", version: "v9" } }, null),
+    refused: await run({ status: 401, data: { outcome: "unauthorized" } }, null),
+    invalid: await run({ status: 400, data: { outcome: "invalid", problems: ["x"] } }, null),
+    failed: await run({ status: 502,
+      data: { outcome: "machine_unreachable", message: "ssh: timed out" } }, null),
+  };
+})()
+"""
+
+
+def test_a_lost_or_timed_out_save_is_decided_from_a_re_read(tmp_path):
+    got = _node(tmp_path, _RUN_SAVE)
+    # timeout / network error / 504: the list is read again and decides
+    assert got["landed"]["kind"] == "saved"
+    assert got["landed"]["recovered"] is True
+    assert got["landed"]["lists"] == 1
+    assert got["unchanged"]["state"] == "not_saved"
+    assert "unchanged" in got["unchanged"]["text"]
+    assert got["other"]["state"] == "conflict"
+    assert got["gateway"]["state"] == "saved"
+    assert got["rmLanded"]["state"] == "saved"
+    assert got["unreadable"]["state"] == "not_saved"
+    assert "may still have landed" in got["unreadable"]["text"]
+    # an answered request is not re-read
+    for k in ("saved", "conflict", "refused", "invalid", "failed"):
+        assert got[k]["lists"] == 0, k
+    assert got["saved"]["state"] == "saved"
+    assert got["conflict"]["state"] == "conflict"
+    assert "token was refused" in got["refused"]["text"]
+    assert "ssh: timed out" in got["failed"]["text"]
+    # every attempt ends in exactly one of the three states
+    for k, v in got.items():
+        assert v["state"] in ("saved", "not_saved", "conflict"), k
+
+
+def test_a_request_that_gets_no_answer_times_out_as_lost(tmp_path):
+    got = _node(
+        tmp_path,
+        "(async () => { fetch = (url, init) => new Promise((_, no) =>"
+        " init.signal.addEventListener('abort', () => no(new Error('aborted'))));"
+        " const timed = await call('/api/boundaries/thor', requestInit('t'), 20);"
+        " fetch = () => Promise.reject(new TypeError('Failed to fetch'));"
+        " const down = await call('/api/boundaries/thor', requestInit('t'), 1000);"
+        " return { timed, down, kinds: [saveOutcome(timed).kind, saveOutcome(down).kind] }; })()",
+    )
+    assert got["timed"] == {"status": 0, "lost": True, "data": {"error": "no answer in 0 s"}}
+    assert got["down"]["data"]["error"] == "Failed to fetch"
+    assert got["kinds"] == ["lost", "lost"]
+    script = _script()
+    assert "SAVE_TIMEOUT_MS = 70000" in script
+
+
+def test_kill_warning_states_the_real_conditions(tmp_path):
+    got = _node(
+        tmp_path,
+        "({ g: killConditions(data), none: killConditions(null), when: KILL_WHEN,"
+        " budget: killBudget(data, 'elitemini') })",
+        data=_GUARD,
+    )
+    g = " | ".join(got["g"])
+    for part in (
+        "daemon's own user",
+        "protect list",
+        "at least 2.0\u00a0GiB of anonymous memory itself (min_victim_mib)",
+        "action is kill (here it is kill)",
+        "more than 50% over its boundary (act_over_pct)",
+    ):
+        assert part in g, part
+    none = " | ".join(got["none"])
+    assert "at least min_victim_mib" in none
+    assert "act_over_pct percent" in none
+    assert "12 s" in got["when"]
+    assert got["budget"] == "A kill counts against the budget of 3 per hour on elitemini (1 used)."
+
+
+def test_modal_frame_is_a_labelled_modal_dialog(tmp_path):
+    out = _node(
+        tmp_path,
+        'renderHTML(html`<${ModalFrame} id="dlg-x" title="Delete a on thor?" icon="bin" '
+        'tone="danger">'
+        "<p>body</p></${ModalFrame}>`)",
+    )
+    assert 'role="dialog"' in out
+    assert 'aria-modal="true"' in out
+    assert 'aria-labelledby="dlg-x-t"' in out
+    assert '<h2 id="dlg-x-t">Delete a on thor?</h2>' in out
+    assert 'tabIndex="-1"' in out
+
+
+def test_modals_move_focus_trap_tab_and_close_on_escape(tmp_path):
+    got = _node(
+        tmp_path,
+        "[trapIndex(3, 2, false), trapIndex(3, 0, true), trapIndex(3, 1, false), "
+        "trapIndex(3, 1, true),"
+        " trapIndex(3, -1, false), trapIndex(3, -1, true), trapIndex(0, 0, false)]",
+    )
+    assert got == [0, 2, -1, -1, 0, 2, -1]
+    block = _editor_block()
+    focus = block[block.index("function useModalFocus") : block.index("function ModalFrame")]
+    assert "const prev = document.activeElement;" in focus
+    assert "first.focus()" in focus
+    assert "prev.focus()" in focus  # restored on close
+    assert 'document.addEventListener("keydown", on, true)' in focus
+    key = block[block.index("function modalKey") : block.index("function useModalFocus")]
+    assert 'e.key === "Escape"' in key
+    assert 'e.key !== "Tab"' in key
+    # delete, a would-kill change and a conflict each open a modal
+    for kind in ('m.kind === "delete"', 'm.kind === "kill"', 'id="dlg-conflict"'):
+        assert kind in block, kind
+    assert "s.attempt(m.req.op, m.req.rule, true)" in block  # re-sent with allow_kill on confirm
+    assert "ctx.onReload()" in block
+
+
+def test_modal_bodies_say_what_happens(tmp_path):
+    procs = [
+        {
+            "pid": 2231,
+            "uid": 1000,
+            "user": "ori",
+            "comm": "node",
+            "cmdline": "node --test js/test/search-panel.test.js",
+            "usage_mib": 13414.4,
+            "far_over_killable": True,
+        }
+    ]
+    got = _node(
+        tmp_path,
+        "(() => { const no = () => {};"
+        " const t = n => textOf(renderHTML(n));"
+        ' return { kill: t(html`<${KillBody} procs=${data.procs} g=${data.g} machine="elitemini"'
+        " onCancel=${no} onConfirm=${no} />`),"
+        ' del: t(html`<${DeleteBody} name="node-tests" machine="elitemini"'
+        ' path="/b/boundaries.toml"'
+        " pv=${{ kind: 'ok', data: { matching: 3 } }} onCancel=${no} onConfirm=${no} />`),"
+        ' conflict: t(html`<${ConflictBody} machine="thor" base="3f9c2e1aa"'
+        ' now="8b04d7a00" isNew=${false} onCancel=${no} onReload=${no} />`),'
+        ' fresh: t(html`<${ConflictBody} machine="thor" base="missing"'
+        ' now="8b04d7a00" isNew=${true} onCancel=${no} onReload=${no} />`) }; })()',
+        data={"procs": procs, "g": _GUARD},
+    )
+    kill = got["kill"]
+    assert "One running process would be far over" in kill
+    assert "pid 2231" in kill
+    assert "node --test js/test/search-panel.test.js" in kill
+    assert "13.1\u00a0GiB" in kill
+    assert "protect list" in kill
+    assert "12 s" in kill
+    assert "Save and allow the kill" in kill
+    assert "Back to the rule" in kill
+    assert "budget of 3 per hour" in kill
+    assert "It matches 3 running processes now." in got["del"]
+    assert "/b/boundaries.toml" in got["del"]
+    assert "kept as a backup" in got["del"]
+    assert "Keep it" in got["del"]
+    assert "You started from 3f9c2e1 · thor now has 8b04d7a." in got["conflict"]
+    assert "your edits are discarded" in got["conflict"]
+    assert "Reload the current rules" in got["conflict"]
+    assert "no file yet" in got["fresh"]
+    assert "keeps your form" in got["fresh"]
+
+
+def test_preview_panel_lists_matches_and_whether_the_guard_could_kill(tmp_path):
+    procs = [
+        {
+            "pid": 41822,
+            "uid": 0,
+            "user": "root",
+            "comm": "python3",
+            "cmdline": "python3 -m vllm worker",
+            "container": "a3f9c1e07b22",
+            "rss_anon_mib": 101800.0,
+            "usage_mib": 101800.0,
+            "state": "far_over",
+            "killable": False,
+            "reason": "uid 0",
+            "far_over_killable": False,
+        },
+        {
+            "pid": 5150,
+            "uid": 1000,
+            "user": "ori",
+            "comm": "node",
+            "cmdline": "node --test",
+            "container": None,
+            "rss_anon_mib": 13414.4,
+            "usage_mib": 13414.4,
+            "state": "far_over",
+            "killable": True,
+            "reason": None,
+            "far_over_killable": True,
+        },
+        {
+            "pid": 7,
+            "uid": 1000,
+            "user": "ori",
+            "comm": "node",
+            "cmdline": "node",
+            "container": None,
+            "rss_anon_mib": 100.0,
+            "usage_mib": 100.0,
+            "state": "within",
+            "killable": False,
+            "reason": "below min_victim_mib 2048",
+            "far_over_killable": False,
+        },
+    ]
+    ok = {
+        "kind": "ok",
+        "data": {
+            "outcome": "ok",
+            "action": "kill",
+            "matching": 3,
+            "far_over_killable": 1,
+            "guard_configured": True,
+            "processes": procs,
+        },
+    }
+    got = _node(
+        tmp_path,
+        "(() => { const r = (pv, scanning) => textOf(renderHTML(html`<${PreviewPanel}"
+        ' machine="thor" pv=${pv}'
+        " scanning=${scanning} rule=${{ max_mib: 4096, scope: 'process' }} g=${data.g} />`));"
+        " return { ok: r(data.ok, false), busy: r(data.ok, true), bad: r({ kind: 'invalid', "
+        "problems: ['x'] }, false),"
+        " none: r(null, false), err: r({ kind: 'error', text: 'busy, retry shortly' }, "
+        "false) }; })()",
+        data={"ok": ok, "g": _GUARD},
+    )
+    ok_text = got["ok"]
+    assert (
+        "3 processes match; each is judged on its own against 4.0\u00a0GiB. 1 would be killed."
+        in ok_text
+    )
+    assert "Live scan on thor" in ok_text
+    assert "never killed: uid 0" in ok_text
+    assert "the guard would kill it" in ok_text
+    assert "never killed: below min_victim_mib 2048" in ok_text
+    assert "far over" in ok_text
+    assert "a3f9c1e07b22" in ok_text
+    assert "Guard action: kill" in ok_text
+    assert "Scanning thor" in got["busy"]
+    assert "Fix the messages beside the form" in got["bad"]
+    assert "Change the rule to see" in got["none"]
+    assert "busy, retry shortly" in got["err"]
+    for k in got:
+        assert "only when all of these hold" in got[k], k  # the kill conditions beside the preview
+
+
+def test_list_and_preview_answers(tmp_path):
+    got = _node(
+        tmp_path,
+        "({ list: [listState({ status: 200, data: data }).kind, listState({ status: 401, "
+        "data: {} }).kind,"
+        " listState({ status: 422, data: { outcome: 'version_too_old', message: 'needs "
+        "0.19.0' } }),"
+        " listState({ status: 502, data: { outcome: 'machine_unreachable', message: 'ssh "
+        "down' } }).text],"
+        " pv: [previewState({ status: 400, data: { outcome: 'invalid', problems: ['p'] } }),"
+        " previewState({ status: 401, data: {} }).kind, previewState({ status: 503, data: { "
+        "error: 'busy' } })] })",
+        data=_LISTING,
+    )
+    assert got["list"][:2] == ["ok", "unauthorized"]
+    assert got["list"][2] == {"kind": "error", "text": "needs 0.19.0"}
+    assert got["list"][3] == "ssh down"
+    assert got["pv"][0] == {"kind": "invalid", "problems": ["p"]}
+    assert got["pv"][1] == "unauthorized"
+    assert got["pv"][2] == {"kind": "error", "text": "busy"}
+
+
+def test_saved_text_and_editor_new_styles(tmp_path):
+    got = _node(
+        tmp_path,
+        "[savedText('set', 'a', 'thor', { kind: 'saved', data: { forced: false } }),"
+        " savedText('rm', 'a', 'thor', { kind: 'saved', recovered: true, data: {} })]",
+    )
+    assert got[0].startswith("Saved a on thor.")
+    assert got[1].startswith("Deleted a on thor (confirmed by re-reading")
+    style = _style()
+    for sel in (
+        ".btn",
+        ".btn.primary",
+        ".btn.danger",
+        ".ibtn",
+        ".field",
+        ".input",
+        ".modal",
+        ".modal-scrim",
+    ):
+        assert sel + " " in style or sel + "{" in style, sel
+    block = style[style.index("/* boundaries editor") :]
+    # new rules use the page's variables only: no new colour beyond white on the danger button
+    assert re.findall(r"#[0-9a-fA-F]{3,6}\b", block) == ["#fff"]
