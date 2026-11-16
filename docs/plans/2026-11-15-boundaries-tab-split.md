@@ -26,19 +26,19 @@ Edit the Owner/Model columns before approving gate 2 — the default Model is a 
 | `t3` | subagent | sonnet |
 | `t4` | subagent | opus |
 | `t5` | main agent | fable |
-| `t6` |  | sonnet |
-| `t7` |  | sonnet |
-| `t8` |  | sonnet |
-| `t11` |  | sonnet |
-| `t13` |  | sonnet |
-| `t9` |  | sonnet |
-| `t12` |  | sonnet |
-| `t10` |  | sonnet |
-| `t14` |  | sonnet |
-| `t15` |  | sonnet |
-| `t16` |  | sonnet |
-| `t17` |  | sonnet |
-| `t18` |  | sonnet |
+| `t6` | main agent | fable |
+| `t7` | subagent | sonnet |
+| `t8` | subagent | sonnet |
+| `t11` | subagent | sonnet |
+| `t13` | subagent | sonnet |
+| `t9` | subagent | sonnet |
+| `t12` | subagent | sonnet |
+| `t10` | subagent | sonnet |
+| `t14` | subagent | sonnet |
+| `t15` | subagent | opus |
+| `t16` | subagent | opus |
+| `t17` | main agent | fable |
+| `t18` | main agent | fable |
 
 ## Wave 1
 
