@@ -62,6 +62,7 @@ def _argv_has_json(argv: list[str] | None) -> bool:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    from heat_governor.cli._commands import boundaries as _boundaries
     from heat_governor.cli._commands import cli as _cli_group
     from heat_governor.cli._commands import doctor as _doctor_cmd
     from heat_governor.cli._commands import explain as _explain_cmd
@@ -98,6 +99,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _tuning.register(sub)
     _mesh.register(sub)
     _memory.register(sub)
+    _boundaries.register(sub)
     _ship.register(sub)
     _mcp.register(sub)
     # Register your own noun groups here:
