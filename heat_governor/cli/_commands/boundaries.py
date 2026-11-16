@@ -55,16 +55,22 @@ failures (unreadable config, no /proc, write failure) are a ``CliError``: exit 2
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import getpass
 import json
+import socket
 import sys
 from pathlib import Path
 
 from heat_governor import boundaries_file
+from heat_governor import boundaries_service as svc
 from heat_governor import config as cfgmod
 from heat_governor import mempreview, memprocs
+from heat_governor.cli._commands import mesh
 from heat_governor.cli._commands.overview import emit_overview
-from heat_governor.cli._errors import EXIT_ENV_ERROR, CliError
+from heat_governor.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from heat_governor.cli._output import emit_result
+from heat_governor.fleet_reader import FleetReader, default_transport
 
 _JSON_HELP = "Emit structured JSON."
 _RULE_KEYS = ("name", "comm", "cmdline", "cgroup", "max_mib", "scope")
@@ -408,14 +414,20 @@ def _with_body(args: argparse.Namespace, runner) -> int:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
+    if getattr(args, "machine", None):
+        return _remote(args, lambda service, name: service.list(name))
     return _finish(run_list(_config_path(args)), args)
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
+    if getattr(args, "machine", None):
+        return _remote_body(args, _remote_apply)
     return _with_body(args, run_apply)
 
 
 def cmd_preview(args: argparse.Namespace) -> int:
+    if getattr(args, "machine", None):
+        return _remote_body(args, _remote_preview)
     return _with_body(args, run_preview)
 
 
@@ -429,20 +441,26 @@ def _flag_rule(args: argparse.Namespace) -> dict:
     return rule
 
 
-def _flag_request(args: argparse.Namespace, op: str, config_path: Path) -> dict:
-    snap = boundaries_file.read(_boundaries_path(_load(config_path)))
+def _build_request(args: argparse.Namespace, op: str, version: str, rules: list[dict]) -> dict:
     rule = {"name": args.name} if op == "rm" else _flag_rule(args)
     if op == "set":  # flags override the current rule; unset flags keep its values
-        old = next((r for r in snap.rules if r.get("name") == args.name), {})
+        old = next((r for r in rules if r.get("name") == args.name), {})
         rule = {**old, **rule}
-    req: dict = {"base_version": snap.version, "operation": op, "rule": rule}
+    req: dict = {"base_version": version, "operation": op, "rule": rule}
     if getattr(args, "allow_kill", False):
         req["allow_kill"] = True
     return req
 
 
+def _flag_request(args: argparse.Namespace, op: str, config_path: Path) -> dict:
+    snap = boundaries_file.read(_boundaries_path(_load(config_path)))
+    return _build_request(args, op, snap.version, snap.rules)
+
+
 def _flag_verb(op: str):
     def run(args: argparse.Namespace) -> int:
+        if getattr(args, "machine", None):
+            return _remote(args, lambda service, name: _remote_flag(service, name, args, op))
         path = _config_path(args)
         result = run_apply(_flag_request(args, op, path), path, **_opts(args))
         return _finish(result, args)
@@ -452,6 +470,76 @@ def _flag_verb(op: str):
 
 
 cmd_add, cmd_set, cmd_rm = _flag_verb("add"), _flag_verb("set"), _flag_verb("rm")
+
+
+# -- --machine: through the reader's boundaries service -------------------------------------
+
+_USER_REFUSALS = (svc.UNKNOWN_MACHINE, svc.VERSION_TOO_OLD, svc.NO_CONFIG_PATH)
+
+
+def _audit_label() -> str:
+    return f"{getpass.getuser()}@{socket.gethostname()}"
+
+
+def _one_machine(args: argparse.Namespace):
+    """(a fleet of just the chosen machine, that machine); ``CliError`` for an unknown name."""
+    fleet = mesh._load(args)
+    chosen = [m for m in fleet.machines if m.name == args.machine]
+    if not chosen:
+        known = ", ".join(m.name for m in fleet.machines) or "none"
+        raise CliError(
+            EXIT_USER_ERROR, f"unknown machine {args.machine!r}; known: {known}", "pass --machine"
+        )
+    return dataclasses.replace(fleet, machines=(chosen[0],)), chosen[0]
+
+
+def _remote(args: argparse.Namespace, run) -> int:
+    """One poll of the chosen machine (its version and config path), then ``run(service,
+    machine_name)`` through the service, labelled ``user@host``; no token."""
+    fleet, machine = _one_machine(args)
+    factory = mesh.transport_factory or default_transport(fleet)
+    reader = FleetReader(fleet, transport_factory=factory)
+    transport = factory(machine)
+    try:
+        reader.poll_all(fleet.timeout_s + mesh.DIRECT_SLACK_S)
+        service = svc.BoundariesService(reader.snapshot, lambda _name: transport)
+        result = run(service, machine.name)
+    finally:
+        reader.close()
+        transport.close()
+    return _finish_remote(result, args)
+
+
+def _finish_remote(result: dict, args: argparse.Namespace) -> int:
+    outcome = result.get("outcome")
+    if outcome in svc.BOX_OUTCOMES:
+        return _finish(result, args)
+    code = EXIT_USER_ERROR if outcome in _USER_REFUSALS else EXIT_ENV_ERROR
+    raise CliError(code, str(result.get("message") or outcome), f"outcome: {outcome}")
+
+
+def _remote_flag(service, name: str, args: argparse.Namespace, op: str) -> dict:
+    listing = service.list(name)
+    if listing.get("outcome") != "ok":
+        return listing
+    request = _build_request(args, op, listing["version"], svc.boundaries_rules(listing))
+    return service.apply(name, request, _audit_label())
+
+
+def _remote_body(args: argparse.Namespace, runner) -> int:
+    body, why = _read_body()
+    if why:
+        return _finish(_invalid([why]), args)
+    return _remote(args, lambda service, name: runner(service, name, body))
+
+
+def _remote_apply(service, name: str, body: object) -> dict:
+    return service.apply(name, body, _audit_label())
+
+
+def _remote_preview(service, name: str, body: object) -> dict:
+    rule = body.get("rule") if isinstance(body, dict) and set(body) == {"rule"} else None
+    return service.preview(name, rule)
 
 
 # -- overview -------------------------------------------------------------------------------
@@ -465,6 +553,8 @@ def cmd_overview(args: argparse.Namespace) -> int:
                 "title": "Verbs",
                 "items": [
                     "boundaries overview -- this description",
+                    "every verb takes --machine M [--fleet P]: run on that fleet.toml machine "
+                    "through the reader's service (version gate, audit log user@host)",
                     "boundaries list [--config P] -- every [[memory.allow]] rule with its source "
                     "file and the boundaries.toml version (config.toml rules are read-only)",
                     "boundaries add --name N [--comm C]... [--cmdline G] [--cgroup G] "
@@ -501,6 +591,8 @@ def _no_verb(args: argparse.Namespace) -> int:
 def _common(p: argparse.ArgumentParser, *, proc: bool = True) -> None:
     p.add_argument("--config", help="config.toml path; boundaries.toml is its sibling.")
     p.add_argument("--json", action="store_true", help=_JSON_HELP)
+    p.add_argument("--machine", help="Act on this fleet.toml machine, through its daemon's box.")
+    p.add_argument("--fleet", help="fleet.toml path for --machine (default: beside config.toml).")
     if proc:
         p.add_argument("--proc-root", default="/proc", help=argparse.SUPPRESS)
         p.add_argument("--uid", type=int, default=None, help=argparse.SUPPRESS)
