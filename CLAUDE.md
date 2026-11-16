@@ -34,10 +34,10 @@ files, and a CI/deploy pipeline. It is a sibling to
 | `mesh overview\|status\|serve`, dashboard on `127.0.0.1:9480` (`mesh_server.py`, `web/`, vendored React/htm/Lato) | Implemented |
 | `mcp`: read-only MCP server over stdio (`mcp_server.py`) | Implemented |
 | Boundaries, read side: `mem_guard` (with each rule's matchers and source, `act_over_pct`, kill cap, `min_victim_mib`) through the fleet reader, `/api/fleet`, `mesh status` and MCP; read-only Boundaries tab in the dashboard (`web/index.html`) | Implemented; live on the EliteMini reader and its own daemon since 2026-11-16 (`docs/evidence/2026-11-16-boundaries-read-live.md`); the five remote daemons still run 0.17.0, so they report no matchers or thresholds; no rule rendered live yet |
-| Boundaries, write side: `boundaries.toml`, `boundaries` CLI noun, token-guarded writes from the page (`docs/specs/2026-11-15-boundaries-tab.md`, `docs/plans/2026-11-15-boundaries-tab.md`) | (planned) |
+| Boundaries, write side: page-managed rules in `boundaries.toml` beside `config.toml` (`boundaries_file.py`), merged by the loader; `boundaries` CLI noun (`list`, `add`, `set`, `rm`, `apply`, `preview`, `--machine`); on-box preview and kill check (`mempreview.py`); reader service with version gate and audit log (`boundaries_service.py`); token-guarded routes in `mesh serve --token-file` and the editor in the dashboard; `memory_boundary_changed` event (`docs/contracts/boundaries.md`) | Implemented, unit-tested with fake `/proc` trees, a fake ssh and tmp config dirs; not yet used on a live box; the five remote daemons need 0.19.0 first |
 | Memory guard (`[memory]`): own thread, slope + floor trigger, absolute per-platform limits, own-user victim by anonymous growth, pidfd-pinned SIGKILL, kill budget, repeat offenders, OOM-kill events, `top` snapshots (`memtrigger.py`, `memprocs.py`, `memkill.py`, `memguard.py`; `memory` verbs) | Implemented; replayed on the 2026-11-14 incident and 2026-11-10..13 records; `action = "kill"` live on all six boxes since 2026-11-15 (on the EliteMini a 1.2 GB/s runaway was killed with 8.7 GB free, `docs/evidence/2026-11-15-memory-guard-live.md`); platform limits declared, unmeasured under a runaway |
 | Off-machine evidence (`[ship]`): stdlib SigV4 S3 client, spool + retry, kill events, black box, postmortem (`sigv4.py`, `ship.py`; `ship` verbs) | Implemented; live since 2026-11-15: five boxes ship to MinIO on spark, spark ships to MinIO on arduino (bucket `heat-governor`); not yet run against R2 or AWS |
-| Bearer-token tailnet listener and daemon `GET /history`; persisted reader history; measured VENTUNO Q limits; cultureos daemon with apply | (planned) |
+| Bearer-token tailnet listener on each daemon and daemon `GET /history`; persisted reader history; measured VENTUNO Q limits; cultureos daemon with apply | (planned) |
 | Live validation on a batch window (duty vs peak temperature vs throughput) | (planned) |
 | Configuration: one TOML file, strict validation, live reload, `config` verbs (`config.py`) | Implemented |
 | GPU clock ceiling via a root helper + narrow sudoers rule (`gpuclock.py`; `gpu-clock` verbs) | Implemented; helper installed on all four boxes 2026-10-23; `lock` at max accepted on GB10 and both Jetsons; effect of a lower ceiling unmeasured |
@@ -58,6 +58,11 @@ contract) and `docs/integration.md` (how lobes, sparkrun and mjolnir use it) bef
   machine. Same rule: the user's go-ahead before enabling either on a box, tests on fake
   `/proc` trees and a local fake S3, and never signal a process a test did not spawn. See
   `docs/contracts/memory.md`.
+- A boundary rule can make a box kill processes. Saving, changing or deleting a boundary on a
+  live machine (`heat-governor boundaries add|set|rm|apply`, with or without `--machine`, or
+  from the page) and enabling a token file on a live `mesh serve` need the user's go-ahead.
+  Tests never write under a real config directory: they pass `--config` under `tmp_path` and
+  a fake `/proc`. See `docs/contracts/boundaries.md`.
 - The runtime package has **no third-party dependencies**
   (`dependencies = []` in `pyproject.toml`). Keep it that way unless there's a
   deliberate decision otherwise; dev-only tools go in `[dependency-groups].dev`.

@@ -262,7 +262,23 @@ plus `ddr 46C` where present) and the trend tooltip and table show it.
 
 The dashboard's **Boundaries** tab (`#boundaries`) lists each machine's memory guard (action,
 limits, kills) and every `[[memory.allow]]` rule with its matchers, anonymous-memory usage and
-state. It is read-only; `mesh status` shows the same guard in one column (`guard kill armed 2k 3b`).
+state; `mesh status` shows the same guard in one column (`guard kill armed 2k 3b`).
+
+Since 0.19.0 boundaries can be created, changed and deleted without editing `config.toml`:
+
+```bash
+heat-governor boundaries list                       # this box: rules of both files, file version
+heat-governor boundaries add --name vllm --cmdline '*vllm*serve*' --max-mib 102400
+heat-governor boundaries set --name vllm --max-mib 110000 --machine spark   # over the reader's SSH
+heat-governor boundaries rm --name vllm
+```
+
+Managed rules live in `boundaries.toml` beside `config.toml`; rules written by hand in
+`config.toml` stay read-only. A save that would put a running process of the daemon's user far
+over its boundary is refused unless `--allow-kill` is given. To edit from the page, start
+`mesh serve --token-file FILE` (lines of `label = token`, mode 600) and enter a token in the
+Boundaries tab; without a token file the server stays read-only. See
+[`docs/contracts/boundaries.md`](docs/contracts/boundaries.md).
 
 For agents, `heat-governor mcp` is a read-only MCP server over stdio. Add it to
 a client as a stdio command, for example:
