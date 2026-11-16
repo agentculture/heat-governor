@@ -30,6 +30,7 @@ records -- all harmless -- but changes no container (it logs what it would do).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -44,7 +45,9 @@ from typing import Callable
 from heat_governor import __version__, platforms
 from heat_governor.actuators import CpuCapper, DutyCycler, Ledger
 from heat_governor.adaptive import AdaptiveLoop, ModelStore, Trend, UsageMeter
+from heat_governor.boundaries_file import rule_to_dict
 from heat_governor.config import (
+    BOUNDARIES_FILE,
     PAIR_RESTART_ONLY,
     Config,
     ConfigError,
@@ -115,8 +118,27 @@ def utc() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-SHIP_EVENTS = MEMORY_EVENTS  # kill, oom_kill, budget_exhausted, boundary_exceeded (not would_kill)
+# kill, oom_kill, budget_exhausted, boundary_exceeded, boundary_changed (not would_kill)
+SHIP_EVENTS = MEMORY_EVENTS
+EV_BOUNDARY_CHANGED = "memory_boundary_changed"
+BOUNDARIES_APPLIED = "boundaries-applied.json"  # in the data dir: the rules last applied
 POSTMORTEM_FILES = 2  # the newest day files read for the postmortem (never the whole archive)
+
+
+def _file_rules(cfg: Config) -> tuple:
+    """The rules that came from boundaries.toml."""
+    return tuple(r for r in cfg.memory.allow if r.source == BOUNDARIES_FILE)
+
+
+def _rules_doc(rules) -> list[dict]:
+    """The merged boundary rules as plain dicts (definitions only), each with its source file."""
+    return [{**rule_to_dict(r), "source": r.source} for r in rules]
+
+
+def _rules_hash(rules) -> str:
+    """A digest of what the rules say; the file a rule came from is not part of it."""
+    body = json.dumps([rule_to_dict(r) for r in rules], sort_keys=True)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 def memory_rule(cfg: Config) -> MemoryRule | None:
@@ -177,6 +199,7 @@ class Daemon:
         self._peer_ok: bool | None = None  # last logged peer health
         self._ceilings: tuple | None = None  # (ours, the peer's) operator ceiling, last logged
         self._started = False
+        self._applied: dict | None = None  # {"hash", "rules"} last applied; lazily loaded
         self._started_at = 0.0
         self.containers: dict[str, Container] = {}
         self._discovered_at = 0.0
@@ -523,6 +546,8 @@ class Daemon:
             cfg.mtime = new.mtime
             return
         changes = config_diff(cfg.data, new.data)
+        if _file_rules(cfg) != _file_rules(new):
+            changes.append(f"{BOUNDARIES_FILE} rules changed")
         later = self._restart_only_changes(cfg.daemon, new.daemon)
         old_pair, new_pair = cfg.data.get("pair") or {}, new.data.get("pair") or {}
         later += [f"pair.{k}" for k in PAIR_RESTART_ONLY if old_pair.get(k) != new_pair.get(k)]
@@ -560,7 +585,54 @@ class Daemon:
         self.set_pair(cfg.pair)
         self.set_memory(memory_rule(cfg))
         self.set_ship(ship_rule(cfg))
+        self._fenced("boundaries event", lambda: self._note_boundaries(cfg.memory.allow))
         self._discovered_at = 0.0  # re-discover on the next tick
+
+    # -- memory_boundary_changed: the merged rules, whichever file they came from
+    def _applied_path(self) -> Path:
+        return (self.opts.data_dir or Path(".")) / BOUNDARIES_APPLIED
+
+    def _load_applied(self) -> dict:
+        """The rules last applied, as the previous run stored them (empty when none)."""
+        try:
+            doc = json.loads(self._applied_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return doc if isinstance(doc, dict) else {}
+
+    def _note_boundaries(self, rules, *, startup: bool = False) -> None:
+        """Record and ship one event when ``rules`` differ from the ones last applied.
+
+        The first start with nothing stored emits only when there are rules to report (old
+        rules ``None``); with no rules at all it stores the empty set and stays quiet."""
+        if self._applied is None:
+            self._applied = self._load_applied()
+        new_hash, new_doc = _rules_hash(rules), _rules_doc(rules)
+        old_hash = self._applied.get("hash")
+        if old_hash == new_hash:
+            return
+        old_doc = self._applied.get("rules") if old_hash is not None else None
+        self._applied = {"hash": new_hash, "rules": new_doc}
+        if old_hash is not None or new_doc:
+            self._route_memory_event(
+                {
+                    "t": self.clock(),
+                    "event": EV_BOUNDARY_CHANGED,
+                    "at_startup": startup,
+                    "old_rules": old_doc,
+                    "new_rules": new_doc,
+                    "old_hash": old_hash,
+                    "new_hash": new_hash,
+                }
+            )
+        self._fenced("boundaries state", self._store_applied)
+
+    def _store_applied(self) -> None:
+        path = self._applied_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(self._applied, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
 
     RESTART_ONLY = ("apply", "listen", "state", "data_dir", "record", "fsync", "reload")
 
@@ -1176,6 +1248,11 @@ class Daemon:
         self._started = True
         self._start_guard()
         self._start_shipper()
+        cfg = self.opts.config
+        if cfg is not None:
+            self._fenced(
+                "boundaries event", lambda: self._note_boundaries(cfg.memory.allow, startup=True)
+            )
         self._log(
             f"start platform={self.profile.name} apply={self.opts.apply} poll={self.opts.poll_s}s "
             f"limits warm/hot/crit={self.profile.limits.warm_c}/{self.profile.limits.hot_c}/"
