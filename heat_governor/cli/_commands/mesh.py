@@ -2,8 +2,11 @@
 
 ``serve`` runs a :class:`FleetReader` and the :class:`MeshServer` (same-origin page + JSON
 API, loopback by default). ``status`` asks a running ``mesh serve`` for ``/api/fleet`` and,
-when none answers, does a one-shot direct read through the same reader code. Everything is
-read-only toward the machines.
+when none answers, does a one-shot direct read through the same reader code. Both are
+read-only toward the machines, except that ``serve --token-file PATH`` enables token-guarded
+boundary reads, previews and writes (``/api/boundaries/MACHINE``, through
+:class:`~heat_governor.boundaries_service.BoundariesService`). Without ``--token-file`` there is
+no write path at all.
 """
 
 from __future__ import annotations
@@ -23,7 +26,15 @@ from heat_governor.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from heat_governor.cli._output import emit_result
 from heat_governor.fleet import Fleet, load_fleet
 from heat_governor.fleet_reader import FleetReader, TransportFactory
-from heat_governor.mesh_server import DEFAULT_HOST, DEFAULT_PORT, MeshServer
+from heat_governor.mesh_server import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    SERVER_NAME_RE,
+    WILDCARD_HOSTS,
+    MeshServer,
+    TokenFileError,
+    load_tokens,
+)
 
 DEFAULT_URL = f"http://{DEFAULT_HOST}:{DEFAULT_PORT}"  # NOSONAR python:S5332 -- loopback
 _JSON_HELP = "Emit structured JSON."
@@ -86,12 +97,77 @@ def parse_listen(spec: str) -> tuple[str, int]:
 # -- serve --------------------------------------------------------------------------
 
 
-def start_mesh(fleet: Fleet, listen: str | None = None) -> tuple[FleetReader, MeshServer]:
-    """The testable core of ``serve``: start the reader and the server (loopback default)."""
+def read_token_file(path: str | Path) -> dict[str, str]:
+    """``load_tokens`` with its refusal as an exit-2 ``CliError`` (the message names the problem
+    and never a token)."""
+    try:
+        return load_tokens(path)
+    except TokenFileError as exc:
+        raise CliError(
+            EXIT_ENV_ERROR,
+            str(exc),
+            "the token file is lines of 'label = token' (token: 32+ characters, no spaces), "
+            "owned by you with mode 600",
+        ) from exc
+
+
+def check_server_names(names: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    for name in names:
+        if not SERVER_NAME_RE.match(name):
+            raise CliError(
+                EXIT_USER_ERROR,
+                f"bad --server-name {name!r}: expected a plain host name, no port",
+                "for example --server-name elitemini.tailnet-name.ts.net",
+            )
+    return tuple(names)
+
+
+def _boundaries_service(reader: FleetReader, audit_path: Path | None):
+    from heat_governor.boundaries_service import BoundariesService
+
+    service = BoundariesService(reader.snapshot, reader.transport, audit_path=audit_path)
+    try:
+        service.audit.check()
+    except OSError as exc:
+        raise CliError(
+            EXIT_ENV_ERROR,
+            f"cannot open the boundaries audit log {service.audit.path}: {exc.strerror or exc}",
+            "writes are refused without an audit log; check the reader state dir",
+        ) from exc
+    return service
+
+
+def start_mesh(
+    fleet: Fleet,
+    listen: str | None = None,
+    *,
+    tokens: dict[str, str] | None = None,
+    server_names: tuple[str, ...] = (),
+    audit_path: Path | None = None,
+) -> tuple[FleetReader, MeshServer]:
+    """The testable core of ``serve``: start the reader and the server (loopback default).
+    ``tokens`` enables the boundaries routes (their audit log at ``audit_path``, default the
+    reader state dir); a wildcard listen address is then refused (exit 1)."""
     host, port = parse_listen(listen) if listen else (DEFAULT_HOST, DEFAULT_PORT)
+    if tokens and host in WILDCARD_HOSTS:
+        raise CliError(
+            EXIT_USER_ERROR,
+            f"--token-file needs a specific --listen address, not {host or 'a wildcard'!r}",
+            "bind the loopback or the tailnet address",
+        )
     reader = _make_reader(fleet)
     try:
-        server = MeshServer(reader, host=host, port=port)
+        # without tokens the call is exactly the read-only one of 0.17
+        writes = (
+            {
+                "tokens": tokens,
+                "boundaries": _boundaries_service(reader, audit_path),
+                "server_names": server_names,
+            }
+            if tokens
+            else {}
+        )
+        server = MeshServer(reader, host=host, port=port, **writes)
     except OSError as exc:
         reader.close()
         raise CliError(
@@ -99,6 +175,9 @@ def start_mesh(fleet: Fleet, listen: str | None = None) -> tuple[FleetReader, Me
             f"cannot listen on {host}:{port}: {exc.strerror or exc}",
             "pick another port with --listen HOST:PORT",
         ) from exc
+    except CliError:
+        reader.close()
+        raise
     reader.start()
     server.start()
     return reader, server
@@ -118,19 +197,35 @@ def _wait_for_signal() -> None:  # pragma: no cover - blocks until SIGINT/SIGTER
 
 def cmd_serve(args: argparse.Namespace) -> int:
     fleet = _load(args)
-    reader, server = start_mesh(fleet, getattr(args, "listen", None))
+    names = check_server_names(getattr(args, "server_name", None) or ())
+    token_file = getattr(args, "token_file", None)
+    tokens = read_token_file(token_file) if token_file else None
+    reader, server = start_mesh(
+        fleet, getattr(args, "listen", None), tokens=tokens, server_names=names
+    )
     host, port = server.address[:2]
     url = f"http://{host}:{port}"  # NOSONAR python:S5332 -- mesh serve binds loopback by default
+    writes = (
+        f"boundary writes enabled ({len(server.tokens)} tokens)"
+        if server.writes_enabled
+        else "read-only"
+    )
     try:
         if _json(args):
             emit_result(
-                {"serving": url, "host": host, "port": port, "machines": len(fleet.machines)},
+                {
+                    "serving": url,
+                    "host": host,
+                    "port": port,
+                    "machines": len(fleet.machines),
+                    "writes_enabled": server.writes_enabled,
+                },
                 json_mode=True,
             )
         else:
             emit_result(
                 f"mesh serve: {url}  ({len(fleet.machines)} machines, "
-                f"poll {fleet.poll_s:g}s); Ctrl-C to stop",
+                f"poll {fleet.poll_s:g}s, {writes}); Ctrl-C to stop",
                 json_mode=False,
             )
         _wait_for_signal()
@@ -351,8 +446,9 @@ def cmd_overview(args: argparse.Namespace) -> int:
                     "mesh overview -- this description",
                     "mesh status [--fleet PATH] [--url URL] -- every machine's state, age, "
                     "temp, level and admission, from a running mesh serve or a one-shot read",
-                    "mesh serve [--fleet PATH] [--listen HOST:PORT] -- the fleet page and "
-                    "JSON API (read-only), until Ctrl-C",
+                    "mesh serve [--fleet PATH] [--listen HOST:PORT] [--token-file PATH] "
+                    "[--server-name NAME] -- the fleet page and JSON API until Ctrl-C; "
+                    "read-only unless --token-file enables token-guarded boundary writes",
                 ],
             },
             {
@@ -391,12 +487,30 @@ def register(sub: argparse._SubParsersAction) -> None:
     st.add_argument("--json", action="store_true", help=_JSON_HELP)
     st.set_defaults(func=cmd_status)
 
-    sv = noun.add_parser("serve", help="Serve the fleet page and JSON API (read-only).")
+    sv = noun.add_parser(
+        "serve",
+        help="Serve the fleet page and JSON API (read-only unless --token-file is given).",
+    )
     sv.add_argument("--fleet", help="fleet.toml path (default: beside config.toml).")
     sv.add_argument(
         "--listen",
-        help=f"HOST:PORT to bind (default {DEFAULT_HOST}:{DEFAULT_PORT}). The server has no "
-        "authentication: bind a non-loopback address only on a network you trust.",
+        help=f"HOST:PORT to bind (default {DEFAULT_HOST}:{DEFAULT_PORT}). The read routes have "
+        "no authentication: bind a non-loopback address only on a network you trust.",
+    )
+    sv.add_argument(
+        "--token-file",
+        help="Enable boundary reads, previews and writes (/api/boundaries/MACHINE) for requests "
+        "with 'Authorization: Bearer TOKEN'. The file holds 'label = token' lines (# comments "
+        "allowed; tokens 32+ characters), must be mode 600 and owned by you, and is read once: "
+        "restart to rotate. No default: without it there is no write path. Needs a specific "
+        "--listen address (plain HTTP: loopback or a tailnet address only).",
+    )
+    sv.add_argument(
+        "--server-name",
+        action="append",
+        default=[],
+        help="A host name the page is opened by (e.g. the tailnet name), accepted in the Host "
+        "header of boundaries requests besides the listen address; repeatable.",
     )
     sv.add_argument("--json", action="store_true", help=_JSON_HELP)
     sv.set_defaults(func=cmd_serve)
