@@ -303,7 +303,7 @@ def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
     d.discover()
     dec = d.tick()
     doc = {"dry_run": not opts.apply, "state": str(opts.state_path), **dec.as_dict()}
-    doc["config"] = str(cfg.path) if cfg.path and cfg.mtime else None
+    doc["config"] = str(cfg.path) if cfg.path and cfg.mtime[0] else None
     doc["containers"] = [{"name": c.name, "role": c.role} for c in d.containers.values()]
     doc["units"] = [
         {

@@ -494,7 +494,7 @@ def test_reload_flags_pair_listen_as_restart_only(tmp_path: Path) -> None:
     )
     assert d.pair_server is not None  # the extra listen address
     cfg_path.write_text('[pair]\npeer = "h:1"\ncontainers = ["x"]\nlisten = "127.0.0.1:2"\n')
-    cfg.mtime = -1.0
+    cfg.mtime = (-1.0, None)
     d.maybe_reload(10.0)
     assert any("restart" in m and "pair.listen" in m for m in logs)
     d.pair_server.httpd.server_close()

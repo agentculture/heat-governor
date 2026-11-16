@@ -155,6 +155,9 @@ ALLOW_KEYS = {
 ALLOW_SCOPES = ("process", "total")
 ALLOW_MATCHERS = ("comm", "cmdline", "cgroup")
 ALLOW_MIN_MIB = 64
+# The page-managed sibling of config.toml: only [[memory.allow]] tables, nothing else.
+BOUNDARIES_FILE = "boundaries.toml"
+CONFIG_FILE = "config.toml"
 SHIP_KEYS = {
     "enabled": bool,
     "endpoint": str,
@@ -234,7 +237,7 @@ class AllowRule:
     cgroup: str | None = None
     scope: str = "process"
     # The file the rule came from. Never a TOML key: the loader sets it, not the user.
-    source: str = "config.toml"
+    source: str = "config.toml"  # CONFIG_FILE
 
 
 @dataclass(frozen=True)
@@ -281,7 +284,7 @@ class ShipRule:
     spool_dir: str | None = None  # default: under the daemon's data dir
 
 
-def _allow_rule(a: dict) -> AllowRule:
+def _allow_rule(a: dict, source: str = CONFIG_FILE) -> AllowRule:
     return AllowRule(
         name=a["name"],
         max_mib=int(a["max_mib"]),
@@ -289,6 +292,7 @@ def _allow_rule(a: dict) -> AllowRule:
         cmdline=a.get("cmdline"),
         cgroup=a.get("cgroup"),
         scope=a.get("scope", "process"),
+        source=source,
     )
 
 
@@ -296,7 +300,16 @@ def _allow_rule(a: dict) -> AllowRule:
 class Config:
     data: dict = field(default_factory=dict)
     path: Path | None = None
-    mtime: float | None = None
+    # (config.toml mtime, boundaries.toml mtime); None for a file that is absent.
+    mtime: tuple[float | None, float | None] = (None, None)
+    # [[memory.allow]] tables from the sibling boundaries.toml, validated, not merged into data.
+    boundaries: tuple[dict, ...] = ()
+    # Why the last boundaries.toml edit was rejected (the previous rules stay in force).
+    boundaries_error: str | None = None
+
+    @property
+    def boundaries_path(self) -> Path | None:
+        return self.path.parent / BOUNDARIES_FILE if self.path else None
 
     @property
     def platform(self) -> str | None:
@@ -365,7 +378,8 @@ class Config:
             float(m.get("top_every_s", d.top_every_s)),
             m.get("floor_mib", d.floor_mib),
             m.get("soft_mib", d.soft_mib),
-            tuple(_allow_rule(a) for a in m.get("allow", d.allow)),
+            tuple(_allow_rule(a) for a in m.get("allow", d.allow))
+            + tuple(_allow_rule(a, BOUNDARIES_FILE) for a in self.boundaries),
             float(m.get("act_over_pct", d.act_over_pct)),
         )
 
@@ -607,6 +621,66 @@ def _validate_allow_fields(where: str, item: dict, ok: set, problems: list[str])
             problems.append(f"{where}.{key} must be a non-empty glob")
     if not any(k in item for k in ALLOW_MATCHERS):
         problems.append(f"{where} needs at least one of {', '.join(ALLOW_MATCHERS)}")
+    elif _matches_everything(item, ok):
+        problems.append(
+            f"{where} matches every process: give a matcher that is not a bare wildcard"
+        )
+
+
+def _bare_wildcard(pattern: object) -> bool:
+    return isinstance(pattern, str) and bool(pattern) and not pattern.strip("*?")
+
+
+def _matches_everything(item: dict, ok: set) -> bool:
+    """True when every matcher given is a bare wildcard (a rule that would hit all processes)."""
+    bare = []
+    for key in ALLOW_MATCHERS:
+        if key not in item or key not in ok:
+            continue
+        if key == "comm":
+            bare.append(any(_bare_wildcard(x) for x in item[key]))
+        else:
+            bare.append(_bare_wildcard(item[key]))
+    return bool(bare) and all(bare)
+
+
+def allow_problems(items: list) -> list[str]:
+    """Problems with a list of ``[[memory.allow]]`` tables (names ``memory.allow[i]``)."""
+    problems: list[str] = []
+    _validate_allow(items, problems)
+    return problems
+
+
+def boundaries_problems(data: dict) -> list[str]:
+    """Problems with a parsed boundaries.toml: only ``[[memory.allow]]`` tables are allowed."""
+    problems: list[str] = []
+    for key in data:
+        if key != "memory":
+            problems.append(
+                f"unknown top-level key {key!r} (boundaries.toml holds only [[memory.allow]])"
+            )
+    mem = data.get("memory", {})
+    if not isinstance(mem, dict):
+        return problems + ["[memory] must be a table"]
+    for key in mem:
+        if key != "allow":
+            problems.append(
+                f"unknown key memory.{key} (boundaries.toml holds only [[memory.allow]])"
+            )
+    allow = mem.get("allow", [])
+    if not isinstance(allow, list):
+        return problems + ["memory.allow must be an array of tables"]
+    return problems + allow_problems(allow)
+
+
+def duplicate_allow_names(config_items: list, boundary_items: list) -> list[str]:
+    """A rule name present in both config.toml and boundaries.toml, naming both files."""
+    mine = {i.get("name") for i in config_items if isinstance(i, dict)}
+    return [
+        f"memory.allow name {i['name']!r} is defined in both {CONFIG_FILE} and {BOUNDARIES_FILE}"
+        for i in boundary_items
+        if isinstance(i, dict) and i.get("name") in mine
+    ]
 
 
 def _validate_memory_mib(mem: dict, ok: set, problems: list[str]) -> None:
@@ -884,31 +958,81 @@ def validate(data: dict) -> list[str]:
     return problems
 
 
-def load(path: Path | None, *, required: bool = False) -> Config:
-    """Read and validate; a missing optional file is an empty config."""
+def _read_toml(path: Path) -> dict:
+    try:
+        with open(path, "rb") as fh:
+            return tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError([f"{path}: {exc}"]) from exc
+
+
+def load_boundaries(path: Path, config_data: dict | None = None) -> tuple[dict, ...]:
+    """Read and validate a boundaries.toml; the rules, or ConfigError naming the file."""
+    data = _read_toml(path)
+    problems = [f"{path.name}: {p}" for p in boundaries_problems(data)]
+    items = data.get("memory", {}).get("allow", []) if not problems else []
+    mine = (config_data or {}).get("memory", {}).get("allow", [])
+    problems += duplicate_allow_names(mine, items)
+    if problems:
+        raise ConfigError(problems)
+    return tuple(items)
+
+
+def _stat_mtime(path: Path | None) -> float | None:
+    try:
+        return path.stat().st_mtime if path else None
+    except OSError:
+        return None
+
+
+def mtimes(path: Path | None) -> tuple[float | None, float | None]:
+    """Current (config.toml, boundaries.toml) modification times beside ``path``."""
+    if path is None:
+        return (None, None)
+    return (_stat_mtime(path), _stat_mtime(path.parent / BOUNDARIES_FILE))
+
+
+def load(path: Path | None, *, required: bool = False, last_good: Config | None = None) -> Config:
+    """Read and validate config.toml and the sibling boundaries.toml (beside ``path``).
+
+    A missing optional file is an empty config. An invalid boundaries.toml raises, unless
+    ``last_good`` is given: then its boundaries stay and the message goes in
+    ``boundaries_error`` so a valid config.toml edit still applies."""
     if path is None or not path.exists():
         if required:
             raise ConfigError([f"no config file at {path}"])
         return Config(path=path)
-    try:
-        with open(path, "rb") as fh:
-            data = tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise ConfigError([f"{path}: {exc}"]) from exc
+    data = _read_toml(path)
     problems = validate(data)
     if problems:
         raise ConfigError(problems)
-    return Config(data=data, path=path, mtime=path.stat().st_mtime)
+    bpath = path.parent / BOUNDARIES_FILE
+    boundaries: tuple[dict, ...] = ()
+    error = None
+    if bpath.exists():
+        try:
+            boundaries = load_boundaries(bpath, data)
+        except ConfigError as exc:
+            if last_good is None:
+                raise
+            boundaries = last_good.boundaries
+            error = f"{bpath} rejected, keeping the last good boundaries: {exc}"
+    return Config(
+        data=data,
+        path=path,
+        mtime=mtimes(path),
+        boundaries=boundaries,
+        boundaries_error=error,
+    )
 
 
 def changed(cfg: Config) -> bool:
     if cfg.path is None:
         return False
-    try:
-        m = cfg.path.stat().st_mtime
-    except OSError:
-        return cfg.mtime is not None  # deleted: back to the built-in profile
-    return m != cfg.mtime
+    now = mtimes(cfg.path)
+    if now[0] is None:
+        return cfg.mtime[0] is not None  # deleted: back to the built-in profile
+    return now != tuple(cfg.mtime)
 
 
 def diff(old: dict, new: dict, prefix: str = "") -> list[str]:
