@@ -2,7 +2,7 @@
   "plan_slug": "boundaries-tab",
   "schema_version": 2,
   "created": "2026-11-15T21:25:02Z",
-  "updated": "2026-11-16T23:14:18Z",
+  "updated": "2026-11-16T23:22:32Z",
   "deviations": [
     {
       "id": "d1",
@@ -103,8 +103,590 @@
       "status": "proposed",
       "superseded": false,
       "seq": 7
+    },
+    {
+      "id": "e3",
+      "obligation_ref": "o1",
+      "test_ref": "tests/test_fleet_reader.py::test_extract_passes_mem_guard_through_as_the_same_object; tests/test_cli_mesh.py::test_status_json_carries_mem_guard_summary; tests/test_mcp.py::test_machine_state_returns_mem_guard_unchanged; tests/test_fleet_reader.py::test_snapshot_carries_mem_guard_config_and_config_error",
+      "behavior_text": "a /state document with mem_guard yields the same mem_guard object under the machine's entry; one without it yields state ok and no error; mesh status --json and MCP machine_state show the same object",
+      "contract_text": "fleet_reader passes each daemon's mem_guard through to /api/fleet, mesh status and the MCP machine_state, tolerating its absence on daemons older than 0.17 (today extract() keeps only THERMAL_FIELDS, heat_governor/fleet_reader.py:79-98,225-243; mesh.py _row whitelists columns)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 4 passed in 0.05s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 8
+    },
+    {
+      "id": "e4",
+      "obligation_ref": "o2",
+      "test_ref": "tests/test_memguard_boundary.py::test_every_boundary_entry_carries_matchers_and_source_idle_and_scanned; tests/test_memguard_boundary.py::test_doc_carries_act_over_pct_kill_budget_and_min_victim_from_config",
+      "behavior_text": "every boundary entry carries comm, cmdline, cgroup and source beside the five 0.17 keys, and mem_guard carries act_over_pct, max_kills_per_hour and min_victim_mib",
+      "contract_text": "The daemon's mem_guard document gains what the page shows and /state lacks today: each boundary's matchers (comm, cmdline, cgroup) and source file, plus act_over_pct, max_kills_per_hour and min_victim_mib. Today an entry is exactly name, max_mib, scope, usage_mib, state (memboundary.py:165-172; docs/contracts/state.md:52), and adding keys is allowed ('clients ignore unknown fields')",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.03s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 9
+    },
+    {
+      "id": "e5",
+      "obligation_ref": "o3",
+      "test_ref": "tests/test_config_memory_allow.py::test_rules_merge_from_both_files_tagged_with_their_source; tests/test_config_memory_allow.py::test_a_name_in_both_files_names_both_files; tests/test_config_memory_allow.py::test_invalid_boundaries_keep_the_last_good_while_a_config_edit_applies; tests/test_config_memory_allow.py::test_touching_only_boundaries_reloads_and_deleting_it_drops_the_rules",
+      "behavior_text": "rules from both files are merged before validation; a name in both files raises ConfigError naming both files; an invalid boundaries.toml keeps the last good boundaries while a valid config.toml edit still applies; touching only boundaries.toml triggers a reload",
+      "contract_text": "The config loader merges [[memory.allow]] rules from a sibling boundaries.toml into [memory] before validation, rejects a name that appears in both files, watches both files' mtimes, and keeps the last good boundaries when only that file is invalid (today load() reads one path, Config.path/mtime are scalars, changed() compares one mtime: config.py:885-909, daemon.py:502-540)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 4 passed in 0.05s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 10
+    },
+    {
+      "id": "e6",
+      "obligation_ref": "o4",
+      "test_ref": "tests/test_boundaries_file.py::test_emit_roundtrips_awkward_matchers; tests/test_boundaries_file.py::test_failure_midway_leaves_file_identical",
+      "behavior_text": "emit then tomllib.loads returns the same rules for matchers with quotes, backslashes, newlines, control characters and non-ASCII; a write that fails midway leaves the previous file byte-identical",
+      "contract_text": "A stdlib emitter writes the boundaries.toml [[memory.allow]] shape, escaping control characters and newlines in matcher strings, and the write is atomic (temp file + os.replace) with a backup. No emitter exists: _toml_value (config.py:924-935) handles scalars/lists only and escapes only backslash and double quote; config init --write is a plain write_text (tuning.py:120)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.03s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 11
+    },
+    {
+      "id": "e7",
+      "obligation_ref": "o5",
+      "test_ref": "tests/test_cli_boundaries.py::test_bare_noun_prints_overview; tests/test_cli_boundaries.py::test_explain_resolves_every_boundaries_path; tests/test_cli_boundaries.py::test_apply_bad_request_text_goes_to_stderr; tests/test_cli_boundaries.py::test_exit_code_helper",
+      "behavior_text": "each verb takes --json, sends results to stdout and errors to stderr, exits 0/1/2 per cli/_errors.py, the bare noun prints the overview, and explain resolves every boundaries path",
+      "contract_text": "A new boundaries CLI noun (overview, list, add, set, rm, a stdin apply used by the remote write, and a preview) follows the agent-first contract: register() in cli/__init__.py, overview verb and bare-noun overview, explain catalog entry, learn text, overview._VERBS line, --json and exit codes",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 5 passed in 0.07s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 12
+    },
+    {
+      "id": "e8",
+      "obligation_ref": "o6",
+      "test_ref": "tests/test_transport.py::test_boundaries_remote_argv_is_fixed_and_body_free; tests/test_transport.py::test_boundaries_body_arrives_on_stdin; tests/test_transport.py::test_boundaries_nonzero_exit_returns_code_stdout_stderr",
+      "behavior_text": "the remote argv is constant for any rule content, the rule body arrives on stdin, and the caller receives the remote exit code and stderr text rather than Unreachable",
+      "contract_text": "The SSH and local transports gain one fixed, argv-only write path that can send a body on stdin and return the remote exit code and stderr (the validator's message), with its own timeout and a defined way to find heat-governor on the remote box",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 5 passed in 0.16s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 13
+    },
+    {
+      "id": "e9",
+      "obligation_ref": "o7",
+      "test_ref": "tests/test_mesh_server.py::test_no_token_file_refuses_every_list_preview_and_write_with_403; tests/test_mesh_server.py::test_missing_or_wrong_token_is_401_and_reaches_nothing; tests/test_mesh_server.py::test_stale_if_match_is_409_with_the_current_rules; tests/test_mesh_server.py::test_foreign_origin_is_refused; tests/test_mesh_server.py::test_wrong_content_type_is_415; tests/test_mesh_server.py::test_existing_routes_are_byte_for_byte_the_same_with_writes_enabled",
+      "behavior_text": "no token file gives 403; a wrong or missing token gives 401; a stale If-Match gives 409 with the current rules; a wrong Origin or Content-Type is refused; every GET response body and status is unchanged from 0.17.1",
+      "contract_text": "mesh serve accepts boundary writes: method dispatch for POST/PUT/DELETE, a capped JSON body reader, a bearer token compared in constant time (401 on a bad token, 403 when none is configured), Origin and Content-Type checks, If-Match with 409 on a stale version, and 4xx error mapping. test_post_not_allowed, the read-only docstrings and the mesh serve help text change with it",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 58 passed in 39.26s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 14
+    },
+    {
+      "id": "e10",
+      "obligation_ref": "o8",
+      "test_ref": "tests/test_recorder_memory.py::test_reload_changing_merged_rules_emits_exactly_one_record_and_ships_it; tests/test_mesh_server.py::test_apply_saves_and_writes_audit_with_label; tests/test_boundaries_service.py::test_apply_writes_attempt_then_final_line_with_mode_0600",
+      "behavior_text": "a changed boundaries file produces one memory_boundary_changed record with old and new rules that is also submitted to the shipper; a write through the reader appends one audit line with token label, time, machine, old and new rule",
+      "contract_text": "The daemon, not the CLI, emits memory_boundary_changed when it reloads a changed boundaries file, and the kind joins recorder.MEMORY_EVENTS so it is recorded and shipped; the reader keeps its own audit log (token label, time, machine, old and new rule) in its state dir",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 3 passed in 0.58s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 15
+    },
+    {
+      "id": "e11",
+      "obligation_ref": "o9",
+      "test_ref": "tests/test_mempreview.py::test_states_and_verdicts_equal_assess_and_refusal; tests/test_mempreview.py::test_cmdline_is_redacted",
+      "behavior_text": "for each matching process the preview's state equals memboundary.assess and its killable verdict equals MemKiller.refusal for the same table; command lines are redacted",
+      "contract_text": "A preview runs on the target box: memprocs.scan + memboundary.assess for within/over/far_over per matching process, with the killer's names function, uid, protect list, min_victim_mib and action deciding whether a far-over process would really be killed; command lines pass through redact() and the container column comes from container_id(cgroup)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.03s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 16
+    },
+    {
+      "id": "e12",
+      "obligation_ref": "o10",
+      "test_ref": "tests/test_web_page.py::test_sections_nav_is_driven_by_the_hash; tests/test_web_page.py::test_read_tab_defaults_to_machines; tests/test_web_page.py::test_references_vendored_scripts_and_fonts",
+      "behavior_text": "the page has a Sections nav with Machines and Boundaries driven by location.hash, an unknown or empty hash shows Machines, the existing page tests pass unchanged, and no URL in the page points at another origin",
+      "contract_text": "The Boundaries tab is built inside heat_governor/web/index.html as a second view of the one React/htm page: a hash-routed Sections nav (Machines | Boundaries) in the header, reusing the existing classes (.pills button[aria-current], .chip, .status, .tag, .facts, .dt, .search, .eyebrow, .lede, Mark/rune, useFleet) and the html[data-mode] theme, not the design's .app.dark class or its anchor-styled pills",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 7 passed in 0.17s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 17
+    },
+    {
+      "id": "e13",
+      "obligation_ref": "o11",
+      "test_ref": "tests/test_web_page.py::test_every_editor_button_has_an_accessible_name; tests/test_web_page.py::test_editor_actions_are_real_controls_without_div_click_handlers; tests/test_web_page.py::test_modal_frame_is_a_labelled_modal_dialog; tests/test_web_page.py::test_modals_move_focus_trap_tab_and_close_on_escape",
+      "behavior_text": "every action is a button, input, select or label element with an accessible name; the confirmation is a modal dialog with focus handling and Escape to close; no click handler sits on a div or span",
+      "contract_text": "New styles are limited to what the dashboard does not have yet: buttons (.btn, primary, danger), icon buttons, form fields (input, select, label, hint, error state), a usage bar with boundary and far-over marks, a left-aligned rules table, and a modal confirmation dialog; the design's inline stroke SVG icons (plus, pencil, bin, lock, warning, refresh) are a new vocabulary for the page",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 4 passed in 0.11s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 18
+    },
+    {
+      "id": "e14",
+      "obligation_ref": "o12",
+      "test_ref": "tests/test_web_page.py::test_csp_and_dependencies_unchanged; tests/test_mesh_server.py::test_csp_is_unchanged",
+      "behavior_text": "dependencies is [] and the Content-Security-Policy string equals the 0.17.1 value",
+      "contract_text": "The page stays self-contained: Lato from /vendor, no Google Fonts link (the design's helmet loads fonts.googleapis.com), no new vendored library, no third-party runtime dependency, CSP unchanged",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.06s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 19
+    },
+    {
+      "id": "e15",
+      "obligation_ref": "o13",
+      "test_ref": "tests/test_web_page.py::test_fixture_states_render_distinctly; tests/test_web_page.py::test_save_outcomes_from_each_answer; tests/test_web_page.py::test_rejected_file_shows_its_message_and_the_last_good_rules_as_live",
+      "behavior_text": "there is a distinct rendering for unreachable, stale, no mem_guard, action = record, save failed, validator rejection on any field, and max_mib under min_victim_mib (as far as the tests go: rendering is asserted from the page source and its functions on fixture documents, not in a browser)",
+      "contract_text": "The page covers states the design does not draw: a machine that is unreachable or stale, a daemon with no mem_guard (older than 0.17 or guard off), action = record (a far-over process is not killed), a save that fails or times out over SSH, a validator rejection for any field (the design shows it for max_mib only), and a rule whose max_mib is under min_victim_mib (blamed, never killed)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 3 passed in 0.24s; rendering is asserted from the page source and its functions on fixture documents, not in a browser",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 20
+    },
+    {
+      "id": "e16",
+      "obligation_ref": "o14",
+      "test_ref": "tests/test_cli_boundaries.py::test_apply_rejects_unknown_rule_keys_with_validator_message; tests/test_mesh_server.py::test_preview_with_extra_keys_is_400; tests/test_config_memory_allow.py::test_boundaries_accepts_only_memory_allow_tables; tests/test_boundaries_service.py::test_malformed_requests_are_invalid_and_send_nothing",
+      "behavior_text": "a request containing any key outside name, comm, cmdline, cgroup, max_mib, scope is rejected and writes nothing; [memory] action, act_over_pct and limits are unchanged after any sequence of page writes",
+      "contract_text": "The page edits boundaries.toml rules only: it never changes [memory] action, act_over_pct, limits, [ship] or thermal settings, and rules written in config.toml show read-only (issue #18 Safety and Out of scope)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 11 passed in 0.59s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 21
+    },
+    {
+      "id": "e17",
+      "obligation_ref": "o15",
+      "test_ref": "tests/test_mesh_server.py; tests/test_fleet_reader.py; tests/test_transport.py; tests/test_client_state.py",
+      "behavior_text": "they pass without edits apart from test_post_not_allowed, and the daemon's listener address is still loopback (as far as the tests go: whole files run; they were edited during the work beyond test_post_not_allowed (new tests added, exact-equality assertions updated), so 'pass without edits' was not checked, only that they pass)",
+      "contract_text": "GET /api/fleet, /api/history and the Machines view keep their behaviour, and remote daemons keep listening on loopback only, reached over the reader's SSH link (issue #18 acceptance criteria and Out of scope)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 325 passed in 107.43s (0:01:47); whole files run; they were edited during the work beyond test_post_not_allowed (new tests added, exact-equality assertions updated), so 'pass without edits' was not checked, only that they pass",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 22
+    },
+    {
+      "id": "e18",
+      "obligation_ref": "o18",
+      "test_ref": "tests/test_transport.py::test_boundaries_default_and_custom_bin; tests/test_boundaries_service.py::test_default_transport_passes_the_machine_bin; tests/test_boundaries_service.py::test_request_is_rebuilt_from_validated_fields",
+      "behavior_text": "the remote argv starts with the configured binary path, default ~/.local/bin/heat-governor; the file is written beside the config path the daemon reports in /state",
+      "contract_text": "The reader runs the remote write and preview by an explicit binary path, default ~/.local/bin/heat-governor with a per-machine override key in fleet.toml, and the on-box command writes boundaries.toml beside the config file the running daemon reports in /state (config, daemon.py:1061), not beside whatever the SSH shell's environment resolves (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 3 passed in 0.09s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 23
+    },
+    {
+      "id": "e19",
+      "obligation_ref": "o19",
+      "test_ref": "tests/test_boundaries_service.py::test_old_or_unparseable_version_is_refused_before_any_transport_call",
+      "behavior_text": "a write to a machine reporting a version below the first boundaries release is refused before any transport call, with the needed version in the message",
+      "contract_text": "The reader refuses a write to a machine whose daemon version predates boundaries.toml support, with a message naming the version needed, and the page shows that machine as read-only until it is upgraded; a missing remote boundaries verb is reported as that same refusal, not as 'unreachable' (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 5 passed in 0.04s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 24
+    },
+    {
+      "id": "e20",
+      "obligation_ref": "o20",
+      "test_ref": "tests/test_boundaries_file.py::test_concurrent_writes_one_base_one_success; tests/test_boundaries_file.py::test_update_with_wrong_base_writes_nothing",
+      "behavior_text": "with the same base version exactly one succeeds and the other reports a conflict with the current rules; a base version that does not match the file writes nothing",
+      "contract_text": "The version check and the write are one atomic step on the box: the on-box command takes an exclusive lock, compares the caller's base version with the hash of the file as it is now, and only then writes; the reader never decides a conflict on its own copy (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.03s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 25
+    },
+    {
+      "id": "e21",
+      "obligation_ref": "o21",
+      "test_ref": "tests/test_fleet_reader.py::test_snapshot_carries_mem_guard_config_and_config_error; tests/test_web_page.py::test_edit_state_comes_from_the_file_read_on_the_box",
+      "behavior_text": "/api/fleet carries each daemon's config path and config_error; the editor's rules and base version come from the file read on the box",
+      "contract_text": "The editor's rule list and base version come from the boundaries.toml file read on the box, not from /state, and the reader passes through the daemon's config path and config_error so the page can say when the file on disk was rejected and the daemon is still running the last good rules (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.07s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 26
+    },
+    {
+      "id": "e22",
+      "obligation_ref": "o22",
+      "test_ref": "tests/test_daemon_memory.py::test_boundary_only_save_keeps_the_trigger_window; tests/test_daemon_memory.py::test_boundary_only_save_keeps_the_kill_budget; tests/test_daemon_memory.py::test_runaway_fires_no_later_with_a_boundary_save_midway",
+      "behavior_text": "the trigger's fill-rate window and the kill budget are the same before and after the change, and a simulated runaway fires no later than without the change (as far as the tests go: the two state-identity tests discriminate; test_runaway_fires_no_later_with_a_boundary_save_midway passes even with the rule swap disabled, so the 'fires no later' part is asserted weakly)",
+      "contract_text": "A change that only touches boundary rules does not lose the guard's detection state: the fill-rate window and the kill budget survive it, either by swapping the rules in the running guard or by carrying the trigger window across the rebuild (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 3 passed in 0.12s; the two state-identity tests discriminate; test_runaway_fires_no_later_with_a_boundary_save_midway passes even with the rule swap disabled, so the 'fires no later' part is asserted weakly",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 27
+    },
+    {
+      "id": "e23",
+      "obligation_ref": "o23",
+      "test_ref": "tests/test_cli_boundaries.py::test_apply_would_kill_writes_nothing_and_returns_process; tests/test_cli_boundaries.py::test_apply_allow_kill_writes",
+      "behavior_text": "without the allow flag nothing is written and the process is returned; with it the file is written",
+      "contract_text": "The kill confirmation is enforced on the box, not only drawn in the page: the on-box apply re-runs the preview at write time and refuses a change that would put a killable own-user process far over its boundary unless the request explicitly allows it, returning the processes concerned (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.07s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 28
+    },
+    {
+      "id": "e24",
+      "obligation_ref": "o24",
+      "test_ref": "tests/test_config_memory_allow.py::test_a_match_all_rule_is_rejected_in_either_file; tests/test_cli_boundaries.py::test_preview_returns_matches_and_writes_nothing",
+      "behavior_text": "a rule whose matchers are all bare wildcards raises ConfigError; the preview reports the number of matching processes (as far as the tests go: the rule was narrowed after review: comm lists are never match-all and globs are probed; the tests assert the narrowed rule)",
+      "contract_text": "The validator rejects a boundary whose matchers are all bare wildcards, and the preview reports how many processes a rule matches, because a rule that matches everything with a large maximum makes every process 'within' and so switches the guard off for that box (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 11 passed in 0.07s; the rule was narrowed after review: comm lists are never match-all and globs are probed; the tests assert the narrowed rule",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 29
+    },
+    {
+      "id": "e25",
+      "obligation_ref": "o25",
+      "test_ref": "tests/test_mesh_server.py::test_missing_or_wrong_token_is_401_and_reaches_nothing; tests/test_mesh_server.py::test_token_in_query_string_is_ignored; tests/test_mesh_server.py::test_mesh_serve_exits_2_for_a_group_or_other_readable_token_file; tests/test_mesh_server.py::test_foreign_host_is_refused",
+      "behavior_text": "preview without a token returns 401 or 403 and no process data; a token in a query string is ignored; a token file with group or other read permission stops startup with exit code 2; a write with a foreign Host header is refused",
+      "contract_text": "Every endpoint that returns process command lines or accepts a change requires the token, including the preview; the token travels only in the Authorization header, never in a URL; mesh serve refuses to start with a token file readable by group or others; write requests are refused when the Host header is not the address the server listens on (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 51 passed in 24.71s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 30
+    },
+    {
+      "id": "e26",
+      "obligation_ref": "o26",
+      "test_ref": "tests/test_web_page.py::test_a_lost_or_timed_out_save_is_decided_from_a_re_read; tests/test_boundaries_service.py::test_lost_response_after_apply_is_recovered_as_saved; tests/test_boundaries_service.py::test_repeating_a_recovered_request_changes_nothing",
+      "behavior_text": "the page ends in saved after re-reading the version, and repeating the same request leaves the file byte-identical (as far as the tests go: the page flow is asserted by running the page's functions under a script harness, not in a browser; 'byte-identical file' is asserted as unchanged rules on a fake box)",
+      "contract_text": "A save whose response is lost is not left ambiguous: writes are whole-rule and idempotent, and after a timeout the page re-reads the file version and reports saved, not saved or conflict from what is on the box (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 3 passed in 0.07s; the page flow is asserted by running the page's functions under a script harness, not in a browser; 'byte-identical file' is asserted as unchanged rules on a fake box",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 31
+    },
+    {
+      "id": "e27",
+      "obligation_ref": "o27",
+      "test_ref": "tests/test_boundaries_file.py::test_update_with_right_base_backs_up_previous; tests/test_boundaries_file.py::test_backups_capped_at_five_newest_kept",
+      "behavior_text": "each write leaves a timestamped backup of the previous file, never more than 5, and restoring the newest reproduces the previous rules (as far as the tests go: restoring the newest backup is not asserted by a test; only that the backup holds the previous file and at most 5 are kept)",
+      "contract_text": "Recovery is specified: each write keeps a timestamped backup of the previous boundaries.toml, at most 5 are kept, and the contract documents how to restore one; deleting boundaries.toml is a valid state that means no page-managed rules (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.07s; restoring the newest backup is not asserted by a test; only that the backup holds the previous file and at most 5 are kept",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 32
+    },
+    {
+      "id": "e28",
+      "obligation_ref": "o28",
+      "test_ref": "tests/test_recorder_memory.py::test_restart_after_an_edit_made_while_down_emits_one_with_the_old_rules; tests/test_recorder_memory.py::test_restart_with_the_same_rules_emits_none",
+      "behavior_text": "exactly one memory_boundary_changed event is emitted at startup; none when the hash matches",
+      "contract_text": "The daemon remembers the hash of the boundaries it last applied in its state dir and emits memory_boundary_changed at startup when the file differs, so a change made while the daemon was down or restarting is still recorded and shipped (challenge pass, 2026-11-15)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran at 4454451: 2 passed in 0.06s",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-16T23:19:20Z",
+        "commit": "4454451ccb67a8940feefecd6c13732fcafaeea0"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 33
+    },
+    {
+      "id": "e29",
+      "obligation_ref": "o29",
+      "test_ref": "search of CLAUDE.md, AGENTS.override.md, AGENTS.colleague.md and QWEN.md for the go-ahead rule and the token file; search of tests/ for paths under the home config directory",
+      "behavior_text": "all four files state that a live boundary save and a token file on a live mesh serve need the user's go-ahead; the only home-style config paths in tests/ are string fixtures (a made-up user's path), never opened",
+      "contract_text": "CLAUDE.md, AGENTS.override.md, AGENTS.colleague.md and QWEN.md state the go-ahead rule for live boundary writes and token files, and no test writes under a real config directory",
+      "evidence_type": "observation",
+      "strength": "coverage",
+      "strength_basis": "read by search, no test asserts it; that no test opens a real config path was checked by search only, not enforced",
+      "outcome": "pass",
+      "run": null,
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 34
     }
   ],
-  "deltas": [],
+  "deltas": [
+    {
+      "id": "b1",
+      "kind": "amended",
+      "behavior_text": "the match-all check rejects a rule with no comm whose globs match anything (including a cgroup of /*); a rule with a comm list is never rejected as match-all, because comm names are compared exactly",
+      "caused_by": [
+        "c35"
+      ],
+      "evidence_refs": [
+        "e24"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b2",
+      "kind": "amended",
+      "behavior_text": "an apply that reaches the box writes two audit lines (attempt, then outcome), not one",
+      "caused_by": [
+        "d4"
+      ],
+      "evidence_refs": [
+        "e10"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b3",
+      "kind": "added",
+      "behavior_text": "an unauthenticated GET /api/boundaries probe returning only writes_enabled; --server-name; a token file refused with a wildcard listen address; a per-client failed-auth limit (429); the kill check counts only processes the change newly puts far over",
+      "caused_by": [
+        "d5"
+      ],
+      "evidence_refs": [
+        "e9",
+        "e23"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b4",
+      "kind": "amended",
+      "behavior_text": "after a lost response, a timeout with the file unchanged is reported as unknown (the command on the box may still write), and ssh's own failure (exit 255) goes through the same recovery",
+      "caused_by": [
+        "c38"
+      ],
+      "evidence_refs": [
+        "e26"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b5",
+      "kind": "amended",
+      "behavior_text": "the live check saved the rule through the page's HTTP routes with curl and from the CLI, not from the page in a browser",
+      "caused_by": [
+        "c28"
+      ],
+      "evidence_refs": [
+        "e2"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    }
+  ],
   "supersessions": []
 }
