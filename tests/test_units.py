@@ -430,7 +430,7 @@ def test_reload_that_drops_a_unit_restores_it(tmp_path: Path) -> None:
     d.tick()
     assert sc.units["app.slice"] == 4_000_000
     path.write_text("")
-    os.utime(path, (cfg.mtime + 5, cfg.mtime + 5))
+    os.utime(path, (cfg.mtime[0] + 5, cfg.mtime[0] + 5))
     d.maybe_reload(d.clock())
     assert d.opts.units == ()
     assert sc.units["app.slice"] is None

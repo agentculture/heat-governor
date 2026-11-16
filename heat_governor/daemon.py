@@ -61,6 +61,7 @@ from heat_governor.config import (
     listen_conflict,
 )
 from heat_governor.config import load as load_config
+from heat_governor.config import mtimes as config_mtimes
 from heat_governor.docker import Container, Docker, DockerError
 from heat_governor.gpuclock import GpuClock
 from heat_governor.gpuclock import unsupported_reason as gpuclock_unsupported
@@ -507,13 +508,13 @@ class Daemon:
         if not config_changed(cfg):
             return
         try:
-            new = load_config(cfg.path)
+            new = load_config(cfg.path, last_good=cfg)
         except ConfigError as exc:
             msg = f"config {cfg.path} rejected, keeping the last good one: {exc}"
             if msg != self.config_error:
                 self._log(msg)
                 self.config_error = msg
-            cfg.mtime = cfg.path.stat().st_mtime if cfg.path and cfg.path.exists() else None
+            cfg.mtime = config_mtimes(cfg.path)
             return
         try:
             profile = platforms.resolve(self.opts.platform, config=new.data)
@@ -526,7 +527,9 @@ class Daemon:
         old_pair, new_pair = cfg.data.get("pair") or {}, new.data.get("pair") or {}
         later += [f"pair.{k}" for k in PAIR_RESTART_ONLY if old_pair.get(k) != new_pair.get(k)]
         self.apply_config(new, profile)
-        self.config_error = None
+        self.config_error = new.boundaries_error
+        if new.boundaries_error:
+            self._log(new.boundaries_error)
         self._log(
             f"config reloaded from {new.path}: " + ("; ".join(changes) or "no effective change")
         )

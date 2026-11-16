@@ -168,7 +168,7 @@ class Rig:
     def rewrite(self, text: str) -> None:
         cfg = self.daemon.opts.config
         self.cfg_path.write_text(text)
-        os.utime(self.cfg_path, (cfg.mtime + 5, cfg.mtime + 5))
+        os.utime(self.cfg_path, (cfg.mtime[0] + 5, cfg.mtime[0] + 5))
         self.daemon.maybe_reload(NOW)
 
 
