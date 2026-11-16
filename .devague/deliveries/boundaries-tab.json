@@ -2,7 +2,7 @@
   "plan_slug": "boundaries-tab",
   "schema_version": 2,
   "created": "2026-11-15T21:25:02Z",
-  "updated": "2026-11-16T17:32:23Z",
+  "updated": "2026-11-16T18:20:26Z",
   "deviations": [
     {
       "id": "d1",
@@ -39,6 +39,30 @@
       "status": "proposed",
       "classification": "acceptable",
       "seq": 4
+    },
+    {
+      "id": "d4",
+      "what": "an apply that reaches the box writes two audit lines (an attempt line before the call, the outcome after it), not one; a version-gate refusal writes one",
+      "task_ref": "t14",
+      "reason": "the audit line must exist before a write is sent, so a failed audit can refuse the write; the outcome is only known afterwards",
+      "affects": [],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": "acceptable",
+      "seq": 5
+    },
+    {
+      "id": "d5",
+      "what": "additions beyond the plan in the server and CLI: an unauthenticated GET /api/boundaries probe that returns only writes_enabled; a --server-name flag for accepted Host names; token routes refuse a wildcard listen address; a per-client-address failed-auth limit (429); the on-box kill check counts only processes the change newly puts far over, so an already far-over process does not block an unrelated edit",
+      "task_ref": "t15",
+      "reason": "the page needs to know whether to offer a token field without spending a failed login; the Host rule needs the name the page is opened by; the kill check as first built blocked every edit while any process was far over",
+      "affects": [
+        "t12"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": "acceptable",
+      "seq": 6
     }
   ],
   "evidence": [
