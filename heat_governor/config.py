@@ -237,7 +237,7 @@ class AllowRule:
     cgroup: str | None = None
     scope: str = "process"
     # The file the rule came from. Never a TOML key: the loader sets it, not the user.
-    source: str = "config.toml"  # CONFIG_FILE
+    source: str = CONFIG_FILE
 
 
 @dataclass(frozen=True)
@@ -406,7 +406,7 @@ def default_config_path(environ: dict[str, str] | None = None) -> Path:
     if env.get(ENV_CONFIG):
         return Path(env[ENV_CONFIG])
     base = env.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "heat-governor" / "config.toml"
+    return Path(base) / "heat-governor" / CONFIG_FILE
 
 
 def _is_num(v: object) -> bool:

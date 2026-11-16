@@ -79,6 +79,8 @@ _OPERATIONS = ("add", "set", "rm")
 _MAX_BODY = 64 * 1024
 _OK_OUTCOMES = ("ok", "saved")
 
+PROC_ROOT = Path("/proc")
+
 
 def _json(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "json", False))
@@ -166,7 +168,7 @@ def _check_rule(rule: object, *, name_only: bool = False) -> list[str]:
 
 
 def run_preview(
-    request: object, config_path: Path, *, proc_root: Path = Path("/proc"), uid=None, self_pid=None
+    request: object, config_path: Path, *, proc_root: Path = PROC_ROOT, uid=None, self_pid=None
 ) -> dict:
     if not isinstance(request, dict) or set(request) - {"rule"}:
         return _invalid(['request must be {"rule": {...}}'])
@@ -276,7 +278,7 @@ def _saved(res: boundaries_file.WriteResult, pv: dict) -> dict:
 
 
 def run_apply(
-    request: object, config_path: Path, *, proc_root: Path = Path("/proc"), uid=None, self_pid=None
+    request: object, config_path: Path, *, proc_root: Path = PROC_ROOT, uid=None, self_pid=None
 ) -> dict:
     problems = _request_problems(request)
     if problems:
@@ -594,7 +596,7 @@ def _common(p: argparse.ArgumentParser, *, proc: bool = True) -> None:
     p.add_argument("--machine", help="Act on this fleet.toml machine, through its daemon's box.")
     p.add_argument("--fleet", help="fleet.toml path for --machine (default: beside config.toml).")
     if proc:
-        p.add_argument("--proc-root", default="/proc", help=argparse.SUPPRESS)
+        p.add_argument("--proc-root", default=str(PROC_ROOT), help=argparse.SUPPRESS)
         p.add_argument("--uid", type=int, default=None, help=argparse.SUPPRESS)
         p.add_argument("--self-pid", type=int, default=None, help=argparse.SUPPRESS)
 

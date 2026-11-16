@@ -371,8 +371,9 @@ def test_boundaries_default_and_custom_bin(fake, tmp_path):
 )
 def test_boundaries_refuses_bad_input_before_any_process(fake, tmp_path, kwargs):
     args = {"verb": "list", "body": b"", "config_path": CFG, **kwargs}
+    t = make(fake, tmp_path)
     with pytest.raises(Unreachable):
-        make(fake, tmp_path).boundaries(args["verb"], args["body"], config_path=args["config_path"])
+        t.boundaries(args["verb"], args["body"], config_path=args["config_path"])
     assert not fake[1].exists()
 
 
@@ -393,7 +394,7 @@ def test_fetch_and_history_still_use_devnull_stdin(fake, tmp_path, monkeypatch):
     assert (tmp_path / "stdin").read_bytes() == b""
 
 
-def test_boundaries_runs_the_real_remote_shell_string(exec_fake, tmp_path):
+def test_boundaries_runs_the_real_remote_shell_string(exec_fake, tmp_path, monkeypatch):
     """sshd hands the string to a shell: the tilde bin expands and a spaced config path
     stays one argument."""
     bin_dir = tmp_path / "home" / ".local" / "bin"
@@ -404,15 +405,10 @@ def test_boundaries_runs_the_real_remote_shell_string(exec_fake, tmp_path):
         "print(json.dumps({'argv': sys.argv[1:], 'stdin': sys.stdin.read()}))\n"
     )
     tool.chmod(0o755)
-    import os
-
-    os.environ["HOME"] = str(tmp_path / "home")
-    try:
-        res = make(exec_fake, tmp_path).boundaries(
-            "preview", b"BODY", config_path="/tmp/a dir/config.toml"
-        )
-    finally:
-        os.environ.pop("HOME", None)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    res = make(exec_fake, tmp_path).boundaries(
+        "preview", b"BODY", config_path="/tmp/a dir/config.toml"
+    )
     got = json.loads(res.stdout)
     assert got["argv"] == ["boundaries", "preview", "--config", "/tmp/a dir/config.toml", "--json"]
     assert got["stdin"] == "BODY"
@@ -470,8 +466,9 @@ def test_local_boundaries_timeout_is_unreachable(tmp_path, monkeypatch):
     tool.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(30)\n")
     tool.chmod(0o755)
     monkeypatch.setattr(transport, "BOUNDARIES_TIMEOUT_S", 0.4)
+    local = LocalTransport(timeout_s=1.0, bin_path=str(tool))
     with pytest.raises(Unreachable, match="timed out"):
-        LocalTransport(timeout_s=1.0, bin_path=str(tool)).boundaries("list", b"", config_path=CFG)
+        local.boundaries("list", b"", config_path=CFG)
 
 
 def test_fleet_toml_bin_key(tmp_path):

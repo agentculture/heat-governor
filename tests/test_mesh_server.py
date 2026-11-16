@@ -639,8 +639,9 @@ def test_allowed_hosts_for_a_non_loopback_bind():
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", ""])
 def test_wildcard_bind_with_tokens_is_refused(host):
+    reader = FakeReader()
     with pytest.raises(ValueError, match="specific"):
-        MeshServer(FakeReader(), host=host, port=0, tokens={"x": TOKEN})
+        MeshServer(reader, host=host, port=0, tokens={"x": TOKEN})
 
 
 @pytest.mark.parametrize(

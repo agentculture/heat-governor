@@ -94,7 +94,7 @@ _MACHINE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")  # fleet.py's mac
 SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _ETAG_RE = re.compile(r'^"([\x21\x23-\x7e]{1,256})"$')
 _BARE_TAG_RE = re.compile(r"^[\x21\x23-\x2b\x2d-\x7e]{1,256}$")
-_LENGTH_RE = re.compile(r"^[0-9]{1,12}$")
+_LENGTH_RE = re.compile(r"^\d{1,12}$", re.ASCII)
 _PROBE, _LIST, _PREVIEW = "probe", "list", "preview"
 _ALLOW = {_PROBE: ("GET", "HEAD"), _LIST: ("GET", "POST"), _PREVIEW: ("POST",)}
 _PREFIX = "/api/boundaries"
@@ -466,7 +466,8 @@ class _Handler(BaseHTTPRequestHandler):
         if host not in mesh.hosts:
             raise _Refusal(403, "host_not_allowed", "the Host header is not this server's address")
         origins = self.headers.get_all("Origin") or []
-        if len(origins) > 1 or (origins and origins[0].strip().lower() != f"http://{host}"):
+        own = f"http://{host}"  # NOSONAR python:S5332 -- the server speaks plain HTTP (tailnet)
+        if len(origins) > 1 or (origins and origins[0].strip().lower() != own):
             raise _Refusal(403, "origin_not_allowed", "cross-origin requests are refused")
         site = self.headers.get("Sec-Fetch-Site")
         if site is not None and site.strip().lower() not in ("same-origin", "none"):

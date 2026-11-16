@@ -2159,7 +2159,8 @@ function Modal(props) {
 }
 function DeleteBody({ name, machine, path, pv, onCancel, onConfirm }) {
   const n = pv && pv.kind === "ok" && fin(pv.data.matching) ? pv.data.matching : null;
-  const now = n == null ? "" : " It matches " + n + (n === 1 ? " running process" : " running processes") + " now.";
+  const noun = n === 1 ? " running process" : " running processes";
+  const now = n == null ? "" : " It matches " + n + noun + " now.";
   return html`<${React.Fragment}>
     <p>${"Without this boundary, the processes it matches are judged by growth alone, like any other process." + now}</p>
     <p class="callout">${"Removes " + name + " from " + (path || "boundaries.toml") + " on " + machine + ". The previous file is kept as a backup."}</p>
@@ -2348,7 +2349,10 @@ function Editor({ route, doc, writes, go, onSaved }) {
   const [form, setForm] = useState(null);
   const base = () => formFromRule(view && view.rule);
   const upd = fn => setForm(f => fn(f || base()));
-  const onReload = () => { if (!isNew) setForm(null); reload(); };
+  const onReload = () => {
+    if (!isNew) { setForm(null); }
+    reload();
+  };
   const head = useRef(null);
   useEffect(() => { if (head.current) head.current.focus(); }, []);
   const editor = { machine, form: form || base(), upd, touched: form !== null, isNew, g, writes, go, onSaved, onReload };
@@ -2374,7 +2378,11 @@ function App() {
   const tab = route.tab;
   const writes = useWrites();
   const [flash, setFlash] = useState("");
-  useEffect(() => { if (!flash) return undefined; const t = setTimeout(() => setFlash(""), 15000); return () => clearTimeout(t); }, [flash]);
+  useEffect(() => {
+    if (!flash) { return undefined; }
+    const t = setTimeout(() => setFlash(""), 15000);
+    return () => clearTimeout(t);
+  }, [flash]);
   const editKey = route.machine + "/" + (route.isNew ? NEW_RULE : route.rule);
   const editor = route.machine ? html`<${Editor} key=${editKey} route=${route} doc=${doc} writes=${writes} go=${go} onSaved=${setFlash} />` : null;
   const rules = useMemo(() => fleetRuleTotal(doc), [doc]);

@@ -47,21 +47,25 @@ def test_emit_empty_is_valid_toml():
 
 
 def test_emit_rejects_invalid_rule():
+    bad = [{"name": "x", "max_mib": 1024}]
     with pytest.raises(bf.BoundariesError) as e:
-        bf.emit([{"name": "x", "max_mib": 1024}])
+        bf.emit(bad)
     assert "matcher" in str(e.value) or "needs at least one" in str(e.value)
 
 
 def test_emit_rejects_unknown_key_and_low_max():
+    bad = [_rule(extra=1)]
     with pytest.raises(bf.BoundariesError):
-        bf.emit([_rule(extra=1)])
+        bf.emit(bad)
+    bad = [_rule(max_mib=1)]
     with pytest.raises(bf.BoundariesError):
-        bf.emit([_rule(max_mib=1)])
+        bf.emit(bad)
 
 
 def test_emit_rejects_unencodable_string():
+    bad = [_rule(comm=["bad\ud800"])]
     with pytest.raises(bf.BoundariesError):
-        bf.emit([_rule(comm=["bad\ud800"])])
+        bf.emit(bad)
 
 
 def test_read_missing_file_uses_sentinel(tmp_path):
@@ -144,8 +148,9 @@ def test_failure_midway_leaves_file_identical(tmp_path, monkeypatch):
         raise OSError("disk gone")
 
     monkeypatch.setattr(os, "replace", boom)
+    bad = [_rule("two")]
     with pytest.raises(OSError):
-        bf.write(p, first.version, [_rule("two")])
+        bf.write(p, first.version, bad)
     monkeypatch.undo()
     assert p.read_bytes() == before
     assert sorted(x.name for x in tmp_path.iterdir() if ".tmp" in x.name) == []
@@ -154,8 +159,9 @@ def test_failure_midway_leaves_file_identical(tmp_path, monkeypatch):
 
 def test_invalid_rules_write_nothing(tmp_path):
     p = tmp_path / "boundaries.toml"
+    bad = [_rule(), _rule()]
     with pytest.raises(bf.BoundariesError):
-        bf.write(p, bf.MISSING_VERSION, [_rule(), _rule()])
+        bf.write(p, bf.MISSING_VERSION, bad)
     assert not p.exists()
 
 
