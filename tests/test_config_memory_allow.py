@@ -253,8 +253,12 @@ def _daemon(tmp_path, cfg):
     return Daemon(SPARK, opts, sensor=Sensor(SPARK.zones, sys_root=sysr), docker=None)
 
 
+_BUMPS = iter(range(10, 10**6, 10))
+
+
 def _bump(path):
-    st = path.stat().st_mtime + 10
+    # each bump moves further ahead, so two rewrites inside one clock tick still differ
+    st = path.stat().st_mtime + next(_BUMPS)
     os.utime(path, (st, st))
 
 
