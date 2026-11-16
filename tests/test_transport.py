@@ -502,7 +502,7 @@ def test_local_boundaries_expands_a_home_relative_bin(monkeypatch):
         return subprocess.CompletedProcess(argv, 0, b"{}", b"")
 
     monkeypatch.setattr(transport.subprocess, "run", fake_run)
-    monkeypatch.setenv("HOME", "/home/someone")
+    monkeypatch.setenv("HOME", "/srv/someone")
     t = transport.LocalTransport(timeout_s=1, bin_path="~/bin/heat-governor")
     t.boundaries("list", b"", config_path="/etc/hg/config.toml")
-    assert seen["argv"][0] == "/home/someone/bin/heat-governor"
+    assert seen["argv"][0] == "/srv/someone/bin/heat-governor"
