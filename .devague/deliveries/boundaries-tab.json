@@ -2,7 +2,7 @@
   "plan_slug": "boundaries-tab",
   "schema_version": 2,
   "created": "2026-11-15T21:25:02Z",
-  "updated": "2026-11-15T23:04:56Z",
+  "updated": "2026-11-16T17:32:23Z",
   "deviations": [
     {
       "id": "d1",
@@ -28,6 +28,17 @@
       "status": "approved",
       "classification": "acceptable",
       "seq": 2
+    },
+    {
+      "id": "d3",
+      "what": "t7 edited six files outside its ownership: cli/_commands/tuning.py and governing.py (cfg.mtime truthiness check now reads cfg.mtime[0]) and four test files (test_units.py, test_gpuclock_unsupported_paths.py, test_daemon_memory.py, test_pair.py) that did arithmetic on cfg.mtime",
+      "task_ref": "t7",
+      "reason": "the plan makes Config.mtime a pair, which breaks every existing reader of the scalar; the edits are one line each and mechanical",
+      "affects": [],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": "acceptable",
+      "seq": 4
     }
   ],
   "evidence": [

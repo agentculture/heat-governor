@@ -488,3 +488,21 @@ def test_fleet_toml_bin_key(tmp_path):
     f.write_text('[[machines]]\nname = "a"\nhost = "a.example"\nbin = ""\n')
     with pytest.raises(CliError):
         load_fleet(f)
+
+
+def test_local_boundaries_expands_a_home_relative_bin(monkeypatch):
+    import subprocess
+
+    from heat_governor import transport
+
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, b"{}", b"")
+
+    monkeypatch.setattr(transport.subprocess, "run", fake_run)
+    monkeypatch.setenv("HOME", "/home/someone")
+    t = transport.LocalTransport(timeout_s=1, bin_path="~/bin/heat-governor")
+    t.boundaries("list", b"", config_path="/etc/hg/config.toml")
+    assert seen["argv"][0] == "/home/someone/bin/heat-governor"

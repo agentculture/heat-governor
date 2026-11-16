@@ -431,7 +431,9 @@ class LocalTransport:
         configured ``bin_path`` if any, else ``sys.executable -m heat_governor``. Same result,
         same refusals, same :data:`BOUNDARIES_TIMEOUT_S`."""
         verb, data, config_path = _boundaries_args(verb, body, config_path)
-        prefix = [self.bin_path] if self.bin_path else [PYTHON, "-m", "heat_governor"]
+        # no shell here, so a leading ~/ is expanded by hand (the ssh side leaves it to sh)
+        local_bin = os.path.expanduser(self.bin_path) if self.bin_path else None
+        prefix = [local_bin] if local_bin else [PYTHON, "-m", "heat_governor"]
         argv = [*prefix, *_boundaries_cmd("", verb, config_path)[1:]]
         try:
             proc = (
