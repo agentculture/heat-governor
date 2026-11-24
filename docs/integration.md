@@ -169,7 +169,9 @@ longer than `keep_days`: a forward clock jump leaves the same hole as a long dow
 at start and at each UTC date change; `heat-governor records overview` shows the inventory and
 `heat-governor records prune --dry-run` lists what a pass would do. `[daemon] log_max_mib` (number > 0,
 default 10) caps `governor.log`, which rotates to `governor.log.1.gz` (one generation). Both are
-live-reloadable. Implemented and unit-tested; not yet run on a live box **(planned)**.
+live-reloadable. Live on all six boxes since 2026-11-24
+(`docs/evidence/2026-11-24-record-retention-live.md`); the seven-day size bound is not yet measured
+**(planned)**.
 
 GPU clock ceilings need a one-time root install of a small helper (`heat-governor gpu-clock helper` prints
 it and the sudoers line), then `gpu_clock = true` under `[daemon]`.

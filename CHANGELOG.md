@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-11-25
+
+### Added
+
+- `docs/evidence/2026-11-24-record-retention-live.md`: 0.20.0 deployed to all six boxes; first retention passes freed 1.2-3.7 GB per box with no errors, every dry run matched the real pass, the dashboard 7d history reads the gzipped days. State rows in `CLAUDE.md`, the three other harness files, README and docs/integration.md updated.
+
 ## [0.20.0] - 2026-11-25
 
 ### Added

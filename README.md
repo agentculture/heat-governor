@@ -311,7 +311,7 @@ days, gzips days older than yesterday to `.jsonl.gz` and deletes the rest; `[dae
 (default 10) caps `governor.log`. Day files before a hole longer than `keep_days` are never deleted
 automatically (a forward clock jump leaves the same hole); `records prune --allow-gap` deletes them once
 the clock is known to be right. `heat-governor records prune --dry-run` shows what a pass would do.
-Implemented and unit-tested; not yet run on a live box (planned).
+Live on all six boxes since 2026-11-24 (`docs/evidence/2026-11-24-record-retention-live.md`).
 
 ## For other tools
 
