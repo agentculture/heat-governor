@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-24T19:10:39Z",
-  "updated": "2026-11-24T22:22:03Z",
+  "updated": "2026-11-24T22:27:01Z",
   "claims": [
     {
       "id": "c1",
@@ -691,7 +691,7 @@
     {
       "id": "s7",
       "surface": "ship.py spool + MinIO on arduino and spark",
-      "finding": "spool dirs 4-8 KB on all boxes; MinIO data /home/arduino/minio/heat-governor/data 580K, /home/spark/minio/heat-governor/data 1.6M",
+      "finding": "spool dirs 4-8 KB on all boxes; MinIO data ~/minio/heat-governor/data 580K on arduino and 1.6M on spark",
       "seeds": [
         "c8"
       ]

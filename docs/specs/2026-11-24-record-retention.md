@@ -112,7 +112,7 @@
   - seeds: `c6`
 - `s6` — `heat_governor/boundaries_service.py AuditLog`: audit log lives in the reader state dir beside records/, 4 KB on the EliteMini; its contract says append-only
   - seeds: `c7`
-- `s7` — `ship.py spool + MinIO on arduino and spark`: spool dirs 4-8 KB on all boxes; MinIO data /home/arduino/minio/heat-governor/data 580K, /home/spark/minio/heat-governor/data 1.6M
+- `s7` — `ship.py spool + MinIO on arduino and spark`: spool dirs 4-8 KB on all boxes; MinIO data ~/minio/heat-governor/data 580K on arduino and 1.6M on spark
   - seeds: `c8`
 - `s8` — `journalctl --user --disk-usage on arduino and spark`: arduino 237.1M, spark 1.6G; the daemon's stderr lands there as well as in governor.log (governing.py:235)
   - seeds: `c9`
