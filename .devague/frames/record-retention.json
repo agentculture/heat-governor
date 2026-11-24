@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-24T19:10:39Z",
-  "updated": "2026-11-24T22:27:01Z",
+  "updated": "2026-11-24T22:37:20Z",
   "claims": [
     {
       "id": "c1",
@@ -891,6 +891,18 @@
       "refs": [
         "t7",
         "o10"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l8",
+      "code": "control-absent",
+      "what": "main agent opened PR 23 after running only harness-smoke --stage config and no Sonar check; CI's toolchain stage (steward doctor portability) failed twice on text the main agent wrote (a hard-coded home path in s7, per-user state-dir refs in the new records and CHANGELOG), and Sonar flagged 42 new issues",
+      "skipped_check": "run every harness-smoke stage CI runs and read Sonar before opening the PR",
+      "refs": [
+        "s7",
+        "PR23"
       ],
       "origin": "llm",
       "status": "proposed"
