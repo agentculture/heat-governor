@@ -1,0 +1,537 @@
+{
+  "slug": "record-retention",
+  "title": "record retention",
+  "frame_slug": "record-retention",
+  "schema_version": 5,
+  "status": "exported",
+  "created": "2026-11-24T19:58:19Z",
+  "updated": "2026-11-24T22:06:25Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "heat-governor keeps a bounded, configurable window of records on every box: days older than a day are gzip-compressed, days older than the retention window (default 7) are deleted, so no machine's disk fills with telemetry",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h24",
+      "kind": "honesty",
+      "text": "on a tmp data dir with 10 day files and keep_days = 7, one prune pass leaves 8 files: today and yesterday raw, six .jsonl.gz (replaces h1)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "the daemon prunes <data_dir>/records/YYYYMMDD.jsonl past a configurable retention (proposed default keep_days = 7) \u2014 today these files are never deleted: recorder.py:47-55 opens one file per UTC day in append mode and nothing removes them (1.4 GB on the EliteMini, 3.0-3.7 GB on the other five boxes, 16-33 files)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "a day older than keep_days (by its YYYYMMDD name, UTC) is deleted whether raw or .gz; a day inside the window is never deleted",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "completed day files older than one day are gzip-compressed in place to YYYYMMDD.jsonl.gz with the stdlib gzip module (no new dependency, pyproject dependencies = []); measured on 20261113.jsonl: 74.5 MB -> 2.86 MB at gzip -6 in 0.40 s (26x), gzip -1 4.36 MB in 0.27 s; zstd -3 is no smaller (2.91 MB) and would need a third-party module",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "a compressed day decompresses byte-identical to the raw file it replaced, and the raw file is removed only after the .gz is fsync'd and renamed into place",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "every reader of record files accepts .jsonl.gz as well as .jsonl: recorder.iter_records (report, sensor_stats) globs *.jsonl only (recorder.py:155-157), daemon postmortem globs *.jsonl (daemon.py:1349), and history.py's remote HISTORY_SCRIPT opens YYYYMMDD.jsonl by name and sizes the stride from os.path.getsize (history.py:80-90) \u2014 without this, compression silently makes trend history and reboot reports go blank",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "iter_records, report, sensor_stats, the daemon postmortem, history.py's remote script and replay / memory replay give the same output over a directory with gzipped days as over the raw one",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c6",
+      "kind": "boundary",
+      "text": "prune never compresses or deletes today's or yesterday's file (UTC), whatever keep_days is; keep_days < 1 is refused by validation (keep_days = 1 keeps exactly today + yesterday)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h25",
+      "kind": "honesty",
+      "text": "prune never compresses or deletes today's or yesterday's file (UTC) for any keep_days >= 1, and keep_days = 0 or negative is a user error (replaces h5)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c7",
+      "kind": "boundary",
+      "text": "boundaries-audit.jsonl is an append-only audit log (boundaries_service.py:27, mode 0600) and is not touched by record retention",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "boundaries-audit.jsonl, boundaries-applied.json, adaptive.json, ledger.json, spool/ and ssh/ are untouched after a prune pass",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "retention is configurable in the [daemon] table beside record/fsync/data_dir (config.py:98-111 DAEMON_KEYS), with strict validation, a commented line in the generated config, and live reload (not added to Daemon.RESTART_ONLY, daemon.py:637)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "keep_days and log_max_mib are strictly validated, appear commented in the generated config, and a live reload changes them without a restart",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c15",
+      "kind": "audience",
+      "text": "the operator running the six-box fleet (EliteMini, cultureos, spark, spark2, thor, orin), and every reader of record files: the reboot report, the postmortem, the dashboard's trend history, replay",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "the spec names every reader of record files found by the scope survey (s4) and nothing in the fleet relies on files older than 7 days",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c16",
+      "kind": "before_state",
+      "text": "record files and governor.log are kept forever: 1.4-3.7 GB of records per box after 16-33 days, growing 87-224 MB/day; cultureos reached 88% of its 55 GB eMMC (6.5 GB free) and needed a manual delete on 2026-11-24",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "the before numbers come from the 2026-11-24 read-only survey (s1, s3) and the cultureos cleanup output",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c17",
+      "kind": "why_it_matters",
+      "text": "a governor that is there to keep a box alive must not be the thing that fills its disk; on cultureos the records alone would fill the free eMMC in about a month",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "cultureos's 9.1 GB free / ~200 MB per day raw holds as the arithmetic behind 'about a month'",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c18",
+      "kind": "after_state",
+      "text": "each box holds today's records plus keep_days (default 7) complete earlier days \u2014 today's and yesterday's raw, older days as .jsonl.gz \u2014 plus a size-bounded governor.log; every record reader works on both forms; 'records prune' does the same on demand",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "after the release has run one rollover on a box, records/ matches the after state",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c19",
+      "kind": "success_signal",
+      "text": "on a box with keep_days = 7, records/ holds <= 8 day files (today + 7), at most 2 uncompressed; on the 100 MB/day boxes records/ stays < 300 MB and on cultureos < 600 MB; governor.log stays under its cap; report, postmortem, history and replay return the same rows on a gzipped day as on the raw file (test)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "the measured sizes after one week on the fleet meet the stated limits",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c20",
+      "kind": "requirement",
+      "text": "a 'records' CLI noun: 'records prune [--dry-run] [--keep-days N] [--json]' compresses and deletes exactly as the daemon would and prints what it did / would do, plus 'records overview' (rubric overview_cli_noun_exists) and explain-catalog entries",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "'records prune --dry-run' changes nothing on disk and lists exactly the files a real pass changes; the verb follows the CLI contract (stdout/stderr split, --json, exit codes) and teken cli doctor --strict passes",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c21",
+      "kind": "requirement",
+      "text": "governor.log rotates when it exceeds a cap (proposed log_max_mib = 10 in [daemon]): the current file becomes governor.log.1.gz, one rotated generation kept; _file_logger (cli/_commands/governing.py:231-239) stays append-and-close per line",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "governor.log never exceeds log_max_mib plus one line; after rotation exactly one governor.log.1.gz exists and holds the previous contents",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c23",
+      "kind": "boundary",
+      "text": "retention only touches files named YYYYMMDD.jsonl / YYYYMMDD.jsonl.gz in <data_dir>/records and governor.log(.1.gz); any other file in the data dir is never deleted; compression writes to a temp file and renames, so a crash leaves either the raw day or the finished .gz, never a torn one",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h23",
+      "kind": "honesty",
+      "text": "a stray .tmp is removed only once it is older than 1 hour, so a concurrent pass's in-progress file survives (replaces h15's unconditional 'the next pass removes it')",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c24",
+      "kind": "requirement",
+      "text": "pruning never runs on the tick loop (the thermal controller must keep its poll cadence): it runs on its own thread and compresses by streaming zlib in 1 MiB chunks (wbits 31, gzip format), never gzip.compress of a whole file as ship.py:599 does \u2014 a whole cultureos day is 224 MB",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h16",
+      "kind": "honesty",
+      "text": "measured on cultureos 2026-11-24: streaming compress of the 224 MB 20261123.jsonl took 2.9 s CPU at nice 19 with 17 MB RSS; gzip -6 output 9.4 MB",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "the daemon's pass and 'records prune' can run at the same time safely: the temp file name is unique per process (`YYYYMMDD.jsonl.gz.PID.tmp`), the final rename is atomic, removing the raw file tolerates it already being gone, and a stray .tmp is removed only when it is older than 1 hour (so one pass never deletes the other's in-progress file)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h17",
+      "kind": "honesty",
+      "text": "governor.log and records/ each have exactly one writer, the daemon (governing.py:267, daemon.py:191), so the only concurrent actor is the CLI prune verb",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c26",
+      "kind": "requirement",
+      "text": "a pass deletes expired days before it compresses anything, and a failed compress (ENOSPC, I/O error) leaves the raw day in place, is logged, and does not stop the rest of the pass \u2014 so a nearly full disk still gets space back",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h18",
+      "kind": "honesty",
+      "text": "deleting needs no free space while compressing needs room for the .gz (~4-9 MB per day); cultureos was at 88% when found",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "every pass that changes something writes one 'records_pruned' event row (files deleted, files compressed, bytes freed, errors) to the records and a line to governor.log; a pass that fails never raises into the daemon",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h19",
+      "kind": "honesty",
+      "text": "without an event the only trace of a deletion is a missing file; the operator needs to see what retention did and when",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "a pass deletes nothing when the wall clock looks wrong: if the newest day file is more than 1 day older than today's UTC date (clock jumped forward), or a day file is dated in the future, the pass logs it and skips deletion",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h20",
+      "kind": "honesty",
+      "text": "a forward clock jump would otherwise delete every record at once; all six boxes have an RTC and NTP sync today and no skewed filename exists, so this is cheap insurance, not an observed fault",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c29",
+      "kind": "boundary",
+      "text": "a pass acts only on regular files directly inside <data_dir>/records (and governor.log beside it): it never follows a symlink, never recurses, and never touches a path outside that directory",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h21",
+      "kind": "honesty",
+      "text": "the data dir is owned by the daemon's user, so this guards mistakes (a hand-made symlink, a misconfigured data_dir) rather than an attacker",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "history.py sizes its stride from the uncompressed size of a .gz day (the gzip ISIZE trailer, the last 4 bytes) instead of os.path.getsize, so a 7d request does not parse ~25x more lines than intended and miss its 9-18 s DEADLINE",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h22",
+      "kind": "honesty",
+      "text": "day files stay far below 4 GiB (largest seen 224 MB), so the 32-bit ISIZE is exact",
+      "deferred": false,
+      "deferred_reason": ""
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "records readers accept .jsonl.gz in recorder.py (iter_records, report, sensor_stats, replay)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests: a fixture stored raw and as .jsonl.gz gives identical iter_records rows, report() entries, sensor_stats() and replay() results",
+        "iter_records orders days by YYYYMMDD whatever the suffix; tail() and Recorder writing are unchanged (existing tests pass)"
+      ],
+      "deps": [],
+      "covers": [
+        "c5",
+        "h4"
+      ],
+      "instruction": "Add a small open_day(path) helper in heat_governor/recorder.py that opens .jsonl or .jsonl.gz as text (gzip.open(..., 'rt')); glob both suffixes in iter_records and sort by the date stem; replay(path) uses open_day. Touch only recorder.py and its tests. Do not change tail()/_rows_between (they read today/yesterday raw)."
+    },
+    {
+      "id": "t2",
+      "summary": "history.py reads gzipped days and sizes its stride from the gzip ISIZE trailer",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests via run_local over tmp XDG_STATE_HOME: history samples for a raw day and the same day gzipped are identical",
+        "the stride computed for a .jsonl.gz day equals the stride for the raw day; ISIZE equals the raw size for the largest fixture"
+      ],
+      "deps": [],
+      "covers": [
+        "c30",
+        "h22",
+        "c5"
+      ],
+      "instruction": "HISTORY_SCRIPT is a self-contained string run remotely with python3: keep it stdlib-only and inside the template. For each day look for YYYYMMDD.jsonl then YYYYMMDD.jsonl.gz; open the .gz with gzip.open; for size use the last 4 bytes (little-endian ISIZE) and estimate avg line length from the first 64 KiB of decompressed text. Touch only heat_governor/history.py and its tests."
+    },
+    {
+      "id": "t3",
+      "summary": "retention core: heat_governor/retention.py prune_pass and compress_day",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_retention.py on tmp_path with a fake clock: 10 day files and keep_days 7 leave 8 files, today and yesterday raw, six .jsonl.gz",
+        "every behaviour in obligations o1, o2, o4, o5, o9, o11, o12, o14, o15 and the streaming part of o10 has a test that passes",
+        "prune_pass(dry_run=True) returns the same planned actions and changes no file; the result is a dict with deleted, compressed, bytes_freed, errors, warnings"
+      ],
+      "deps": [],
+      "covers": [
+        "c1",
+        "h24",
+        "c2",
+        "h2",
+        "c3",
+        "h3",
+        "c6",
+        "h25",
+        "c7",
+        "h6",
+        "c23",
+        "h23",
+        "c25",
+        "h17",
+        "c26",
+        "h18",
+        "c28",
+        "h20",
+        "c29",
+        "h21",
+        "c24"
+      ],
+      "instruction": "New module, stdlib only. prune_pass(records_dir, now, keep_days, *, dry_run=False, compress=compress_day) -> dict. Select only regular files (lstat, not symlinks) directly in records_dir matching ^\\d{8}\\.jsonl(\\.gz)?$. Order: clock sanity check, delete expired, remove .tmp older than 1 h, then compress days older than yesterday. compress_day streams with zlib.compressobj(6, DEFLATED, 31) in 1 MiB chunks to `YYYYMMDD.jsonl.gz.PID.tmp` (PID = os.getpid()), fsync, os.replace, then unlink the raw file tolerating FileNotFoundError. Never touch the real ~/.local/state in tests."
+    },
+    {
+      "id": "t4",
+      "summary": "config: keep_days and log_max_mib in [daemon]",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests: keep_days defaults to 7, accepts ints >= 1, refuses 0, negatives, bools and floats with ConfigError; log_max_mib defaults to 10 and refuses <= 0",
+        "the generated config text has a commented keep_days and log_max_mib line in the [daemon] table; neither key is in Daemon.RESTART_ONLY"
+      ],
+      "deps": [],
+      "covers": [
+        "c10",
+        "h7",
+        "c6",
+        "h25"
+      ],
+      "instruction": "Add both keys to DAEMON_KEYS and the daemon settings dataclass in heat_governor/config.py with validation beside record/fsync; add the commented lines to the generated config. Touch only config.py and config tests; the daemon wiring is a later task."
+    },
+    {
+      "id": "t5",
+      "summary": "memory replay accepts a .jsonl.gz records file",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests: memory replay over a records fixture and the same fixture gzipped prints identical results"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c5"
+      ],
+      "instruction": "Use recorder.open_day for the records paths in heat_governor/cli/_commands/memory.py (lines ~146-189); CSV input stays plain. Touch only memory.py and its tests."
+    },
+    {
+      "id": "t6",
+      "summary": "governor.log rotation at log_max_mib",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests on tmp_path with a tiny cap: the log never exceeds cap plus one line; the previous contents are in governor.log.1.gz; a second rotation replaces it",
+        "a rotation failure is written to stderr and logging continues"
+      ],
+      "deps": [
+        "t4"
+      ],
+      "covers": [
+        "c21",
+        "h14"
+      ],
+      "instruction": "In heat_governor/cli/_commands/governing.py keep _file_logger append-and-close per line; before appending, if size >= cap, stream-gzip the file to governor.log.1.gz.tmp, os.replace onto governor.log.1.gz, then unlink governor.log. Pass the cap from cfg.daemon.log_max_mib. Touch only governing.py (logger part) and its tests."
+    },
+    {
+      "id": "t7",
+      "summary": "daemon: retention thread at UTC rollover, records_pruned event, gz-aware postmortem, live reload",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests: a pass runs once at daemon start and once per UTC day rollover on its own thread; ticks keep their cadence while a slow fake compressor runs",
+        "a pass that changed something writes one records_pruned row returned by iter_records and one log line; an exception inside the pass is logged and the daemon keeps ticking",
+        "the postmortem reads the newest day files whether raw or gzipped; a reload that changes keep_days is used by the next pass without a restart"
+      ],
+      "deps": [
+        "t1",
+        "t3",
+        "t4"
+      ],
+      "covers": [
+        "c24",
+        "h16",
+        "c27",
+        "h19",
+        "c10",
+        "h7",
+        "c1"
+      ],
+      "instruction": "In heat_governor/daemon.py: start a daemon thread that calls retention.prune_pass(self.recorder.directory, time.time(), cfg.daemon.keep_days) at start (after the postmortem scan) and when the UTC date changes; write its result through the existing recorder path on the tick thread side as {event: records_pruned, ...}. Extend the postmortem glob (daemon.py:1349) to both suffixes via recorder.open_day. Skip when record is off. Tests use tmp data dirs and fake clocks."
+    },
+    {
+      "id": "t8",
+      "summary": "records CLI noun: overview and prune",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_cli_records.py: prune --dry-run changes no file and lists exactly what a real prune then does; --json output matches prune_pass's dict; exit 1 on a bad --keep-days, 2 when the records dir is unreadable",
+        "uv run teken cli doctor . --strict passes; explain resolves records, records overview, records prune; learn mentions the records noun"
+      ],
+      "deps": [
+        "t3",
+        "t4"
+      ],
+      "covers": [
+        "c20",
+        "h13"
+      ],
+      "instruction": "New heat_governor/cli/_commands/records.py with register(sub) (parser_class=type(p)); wire it in _build_parser(); keep_days defaults from the loaded config, else 7. Add ENTRIES in explain/catalog.py and fix the stale ~/.local/share records path at catalog.py:355 to ~/.local/state. Touch records.py, cli/__init__.py, explain/catalog.py, learn.py and tests."
+    },
+    {
+      "id": "t9",
+      "summary": "docs and harness files carry the retention facts; version bump",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "a grep for '.jsonl' readers in heat_governor finds none that ignore .jsonl.gz (list each reader and its test in the PR description)",
+        "CLAUDE.md state table, AGENTS.override.md, AGENTS.colleague.md, QWEN.md, docs/integration.md history paragraph and the config docs describe keep_days, log_max_mib, gzip days and records prune, marked unvalidated live; markdownlint and harness-smoke pass",
+        "pyproject.toml and CHANGELOG.md bumped (minor)"
+      ],
+      "deps": [
+        "t5",
+        "t6",
+        "t7",
+        "t8"
+      ],
+      "covers": [
+        "c15",
+        "h8"
+      ],
+      "instruction": "Keep docs grounded in what is on disk; mark the live check (planned). Run uv run python scripts/harness-smoke.py --stage config."
+    },
+    {
+      "id": "t10",
+      "summary": "live check: EliteMini first, then the fleet, recorded in docs/evidence",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "with the user's go-ahead per box: records prune --dry-run then the release on the EliteMini; ls -la records/ shows today and yesterday raw and older days .gz",
+        "cultureos: time and RSS of one real compress measured with the shipped code; df on arduino recorded",
+        "7 days after rollout on all six boxes: <= 8 day files, <= 2 raw, records/ < 300 MB (cultureos < 600 MB), governor.log under its cap; written to `docs/evidence/YYYY-MM-DD-record-retention-live.md`"
+      ],
+      "deps": [
+        "t9"
+      ],
+      "covers": [
+        "c18",
+        "h11",
+        "c19",
+        "h12",
+        "c16",
+        "h9",
+        "c17",
+        "h10",
+        "h16"
+      ],
+      "instruction": "Deleting records on a live box needs the user's go-ahead for each box; spark, spark2, thor and orin lose their 2026-10-23 days on the first pass (accepted, c22). Use the fleet ssh hosts from fleet.toml."
+    }
+  ],
+  "risks": [],
+  "obligations": []
+}
