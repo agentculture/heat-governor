@@ -242,7 +242,8 @@ light and dark) is served from vendored assets and works offline. From another
 device, open it through a tunnel:
 `ssh -L 9480:127.0.0.1:9480 user@host`, then <http://127.0.0.1:9480/>.
 Trends come from each machine's own record files
-(`<data_dir>/records/YYYYMMDD.jsonl`, the ones the daemon already writes): the
+(`<data_dir>/records/YYYYMMDD.jsonl`, the ones the daemon already writes; days older than
+yesterday are `.jsonl.gz` under record retention and read transparently): the
 reader runs one fixed, read-only, niced downsampling script over its existing
 ssh connection (numbers are its only arguments) and reads this machine's files
 locally, caching each answer for a minute (five for ranges over 26 h). The panel
@@ -305,6 +306,11 @@ heat-governor config show             # what is in force
 heat-governor gpu-clock helper        # the root helper + sudoers line for GPU clocks
 ```
 
+Records stay bounded: `[daemon] keep_days` (default 7) keeps today plus that many complete earlier
+days, gzips days older than yesterday to `.jsonl.gz` and deletes the rest; `[daemon] log_max_mib`
+(default 10) caps `governor.log`. `heat-governor records prune --dry-run` shows what a pass would do.
+Implemented and unit-tested; not yet run on a live box (planned).
+
 ## For other tools
 
 - Label your containers, or read the signal before starting new work:
@@ -333,6 +339,7 @@ heat-governor gpu-clock helper        # the root helper + sudoers line for GPU c
 | `mcp` | Read-only MCP server over stdio (tools `mesh_status`, `machine_state`, `sense`). |
 | `memory overview\|status\|top\|replay` | The memory guard: its state and limits, the biggest processes now, or when it would have fired over recorded memory. |
 | `ship overview\|test\|fetch` | Off-machine evidence in an S3-compatible bucket: check the bucket, or download a machine's kill events, postmortem and black box. |
+| `records overview\|prune` | Record retention: the day files and keep_days, or one pass now (`--dry-run` lists what it would gzip or delete). |
 | `whoami`, `learn`, `explain <path>`, `overview`, `doctor`, `cli overview` | Agent verbs. |
 
 Every command supports `--json`. Results go to stdout and errors/diagnostics

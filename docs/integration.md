@@ -161,6 +161,14 @@ live in `$XDG_CONFIG_HOME/heat-governor/config.toml` (`heat-governor config init
 re-reads it within ~2 s; an invalid edit is rejected and logged, and the last good settings stay. Every tick
 is recorded, so `heat-governor replay` can check a change against real traces before it governs.
 
+Records are kept bounded: `[daemon] keep_days` (integer >= 1, default 7) keeps today plus that many
+complete earlier UTC days in `<data_dir>/records`; today and yesterday stay raw, older days in the window
+are gzipped in place to `YYYYMMDD.jsonl.gz`, and days past the window are deleted. The daemon runs a pass
+at start and at each UTC date change; `heat-governor records overview` shows the inventory and
+`heat-governor records prune --dry-run` lists what a pass would do. `[daemon] log_max_mib` (number > 0,
+default 10) caps `governor.log`, which rotates to `governor.log.1.gz` (one generation). Both are
+live-reloadable. Implemented and unit-tested; not yet run on a live box **(planned)**.
+
 GPU clock ceilings need a one-time root install of a small helper (`heat-governor gpu-clock helper` prints
 it and the sudoers line), then `gpu_clock = true` under `[daemon]`.
 
@@ -197,7 +205,8 @@ machines at once:
   `GET /api/history?machine=<name>&range=15m|1h|6h|24h|7d` returns
   `{"machine", "range", "source", "samples"}`. Samples come from the machine's own record files
   (`source: "records"`, read by a fixed, niced script over the reader's ssh connection, or locally for
-  the reader's own machine; at most 300 buckets, each keeping maxima, the most severe level and the
+  the reader's own machine; days older than yesterday are `YYYYMMDD.jsonl.gz` under record retention and
+  are read transparently, and the default `keep_days = 7` covers the whole 7d range; at most 300 buckets, each keeping maxima, the most severe level and the
   lowest concurrency factor; 7 d buckets are sampled maxima). When the records are unreadable the reader
   falls back to its in-memory 24 h buffer (`source: "buffer"`). The concurrency factor in record-based
   samples is derived from the level with the default per-level map.
