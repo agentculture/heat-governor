@@ -2,7 +2,7 @@
   "plan_slug": "record-retention",
   "schema_version": 2,
   "created": "2026-11-24T23:04:19Z",
-  "updated": "2026-11-24T23:04:19Z",
+  "updated": "2026-11-24T23:11:23Z",
   "deviations": [
     {
       "id": "d1",
@@ -14,7 +14,7 @@
         "t8"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "classification": "acceptable",
       "seq": 1
     },
@@ -30,7 +30,7 @@
         "t6"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "classification": "acceptable",
       "seq": 2
     }
