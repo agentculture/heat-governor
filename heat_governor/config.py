@@ -108,7 +108,11 @@ DAEMON_KEYS = {
     "reload": bool,
     "gpu_clock": bool,
     "gpu_ceiling_mhz": int,
+    "keep_days": int,
+    "log_max_mib": (int, float),
 }
+DEFAULT_KEEP_DAYS = 7
+DEFAULT_LOG_MAX_MIB = 10
 CONTAINER_KEYS = {"name", "role", "cpu_cap"}
 UNIT_LEVELS = ("warm", "hot", "critical")
 UNIT_MODES = ("levels", "adaptive")
@@ -324,6 +328,16 @@ class Config:
         return self.data.get("daemon", {})
 
     @property
+    def keep_days(self) -> int:
+        """``[daemon] keep_days``: record days kept (today plus N complete earlier days)."""
+        return self.daemon.get("keep_days", DEFAULT_KEEP_DAYS)
+
+    @property
+    def log_max_mib(self) -> float:
+        """``[daemon] log_max_mib``: governor.log rotates past this size."""
+        return self.daemon.get("log_max_mib", DEFAULT_LOG_MAX_MIB)
+
+    @property
     def containers(self) -> list[ContainerRule]:
         return [
             ContainerRule(c["name"], c["role"], bool(c.get("cpu_cap", False)))
@@ -526,6 +540,12 @@ def _validate_daemon(dmn: dict, problems: list[str]) -> None:
     ceiling = dmn.get("gpu_ceiling_mhz")
     if _is_num(ceiling) and not 100 <= ceiling <= 5000:
         problems.append("daemon.gpu_ceiling_mhz must be > 0, a whole MHz within 100-5000")
+    keep = dmn.get("keep_days")
+    if isinstance(keep, int) and not isinstance(keep, bool) and keep < 1:
+        problems.append("daemon.keep_days must be a whole number of days, at least 1")
+    log_max = dmn.get("log_max_mib")
+    if _is_num(log_max) and not log_max > 0:
+        problems.append("daemon.log_max_mib must be greater than 0")
 
 
 def _typed_keys(section: str, tbl: dict, keys: dict, problems: list[str]) -> set[str]:
@@ -1129,6 +1149,9 @@ def template(profile: Profile) -> str:
         "# poll_s = 1.0",
         '# listen = "127.0.0.1:9476"',
         "# use_labels = true    # govern containers labelled heat-governor.role=...",
+        "# keep_days = 7        # records kept: today plus N complete earlier days; older days"
+        " deleted, days before yesterday gzip-compressed",
+        "# log_max_mib = 10     # governor.log rotates to governor.log.1.gz past this size",
         "# gpu_clock = false    # true: lower the GPU clock ceiling per gpu_clock_bands",
         "# gpu_ceiling_mhz = 2200  # the operator's GPU ceiling: law, applied even with",
         "#                         # gpu_clock off; the daemon may go below it, never above",
