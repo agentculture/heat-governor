@@ -10,16 +10,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Record retention (spec docs/specs/2026-11-24-record-retention.md): a daemon thread at start and each UTC date change keeps today plus [daemon] keep_days (default 7) complete earlier days, gzips days older than yesterday to YYYYMMDD.jsonl.gz, deletes older days and writes a records_pruned event; unit-tested, not yet run on a live box (planned)
-- heat-governor records overview|prune [--dry-run] [--keep-days N]
+- heat-governor records overview|prune [--dry-run] [--keep-days N] [--allow-gap]
+- Gap check: day files before a hole longer than keep_days are never deleted automatically (a forward clock jump leaves the same hole as a long downtime); records prune --allow-gap deletes them
 - [daemon] log_max_mib (default 10): governor.log rotates to governor.log.1.gz, following a live reload
 
 ### Changed
 
+- keep_days is capped at 3650 and log_max_mib must be finite (config and prune_pass)
+- records options given before the verb (records --config X prune) now reach it
 - report, sensors, replay, memory replay, the postmortem and the dashboard trend history read .jsonl and .jsonl.gz day files alike
 - docs and harness files (CLAUDE.md, AGENTS.override.md, AGENTS.colleague.md, QWEN.md, README.md, docs/integration.md) describe retention
 
 ### Fixed
 
+- a corrupt .jsonl.gz day (bad magic, CRC mismatch, corrupt deflate body) is skipped by report / sensors and the dashboard history instead of failing the whole read
+- a governor.log cap that cannot be read is reported on stderr; the line is still written
 - explain's records path names the XDG state dir (`$XDG_STATE_HOME/heat-governor/records`), not the data dir
 
 ## [0.19.2] - 2026-11-24

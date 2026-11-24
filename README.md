@@ -308,7 +308,9 @@ heat-governor gpu-clock helper        # the root helper + sudoers line for GPU c
 
 Records stay bounded: `[daemon] keep_days` (default 7) keeps today plus that many complete earlier
 days, gzips days older than yesterday to `.jsonl.gz` and deletes the rest; `[daemon] log_max_mib`
-(default 10) caps `governor.log`. `heat-governor records prune --dry-run` shows what a pass would do.
+(default 10) caps `governor.log`. Day files before a hole longer than `keep_days` are never deleted
+automatically (a forward clock jump leaves the same hole); `records prune --allow-gap` deletes them once
+the clock is known to be right. `heat-governor records prune --dry-run` shows what a pass would do.
 Implemented and unit-tested; not yet run on a live box (planned).
 
 ## For other tools
@@ -339,7 +341,7 @@ Implemented and unit-tested; not yet run on a live box (planned).
 | `mcp` | Read-only MCP server over stdio (tools `mesh_status`, `machine_state`, `sense`). |
 | `memory overview\|status\|top\|replay` | The memory guard: its state and limits, the biggest processes now, or when it would have fired over recorded memory. |
 | `ship overview\|test\|fetch` | Off-machine evidence in an S3-compatible bucket: check the bucket, or download a machine's kill events, postmortem and black box. |
-| `records overview\|prune` | Record retention: the day files and keep_days, or one pass now (`--dry-run` lists what it would gzip or delete). |
+| `records overview\|prune` | Record retention: the day files and keep_days, or one pass now (`--dry-run` lists what it would gzip or delete; `--allow-gap` also deletes days before a long hole). |
 | `whoami`, `learn`, `explain <path>`, `overview`, `doctor`, `cli overview` | Agent verbs. |
 
 Every command supports `--json`. Results go to stdout and errors/diagnostics

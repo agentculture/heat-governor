@@ -1,0 +1,41 @@
+{
+  "plan_slug": "record-retention",
+  "schema_version": 2,
+  "created": "2026-11-24T23:04:19Z",
+  "updated": "2026-11-24T23:04:19Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "prune_pass never deletes day files before a hole longer than keep_days (they are still compressed; a 'gap check' warning is recorded each pass); 'records prune --allow-gap' deletes across it. After a real downtime longer than the window, up to ~keep_days+1 old days stay until the operator runs --allow-gap",
+      "task_ref": "t3",
+      "reason": "review of PR 23 (M1): the daemon writes today's file before any pass, so the newest-file clock check (c28) could not see a forward jump and a jump to 2030 deleted every real day (reproduced). A jump and a long downtime look the same from the files alone; holding the days before the hole is the safe side. User approved the fix ('Please do') after the review proposed a gap check",
+      "affects": [
+        "t7",
+        "t8"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": "acceptable",
+      "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "records CLI: --config, --data-dir and --json given before the verb now reach it (verb-parser copies default to SUPPRESS); keep_days capped at 3650 in config and prune_pass; log_max_mib must be finite; corrupt .gz days are skipped by iter_records and the history script",
+      "task_ref": "t8",
+      "reason": "review of PR 23 (M2, S1, S2, S3), each reproduced and fixed test-first; user approved ('Please do')",
+      "affects": [
+        "t1",
+        "t2",
+        "t4",
+        "t6"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": "acceptable",
+      "seq": 2
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}

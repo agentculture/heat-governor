@@ -163,7 +163,9 @@ is recorded, so `heat-governor replay` can check a change against real traces be
 
 Records are kept bounded: `[daemon] keep_days` (integer >= 1, default 7) keeps today plus that many
 complete earlier UTC days in `<data_dir>/records`; today and yesterday stay raw, older days in the window
-are gzipped in place to `YYYYMMDD.jsonl.gz`, and days past the window are deleted. The daemon runs a pass
+are gzipped in place to `YYYYMMDD.jsonl.gz`, and days past the window are deleted, except days before a hole
+longer than `keep_days`: a forward clock jump leaves the same hole as a long downtime, so those are kept
+(and gzipped) until `heat-governor records prune --allow-gap`. The daemon runs a pass
 at start and at each UTC date change; `heat-governor records overview` shows the inventory and
 `heat-governor records prune --dry-run` lists what a pass would do. `[daemon] log_max_mib` (number > 0,
 default 10) caps `governor.log`, which rotates to `governor.log.1.gz` (one generation). Both are
