@@ -1,0 +1,510 @@
+{
+  "slug": "record-retention",
+  "title": "record retention",
+  "schema_version": 6,
+  "status": "exported",
+  "created": "2026-11-24T19:10:39Z",
+  "updated": "2026-11-24T19:29:26Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "heat-governor keeps a bounded, configurable window of records on every box: days older than a day are gzip-compressed, days older than the retention window (default 7) are deleted, so no machine's disk fills with telemetry",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "on a tmp data dir with 10 day files and keep_days = 7, one prune pass leaves 7 files: the two newest raw, five .jsonl.gz",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "tests/test_retention.py over tmp_path with a fake clock; never the real ~/.local/state",
+      "revisions": []
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "the daemon prunes <data_dir>/records/YYYYMMDD.jsonl past a configurable retention (proposed default keep_days = 7) \u2014 today these files are never deleted: recorder.py:47-55 opens one file per UTC day in append mode and nothing removes them (1.4 GB on the EliteMini, 3.0-3.7 GB on the other five boxes, 16-33 files)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h2",
+          "text": "a day older than keep_days (by its YYYYMMDD name, UTC) is deleted whether raw or .gz; a day inside the window is never deleted",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "unit test with day files on both sides of the boundary, keep_days 1, 7 and 30",
+      "revisions": []
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "completed day files older than one day are gzip-compressed in place to YYYYMMDD.jsonl.gz with the stdlib gzip module (no new dependency, pyproject dependencies = []); measured on 20261113.jsonl: 74.5 MB -> 2.86 MB at gzip -6 in 0.40 s (26x), gzip -1 4.36 MB in 0.27 s; zstd -3 is no smaller (2.91 MB) and would need a third-party module",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "a compressed day decompresses byte-identical to the raw file it replaced, and the raw file is removed only after the .gz is fsync'd and renamed into place",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: gunzip(.gz) == original bytes; inject a failure between write and rename and assert the raw file survives",
+      "revisions": []
+    },
+    {
+      "id": "c4",
+      "kind": "assumption",
+      "text": "a week is not too much once compressed: today + yesterday raw and five gzip days is ~230 MB on the 100 MB/day boxes and ~450 MB on cultureos (177-224 MB/day raw, ~7-9 MB/day gzip); a raw week on cultureos would be ~1.4 GB",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "a week is not too much once compressed: one raw day + six gzip days is ~120 MB on the 100 MB/day boxes and ~220 MB on cultureos (177 MB/day raw, ~7 MB/day gzip); a raw week on cultureos would be ~1.2 GB, 18% of its 6.5 GB free",
+          "kind": "assumption",
+          "reason": "the retention window keeps two raw days, not one; cultureos 20261123 measured 224 MB"
+        }
+      ]
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "every reader of record files accepts .jsonl.gz as well as .jsonl: recorder.iter_records (report, sensor_stats) globs *.jsonl only (recorder.py:155-157), daemon postmortem globs *.jsonl (daemon.py:1349), and history.py's remote HISTORY_SCRIPT opens YYYYMMDD.jsonl by name and sizes the stride from os.path.getsize (history.py:80-90) \u2014 without this, compression silently makes trend history and reboot reports go blank",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "iter_records, report, sensor_stats, the daemon postmortem, history.py's remote script and replay / memory replay give the same output over a directory with gzipped days as over the raw one",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "parametrised tests over the same fixture stored raw and gzipped; history.py checked through run_local",
+      "revisions": [
+        {
+          "text": "every reader of record files accepts .jsonl.gz as well as .jsonl: recorder.iter_records (report, sensor_stats) globs *.jsonl only (recorder.py:155-157), daemon postmortem globs *.jsonl (daemon.py:1349), and history.py's remote HISTORY_SCRIPT opens <day>.jsonl by name and sizes the stride from os.path.getsize (history.py:80-90) \u2014 without this, compression silently makes trend history and reboot reports go blank",
+          "kind": "requirement",
+          "reason": "markdown lint: a bare <day> token renders as inline HTML (MD033); same meaning"
+        }
+      ]
+    },
+    {
+      "id": "c6",
+      "kind": "boundary",
+      "text": "the open (today's) file and yesterday's are never compressed or deleted: Recorder holds today's file open for append, and recorder.tail (recorder.py:75-90, the shipper's black box) reads today and yesterday across midnight",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "prune never compresses or deletes today's or yesterday's file (UTC), whatever keep_days is (keep_days < 2 is refused by validation)",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test around a fake midnight; config test that keep_days = 1 is a user error",
+      "revisions": []
+    },
+    {
+      "id": "c7",
+      "kind": "boundary",
+      "text": "boundaries-audit.jsonl is an append-only audit log (boundaries_service.py:27, mode 0600) and is not touched by record retention",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "boundaries-audit.jsonl, boundaries-applied.json, adaptive.json, ledger.json, spool/ and ssh/ are untouched after a prune pass",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: populate a tmp data dir with each, prune, assert unchanged mtimes and contents",
+      "revisions": []
+    },
+    {
+      "id": "c8",
+      "kind": "non_goal",
+      "text": "the ship spool and the MinIO buckets are not part of this: the spool is already capped (ship.py max_spool_files = 5000, deleted after a successful PUT) and the buckets are 580 KB (arduino) and 1.6 MB (spark) because [ship] uploads black boxes and events, not the day files",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c9",
+      "kind": "non_goal",
+      "text": "the user journald is not managed by heat-governor (spark's user journal is 1.6 GB, arduino's 237 MB) \u2014 journald has its own SystemMaxUse limits",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "retention is configurable in the [daemon] table beside record/fsync/data_dir (config.py:98-111 DAEMON_KEYS), with strict validation, a commented line in the generated config, and live reload (not added to Daemon.RESTART_ONLY, daemon.py:637)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "keep_days and log_max_mib are strictly validated, appear commented in the generated config, and a live reload changes them without a restart",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "config tests + a daemon reload test asserting the new value is used at the next rollover",
+      "revisions": []
+    },
+    {
+      "id": "c11",
+      "kind": "decision",
+      "text": "cultureos one-off cleanup: keep the last 2 day files (yesterday + today) for testing, delete the older ones now",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c12",
+      "kind": "decision",
+      "text": "default retention keep_days = 7",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c13",
+      "kind": "decision",
+      "text": "governor.log gets size-bounded rotation as part of this work",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c14",
+      "kind": "decision",
+      "text": "retention runs in two places: inside the daemon at the UTC day rollover, and as a CLI verb for on-demand / one-off cleanup",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c15",
+      "kind": "audience",
+      "text": "the operator running the six-box fleet (EliteMini, cultureos, spark, spark2, thor, orin), and every reader of record files: the reboot report, the postmortem, the dashboard's trend history, replay",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "the spec names every reader of record files found by the scope survey (s4) and nothing in the fleet relies on files older than 7 days",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "grep for '*.jsonl' and '.jsonl' readers in heat_governor before merge; list any new one",
+      "revisions": []
+    },
+    {
+      "id": "c16",
+      "kind": "before_state",
+      "text": "record files and governor.log are kept forever: 1.4-3.7 GB of records per box after 16-33 days, growing 87-224 MB/day; cultureos reached 88% of its 55 GB eMMC (6.5 GB free) and needed a manual delete on 2026-11-24",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "the before numbers come from the 2026-11-24 read-only survey (s1, s3) and the cultureos cleanup output",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "cite docs/evidence when the PR lands",
+      "revisions": []
+    },
+    {
+      "id": "c17",
+      "kind": "why_it_matters",
+      "text": "a governor that is there to keep a box alive must not be the thing that fills its disk; on cultureos the records alone would fill the free eMMC in about a month",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "cultureos's 9.1 GB free / ~200 MB per day raw holds as the arithmetic behind 'about a month'",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "recheck with df on arduino before the release note",
+      "revisions": []
+    },
+    {
+      "id": "c18",
+      "kind": "after_state",
+      "text": "each box holds at most keep_days (default 7) of records \u2014 today's and yesterday's raw, older days as .jsonl.gz \u2014 plus a size-bounded governor.log; every record reader works on both forms; 'records prune' does the same on demand",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "after the release has run one rollover on a box, records/ matches the after state",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "live check on the EliteMini first (ls -la records/), then the fleet; record in docs/evidence",
+      "revisions": []
+    },
+    {
+      "id": "c19",
+      "kind": "success_signal",
+      "text": "on a box with keep_days = 7, records/ holds <= 7 day files, at most 2 uncompressed; on the 100 MB/day boxes records/ stays < 300 MB and on cultureos < 600 MB; governor.log stays under its cap; report, postmortem, history and replay return the same rows on a gzipped day as on the raw file (test)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "the measured sizes after one week on the fleet meet the stated limits",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "du -sh records/ and ls -la governor.log* on all six boxes 7 days after rollout",
+      "revisions": [
+        {
+          "text": "on a box with keep_days = 7, records/ holds <= 7 day files, at most 2 uncompressed; on the 100 MB/day boxes records/ stays < 300 MB and on cultureos < 500 MB; governor.log stays under its cap; report, postmortem, history and replay return the same rows on a gzipped day as on the raw file (test)",
+          "kind": "success_signal",
+          "reason": "two raw cultureos days alone can reach ~450 MB (224 MB measured for 20261123)"
+        }
+      ]
+    },
+    {
+      "id": "c20",
+      "kind": "requirement",
+      "text": "a 'records' CLI noun: 'records prune [--dry-run] [--keep-days N] [--json]' compresses and deletes exactly as the daemon would and prints what it did / would do, plus 'records overview' (rubric overview_cli_noun_exists) and explain-catalog entries",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h13",
+          "text": "'records prune --dry-run' changes nothing on disk and lists exactly the files a real pass changes; the verb follows the CLI contract (stdout/stderr split, --json, exit codes) and teken cli doctor --strict passes",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "CLI tests on tmp_path; uv run teken cli doctor . --strict",
+      "revisions": []
+    },
+    {
+      "id": "c21",
+      "kind": "requirement",
+      "text": "governor.log rotates when it exceeds a cap (proposed log_max_mib = 10 in [daemon]): the current file becomes governor.log.1.gz, one rotated generation kept; _file_logger (cli/_commands/governing.py:231-239) stays append-and-close per line",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "governor.log never exceeds log_max_mib plus one line; after rotation exactly one governor.log.1.gz exists and holds the previous contents",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test with a tiny cap (e.g. 1 KiB via a test hook) on tmp_path",
+      "revisions": []
+    },
+    {
+      "id": "c22",
+      "kind": "non_goal",
+      "text": "no archive or upload of a day before deletion: days older than keep_days are gone (this includes the 2026-10-23 records still on spark, spark2, thor and orin once the release lands)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c23",
+      "kind": "boundary",
+      "text": "retention only touches files named YYYYMMDD.jsonl / YYYYMMDD.jsonl.gz in <data_dir>/records and governor.log(.1.gz); any other file in the data dir is never deleted; compression writes to a temp file and renames, so a crash leaves either the raw day or the finished .gz, never a torn one",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h15",
+          "text": "a crash at any point of compress leaves either the raw day or a complete .gz (plus possibly a stray .tmp that the next pass removes); files outside the named patterns survive",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test that kills the step between write, fsync and rename; assert a following pass cleans up",
+      "revisions": []
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "fleet-reader trend history over long spans reads compressed days: history.py's stride estimate uses compressed getsize and its 9-18 s DEADLINE may be hit decompressing gzip on the slower boxes \u2014 unmeasured",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "heat_governor/recorder.py (Recorder)",
+      "finding": "one append-only file per UTC day (recorder.py:47-55), no retention anywhere in the package (grep for prune/retention/rotate finds only memkill's kill-budget window); measured 100-106 MB/day on EliteMini, spark, spark2, orin; 87 MB thor; 177 MB cultureos",
+      "seeds": [
+        "c2"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "compression trial on EliteMini records/20261113.jsonl",
+      "finding": "gzip -6 74.5 MB -> 2.86 MB (26x, 0.40 s, ~2 MB RSS); zstd -3 2.91 MB; stdlib gzip already used by ship.py:599 for the black box",
+      "seeds": [
+        "c3"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "fleet disk survey (ssh, read-only, 2026-11-24)",
+      "finding": "cultureos (arduino) root eMMC 55G, 47G used, 6.5G free (88%), records 3.0G; spark 86% of 3.7T; spark2 24%; thor 70%; orin 66%; EliteMini /home 77% (50G free)",
+      "seeds": [
+        "c4"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "record readers (recorder.py, daemon.py postmortem, history.py, replay/memory replay CLI)",
+      "finding": "four readers assume plain .jsonl: iter_records glob, postmortem glob of the newest N files, history.py builds the path by name and estimates lines from compressed-unaware getsize; replay and memory replay take an explicit path (governing.py:513, memory.py:381)",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "heat_governor/recorder.py tail + ship.py black box",
+      "finding": "tail reads directory/YYYYMMDD.jsonl for the days spanning the window (recorder.py:85); ship.py:597 calls it for the black box every cadence",
+      "seeds": [
+        "c6"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "heat_governor/boundaries_service.py AuditLog",
+      "finding": "audit log lives in the reader state dir beside records/, 4 KB on the EliteMini; its contract says append-only",
+      "seeds": [
+        "c7"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "ship.py spool + MinIO on arduino and spark",
+      "finding": "spool dirs 4-8 KB on all boxes; MinIO data /home/arduino/minio/heat-governor/data 580K, /home/spark/minio/heat-governor/data 1.6M",
+      "seeds": [
+        "c8"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "journalctl --user --disk-usage on arduino and spark",
+      "finding": "arduino 237.1M, spark 1.6G; the daemon's stderr lands there as well as in governor.log (governing.py:235)",
+      "seeds": [
+        "c9"
+      ]
+    },
+    {
+      "id": "s9",
+      "surface": "heat_governor/config.py DAEMON_KEYS + daemon.py RESTART_ONLY",
+      "finding": "record/fsync/data_dir are DAEMON_KEYS and restart-only; a retention knob has no reason to be restart-only",
+      "seeds": [
+        "c10"
+      ]
+    },
+    {
+      "id": "s10",
+      "surface": "governor.log (cli/_commands/governing.py:231-239)",
+      "finding": "_file_logger appends every action line to <data_dir>/governor.log with no rotation; 19,950,790 bytes on spark, 15,020 on arduino, 8 KB on EliteMini",
+      "seeds": []
+    },
+    {
+      "id": "s11",
+      "surface": "cultureos cleanup (ssh arduino, 2026-11-24 21:14)",
+      "finding": "deleted 14 day files 20261109-20261122 with the user's go-ahead; kept 20261123 (224 MB) and 20261124; root went 6.5G -> 9.1G free (83%)",
+      "seeds": [
+        "c11"
+      ]
+    }
+  ],
+  "lapses": [],
+  "obligations": []
+}

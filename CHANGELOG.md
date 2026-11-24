@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.2] - 2026-11-24
+
+### Added
+
+- `docs/specs/2026-11-24-record-retention.md`: converged devague spec for bounded record retention: day files older than a day gzip-compressed, days past `keep_days` (default 7) deleted, `governor.log` rotation, every record reader accepting `.jsonl.gz`, and a `records prune` verb (planned; not implemented yet).
+
 ## [0.19.1] - 2026-11-17
 
 ### Added
