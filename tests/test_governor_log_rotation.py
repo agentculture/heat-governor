@@ -102,3 +102,16 @@ def test_run_options_cap_follows_a_live_reload(tmp_path, capsys):
     assert (data / "governor.log.1.gz").exists()
     assert (data / "governor.log").read_text() == "y" * 29 + "\n"
     capsys.readouterr()
+
+
+def test_a_cap_that_cannot_be_read_never_stops_logging(tmp_path, capsys):
+    """Review of PR 23, S3: the cap callable raising goes to stderr; the line is written."""
+
+    def broken_cap() -> int:
+        raise OverflowError("cannot convert float infinity to integer")
+
+    log_path = tmp_path / "governor.log"
+    log = _file_logger(log_path, broken_cap)
+    log("still logged")
+    assert log_path.read_text() == "still logged\n"
+    assert "rotation" in capsys.readouterr().err

@@ -73,3 +73,21 @@ def test_template_has_commented_lines_in_daemon_table() -> None:
 def test_not_restart_only() -> None:
     assert "keep_days" not in Daemon.RESTART_ONLY
     assert "log_max_mib" not in Daemon.RESTART_ONLY
+
+
+# -- review of PR 23, S3: non-finite or absurd values are refused at load
+
+
+@pytest.mark.parametrize("value", ["inf", "nan", "-inf"])
+def test_log_max_mib_must_be_finite(tmp_path, value):
+    path = tmp_path / "c.toml"
+    path.write_text(f"[daemon]\nlog_max_mib = {value}\n")
+    with pytest.raises(cfgmod.ConfigError):
+        cfgmod.load(path, required=True)
+
+
+def test_keep_days_has_an_upper_bound(tmp_path):
+    path = tmp_path / "c.toml"
+    path.write_text("[daemon]\nkeep_days = 1000000\n")
+    with pytest.raises(cfgmod.ConfigError):
+        cfgmod.load(path, required=True)

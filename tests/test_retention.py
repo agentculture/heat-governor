@@ -740,3 +740,54 @@ def test_dry_run_never_calls_the_compressor(records):
 
     planned = prune_pass(records, NOW, 7, dry_run=True, compress=compress)
     assert len(planned["compressed"]) == 4
+
+
+# -- review of PR 23, M1: a hole longer than keep_days (clock jumped forward, or a long
+#    downtime) never lets a pass delete the days before it, unless allow_gap is given
+
+
+def _jump_fixture(records: Path) -> float:
+    for i in range(8):  # 2026-11-18 .. 2026-11-25, the real days
+        write_raw(records, TODAY - timedelta(days=i))
+    jumped = date(2030, 1, 2)
+    write_raw(records, jumped - timedelta(days=1))  # what the daemon wrote after the jump
+    write_raw(records, jumped)
+    return datetime(2030, 1, 2, 12, tzinfo=timezone.utc).timestamp()
+
+
+def test_days_before_a_hole_longer_than_keep_days_are_never_deleted(records):
+    now = _jump_fixture(records)
+    result = prune_pass(records, now, 7)
+    assert result["deleted"] == []
+    assert any("gap" in w for w in result["warnings"])
+    left = {n.split(".")[0] for n in names(records)}
+    for i in range(8):
+        assert stem(TODAY - timedelta(days=i)) in left
+
+
+def test_days_before_the_hole_are_still_compressed(records):
+    now = _jump_fixture(records)
+    prune_pass(records, now, 7)
+    assert f"{stem(TODAY - timedelta(days=7))}.jsonl.gz" in names(records)
+
+
+def test_allow_gap_deletes_across_the_hole(records):
+    now = _jump_fixture(records)
+    result = prune_pass(records, now, 7, allow_gap=True)
+    assert len(result["deleted"]) == 8
+    assert names(records) == {"20300101.jsonl", "20300102.jsonl"}
+
+
+def test_a_short_downtime_is_not_a_gap(records):
+    for back in (0, 1, 2, 6, 7, 8, 9, 10):  # 3 days missing: shorter than keep_days
+        write_raw(records, TODAY - timedelta(days=back))
+    result = prune_pass(records, NOW, 7)
+    assert result["deleted"] == [f"{stem(TODAY - timedelta(days=b))}.jsonl" for b in (10, 9, 8)]
+    assert not any("gap" in w for w in result["warnings"])
+
+
+def test_a_day_file_name_with_a_trailing_newline_is_not_a_day(records):
+    (records / "20261001.jsonl\n").write_bytes(b"x")
+    write_raw(records, TODAY)
+    prune_pass(records, NOW, 7)
+    assert (records / "20261001.jsonl\n").exists()

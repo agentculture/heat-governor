@@ -180,8 +180,10 @@ def iter_records(directory: Path) -> Iterator[dict]:
                         yield json.loads(line)
                     except ValueError:
                         continue  # a torn last line after a power loss
-        except (EOFError, zlib.error):
-            continue  # a truncated gzip stream: keep the rows read so far, go on to the next day
+        except (OSError, EOFError, zlib.error):
+            # a truncated or corrupt gzip stream (BadGzipFile is an OSError), or a day removed
+            # by a retention pass mid-read: keep the rows read so far, go on to the next day
+            continue
 
 
 MEMORY_EVENTS = (

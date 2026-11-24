@@ -104,3 +104,19 @@ def test_truncated_gz_keeps_earlier_rows(tmp_path):
     assert ids[0] == "boot-a"
     assert ids[-1] == "boot-c"
     assert len(rows) >= 60
+
+
+def test_a_corrupt_gz_day_is_skipped_not_fatal(tmp_path):
+    """Review of PR 23, S1: a bad magic number or a CRC mismatch (gzip.BadGzipFile, an
+    OSError) loses that day's unread rows, never the rest of the archive."""
+    d = tmp_path / "records"
+    d.mkdir()
+    (d / "20261120.jsonl").write_text('{"t":1}\n')
+    (d / "20261121.jsonl.gz").write_bytes(b"notgzip")
+    good = gzip.compress(b'{"t":3}\n')
+    bad_crc = good[:-8] + bytes([good[-8] ^ 0xFF]) + good[-7:]
+    (d / "20261122.jsonl.gz").write_bytes(bad_crc)
+    (d / "20261123.jsonl").write_text('{"t":4}\n')
+    rows = [r["t"] for r in recorder.iter_records(d)]
+    assert 1 in rows
+    assert 4 in rows

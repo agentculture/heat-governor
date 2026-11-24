@@ -254,7 +254,8 @@ def test_script_is_plain_stdlib_and_has_no_single_quotes():
     imports = [ln for ln in HISTORY_SCRIPT.splitlines() if ln.startswith(("import", "from"))]
     assert imports
     assert all(
-        set(ln.replace(",", " ").split()[1:]) <= {"json", "os", "sys", "time", "datetime", "gzip"}
+        set(ln.replace(",", " ").split()[1:])
+        <= {"json", "os", "sys", "time", "datetime", "gzip", "zlib"}
         or ln.startswith("from datetime import")
         for ln in imports
     )
@@ -315,3 +316,16 @@ def test_raw_day_wins_over_a_gzipped_twin_and_bad_gz_is_skipped(home):
     out = run(home, T0, T0 + DAY + 100, 10)
     assert [x["temp_c"] for x in out["samples"]] == [66.0]
     assert out["files"][0] == day_file(T0)
+
+
+def test_a_gz_with_a_corrupt_deflate_body_does_not_fail_the_window(home):
+    """Review of PR 23, S2: zlib.error from a corrupt deflate body skips that day."""
+    rd = records(home)
+    write(rd, [rec(T0 + 10, 66.0, "warm")])
+    good = gzip.compress(
+        ("".join(json.dumps(rec(T0 + DAY + i, 50.0, "cool")) + "\n" for i in range(200))).encode()
+    )
+    corrupt = good[:10] + bytes(b ^ 0x55 for b in good[10:60]) + good[60:]
+    (rd / (day_file(T0 + DAY) + ".gz")).write_bytes(corrupt)
+    out = run(home, T0, T0 + 2 * DAY, 10)
+    assert 66.0 in [x["temp_c"] for x in out["samples"]]

@@ -59,9 +59,11 @@ def cmd_prune(args: argparse.Namespace) -> int:
         )
     records = _data_dir(args, cfg) / "records"
     try:
-        result = retention.prune_pass(records, time.time(), keep, dry_run=args.dry_run)
+        result = retention.prune_pass(
+            records, time.time(), keep, dry_run=args.dry_run, allow_gap=args.allow_gap
+        )
     except ValueError as exc:
-        raise CliError(EXIT_USER_ERROR, str(exc), "pass --keep-days N with N >= 1") from exc
+        raise CliError(EXIT_USER_ERROR, str(exc), "pass --keep-days N with 1 <= N <= 3650") from exc
     except NotADirectoryError as exc:
         raise CliError(
             EXIT_ENV_ERROR,
@@ -100,7 +102,7 @@ def _render_prune(doc: dict) -> str:
 
 # -- overview -----------------------------------------------------------------------
 
-_DAY_RE = re.compile(r"^\d{8}\.jsonl(\.gz)?$")
+_DAY_RE = re.compile(r"^\d{8}\.jsonl(\.gz)?\Z", re.ASCII)
 
 
 def _inventory(records: Path) -> str:
@@ -142,8 +144,9 @@ def cmd_overview(args: argparse.Namespace) -> int:
                 "title": "Verbs",
                 "items": [
                     "records overview [--config PATH] [--data-dir DIR] -- this description",
-                    "records prune [--keep-days N] [--dry-run] [--config PATH] [--data-dir DIR]"
-                    " -- run one retention pass; --dry-run lists what it would do",
+                    "records prune [--keep-days N] [--dry-run] [--allow-gap] [--config PATH] "
+                    "[--data-dir DIR] -- run one retention pass; --dry-run lists what it would "
+                    "do; --allow-gap also deletes days before a hole longer than keep_days",
                     "exit codes: 0 ok, 1 bad --keep-days or config, 2 records directory "
                     "missing or unreadable, or a file failed",
                 ],
@@ -158,13 +161,18 @@ def _no_verb(args: argparse.Namespace) -> int:
     return cmd_overview(args)
 
 
-def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--config", help="Config file (default: the usual path).")
+def _add_common(p: argparse.ArgumentParser, *, verb: bool = False) -> None:
+    """Shared options, accepted before or after the verb. On a verb parser their default is
+    SUPPRESS, so a value given at the noun level (``records --config X prune``) is kept
+    rather than reset to the verb's default."""
+    extra = {"default": argparse.SUPPRESS} if verb else {}
+    p.add_argument("--config", help="Config file (default: the usual path).", **extra)
     p.add_argument(
         "--data-dir",
         help="The daemon's data directory (default: daemon.data_dir, else XDG state).",
+        **extra,
     )
-    p.add_argument("--json", action="store_true", help=_JSON_HELP)
+    p.add_argument("--json", action="store_true", help=_JSON_HELP, **extra)
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -174,11 +182,11 @@ def register(sub: argparse._SubParsersAction) -> None:
     noun = p.add_subparsers(dest="records_command", parser_class=type(p))
 
     ov = noun.add_parser("overview", help="Describe the records noun and the retention window.")
-    _add_common(ov)
+    _add_common(ov, verb=True)
     ov.set_defaults(func=cmd_overview)
 
     pr = noun.add_parser("prune", help="Delete and compress old day files (--dry-run to preview).")
-    _add_common(pr)
+    _add_common(pr, verb=True)
     pr.add_argument(
         "--keep-days",
         type=int,
@@ -186,5 +194,11 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     pr.add_argument(
         "--dry-run", action="store_true", help="Change nothing; list what would happen."
+    )
+    pr.add_argument(
+        "--allow-gap",
+        action="store_true",
+        help="Also delete days before a hole longer than keep_days (only once the clock is "
+        "known to be right: a forward clock jump leaves the same hole).",
     )
     pr.set_defaults(func=cmd_prune)

@@ -57,7 +57,7 @@ LEVELS = ("cool", "warm", "hot", "critical")
 CONCURRENCY = (1.0, 0.5, 0.0, 0.0)
 PYTHON = sys.executable
 
-HISTORY_SCRIPT = """import gzip, json, os, sys, time
+HISTORY_SCRIPT = """import gzip, json, os, sys, time, zlib
 from datetime import datetime, timedelta, timezone
 LEVELS = %s
 CF = %r
@@ -91,7 +91,7 @@ def main(argv):
         try:
             with opener(paths[0]) as fh:
                 head = fh.read(65536)
-        except (OSError, EOFError):
+        except (OSError, EOFError, zlib.error):
             head = b""
         avg = len(head) / max(1, head.count(b"\\n"))
         stride = max(1, -(-int(size / max(avg, 1.0)) // MAX_PARSED))
@@ -162,7 +162,7 @@ def rows(p):
         with opener(p, True) as fh:
             for line in fh:
                 yield line
-    except (OSError, EOFError):
+    except (OSError, EOFError, zlib.error):
         return
 def usize(p):
     try:

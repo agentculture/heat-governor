@@ -39,10 +39,12 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import BinaryIO, Callable
 
-DAY_RE = re.compile(r"^(\d{8})\.jsonl(\.gz)?$")
-TMP_RE = re.compile(r"^(\d{8})\.jsonl\.gz\.(\d+)\.tmp$")
+# \Z, not $ ($ also matches before a trailing newline); ASCII digits only
+DAY_RE = re.compile(r"^(\d{8})\.jsonl(\.gz)?\Z", re.ASCII)
+TMP_RE = re.compile(r"^(\d{8})\.jsonl\.gz\.(\d+)\.tmp\Z", re.ASCII)
 CHUNK = 1 << 20  # 1 MiB: peak extra memory does not grow with the day's size
 TMP_MAX_AGE_S = 3600.0
+MAX_KEEP_DAYS = 3650  # ten years; far larger values overflow the date arithmetic
 GZIP_LEVEL = 6
 GZIP_WBITS = 31  # 16 + 15: gzip container, 32 KiB window
 
@@ -185,6 +187,8 @@ def _check_args(records_dir: Path, keep_days: int) -> None:
         raise ValueError(
             f"keep_days must be >= 1 (today and yesterday are always kept), got {keep_days}"
         )
+    if keep_days > MAX_KEEP_DAYS:
+        raise ValueError(f"keep_days must be <= {MAX_KEEP_DAYS}, got {keep_days}")
     if not records_dir.is_dir():
         raise NotADirectoryError(f"records directory not found: {records_dir}")
 
@@ -243,6 +247,21 @@ def _clock_problem(days: dict[date, _Day], today: date) -> str | None:
     return None
 
 
+def _gap_floor(days, keep_days: int) -> date | None:
+    """The oldest day after the newest hole longer than ``keep_days`` between day files.
+
+    A forward clock jump and a long downtime look the same from the files alone: real days,
+    a hole, then the days written after it. Days before such a hole are never deleted by an
+    ordinary pass (``allow_gap`` lifts it), because after a jump the daemon writes today's
+    file before any pass, so the newest-file check in :func:`_clock_problem` cannot see it.
+    None when there is no such hole."""
+    ordered = sorted(days, reverse=True)
+    for newer, older in zip(ordered, ordered[1:]):
+        if (newer - older).days > keep_days:
+            return newer
+    return None
+
+
 def _remove(records_dir: Path, name: str, size: int, dry_run: bool, result: dict) -> None:
     if not dry_run:
         try:
@@ -256,8 +275,21 @@ def _remove(records_dir: Path, name: str, size: int, dry_run: bool, result: dict
     result["bytes_freed"] += size
 
 
-def _delete_expired(records_dir: Path, scan: _Scan, cutoff: date, dry_run: bool, result: dict):
-    for day in sorted(d for d in scan.days if d < cutoff):
+def _delete_expired(
+    records_dir: Path, scan: _Scan, cutoff: date, floor: date | None, dry_run: bool, result: dict
+):
+    expired = sorted(d for d in scan.days if d < cutoff)
+    held = [d for d in expired if floor is not None and d < floor]
+    if held:
+        result["warnings"].append(
+            f"gap check: no day files between {max(held):%Y%m%d} and {floor:%Y%m%d}, longer "
+            f"than keep_days; {len(held)} day(s) before the gap kept (a forward clock jump "
+            "looks the same as a long downtime); run 'records prune --allow-gap' once the "
+            "clock is known to be right"
+        )
+    for day in expired:
+        if day in held:
+            continue
         entry = scan.days.pop(day)
         for item in (entry.raw, entry.gz):
             if item:
@@ -324,6 +356,7 @@ def prune_pass(
     *,
     dry_run: bool = False,
     compress: Compressor = compress_day,
+    allow_gap: bool = False,
 ) -> dict:
     """Run one retention pass over ``records_dir`` at wall-clock ``now`` (epoch s).
 
@@ -341,6 +374,9 @@ def prune_pass(
     matching ``.gz`` already exists), because a ``.gz`` size is unknown until it
     is written -- it is a lower bound of what a real pass frees.
 
+    Day files before a hole longer than ``keep_days`` are not deleted (a warning says so)
+    unless ``allow_gap`` is true; they are still compressed.
+
     Raises ``ValueError`` for ``keep_days`` < 1 and ``NotADirectoryError`` when
     ``records_dir`` is not a directory.
     """
@@ -353,7 +389,9 @@ def prune_pass(
     if problem:
         result["warnings"].append(problem)
         return result
-    _delete_expired(records_dir, scan, today - timedelta(days=keep_days), dry_run, result)
+    floor = None if allow_gap else _gap_floor(scan.days, keep_days)
+    cutoff = today - timedelta(days=keep_days)
+    _delete_expired(records_dir, scan, cutoff, floor, dry_run, result)
     _remove_stale_tmps(records_dir, scan, now, dry_run, result)
     _compress_old(records_dir, scan, today - timedelta(days=2), dry_run, compress, result)
     return result

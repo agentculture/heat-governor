@@ -257,19 +257,24 @@ def _file_logger(log_path: Path, max_bytes=None):
 
     def log(line: str) -> None:
         sys.stderr.write(line + "\n")
-        cap = max_bytes() if callable(max_bytes) else max_bytes
-        if cap is not None:
-            try:
-                if log_path.stat().st_size >= cap:
-                    _rotate_log(log_path)
-            except FileNotFoundError:
-                pass
-            except Exception as exc:  # noqa: BLE001 - logging must continue
-                sys.stderr.write(f"governor.log rotation failed: {exc}\n")
+        _maybe_rotate(log_path, max_bytes)
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
     return log
+
+
+def _maybe_rotate(log_path: Path, max_bytes) -> None:
+    """Rotate ``log_path`` when it is at or over the cap; never raises (reading the cap
+    included: a bad cap is reported on stderr and the line is still appended)."""
+    try:
+        cap = max_bytes() if callable(max_bytes) else max_bytes
+        if cap is not None and log_path.stat().st_size >= cap:
+            _rotate_log(log_path)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:  # noqa: BLE001 - logging must continue
+        sys.stderr.write(f"governor.log rotation failed: {exc}\n")
 
 
 def _docker(args: argparse.Namespace, cfg):

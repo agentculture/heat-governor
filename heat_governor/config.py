@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import fnmatch
 import ipaddress
+import math
 import os
 import re
 import tomllib
@@ -113,6 +114,7 @@ DAEMON_KEYS = {
 }
 DEFAULT_KEEP_DAYS = 7
 DEFAULT_LOG_MAX_MIB = 10
+MAX_KEEP_DAYS = 3650  # matches heat_governor.retention.MAX_KEEP_DAYS
 CONTAINER_KEYS = {"name", "role", "cpu_cap"}
 UNIT_LEVELS = ("warm", "hot", "critical")
 UNIT_MODES = ("levels", "adaptive")
@@ -546,11 +548,13 @@ def _validate_daemon(dmn: dict, problems: list[str]) -> None:
 def _validate_retention(dmn: dict, problems: list[str]) -> None:
     """``[daemon] keep_days`` and ``log_max_mib`` ranges (their types are checked above)."""
     keep = dmn.get("keep_days")
-    if isinstance(keep, int) and not isinstance(keep, bool) and keep < 1:
-        problems.append("daemon.keep_days must be a whole number of days, at least 1")
+    if isinstance(keep, int) and not isinstance(keep, bool) and not 1 <= keep <= MAX_KEEP_DAYS:
+        problems.append(
+            f"daemon.keep_days must be a whole number of days, from 1 to {MAX_KEEP_DAYS}"
+        )
     log_max = dmn.get("log_max_mib")
-    if _is_num(log_max) and log_max <= 0:
-        problems.append("daemon.log_max_mib must be greater than 0")
+    if _is_num(log_max) and (not math.isfinite(log_max) or log_max <= 0):
+        problems.append("daemon.log_max_mib must be a finite number greater than 0")
 
 
 def _typed_keys(section: str, tbl: dict, keys: dict, problems: list[str]) -> set[str]:

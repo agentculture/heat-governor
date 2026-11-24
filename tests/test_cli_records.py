@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from heat_governor import retention
-from heat_governor.cli import main
+from heat_governor.cli import _build_parser, main
 from heat_governor.explain import known_paths
 
 
@@ -35,9 +35,9 @@ def _day(offset: int) -> str:
 def data(tmp_path) -> Path:
     rec = tmp_path / "data" / "records"
     rec.mkdir(parents=True)
-    for off in (0, 1, 2, 3, 20, 30):
+    for off in (0, 1, 2, 3, 9, 12):  # no hole longer than keep_days (see the gap tests)
         (rec / f"{_day(off)}.jsonl").write_text('{"t":1}\n' * 50)
-    with gzip.open(rec / f"{_day(25)}.jsonl.gz", "wb") as fh:
+    with gzip.open(rec / f"{_day(10)}.jsonl.gz", "wb") as fh:
         fh.write(b'{"t":1}\n')
     return tmp_path / "data"
 
@@ -80,7 +80,7 @@ def test_json_matches_prune_pass(capsys, data):
 def test_text_output_dry_run(capsys, data):
     rc, out, _ = run(capsys, "records", "prune", "--dry-run", "--data-dir", str(data))
     assert rc == 0
-    assert f"would delete {_day(30)}.jsonl" in out
+    assert f"would delete {_day(12)}.jsonl" in out
     assert f"would compress {_day(3)}.jsonl" in out
     assert "MB" in out
 
@@ -182,3 +182,53 @@ def test_explain_and_learn(capsys):
     assert "records" in out
     rc, out, _ = run(capsys, "explain", "memory")
     assert ".local/share" not in out
+
+
+# -- review of PR 23, M2: options given at the noun level reach the verb
+
+
+def test_noun_level_options_reach_the_verb(capsys, data, tmp_path):
+    cfg = tmp_path / "keep30.toml"
+    cfg.write_text("[daemon]\nkeep_days = 30\n")
+    args = _build_parser().parse_args(
+        ["records", "--data-dir", str(data), "--config", str(cfg), "--json", "prune", "--dry-run"]
+    )
+    assert args.data_dir == str(data)
+    assert args.config == str(cfg)
+    assert args.json is True
+    rc, out, _ = run(
+        capsys,
+        "records",
+        "--data-dir",
+        str(data),
+        "--config",
+        str(cfg),
+        "--json",
+        "prune",
+        "--dry-run",
+    )
+    assert rc == 0
+    payload = json.loads(out)
+    assert payload["keep_days"] == 30
+    assert payload["deleted"] == []  # keep_days 30 from the noun-level --config
+
+
+def test_verb_level_option_still_wins_over_the_noun(tmp_path):
+    args = _build_parser().parse_args(
+        ["records", "--data-dir", "/noun", "prune", "--data-dir", "/verb", "--dry-run"]
+    )
+    assert args.data_dir == "/verb"
+
+
+def test_allow_gap_flag_reaches_prune_pass(capsys, data, monkeypatch):
+    seen = {}
+    real = retention.prune_pass
+
+    def spy(*a, **kw):
+        seen.update(kw)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(retention, "prune_pass", spy)
+    rc, _, _ = run(capsys, "records", "prune", "--dry-run", "--allow-gap", "--data-dir", str(data))
+    assert rc == 0
+    assert seen.get("allow_gap") is True

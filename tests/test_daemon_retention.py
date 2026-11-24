@@ -377,3 +377,26 @@ def test_the_postmortem_reads_a_day_once_when_both_suffixes_exist(tmp_path):
     b = previous_boot_postmortem(both, "boot-new", T0, T0 - 60, pid=2)
     assert a is not None
     assert b == a
+
+
+def test_a_forward_clock_jump_deletes_nothing_through_the_daemon(tmp_path):
+    """Review of PR 23, M1: the daemon writes today's file before a pass, so the newest-file
+    check alone cannot see a jump; the hole between the real days and the new ones does."""
+    rig = Rig(tmp_path, prune=retention.prune_pass)
+    rig.records.mkdir(parents=True)
+    real = [f"202611{d}.jsonl" for d in range(18, 26)]
+    for name in real:
+        (rig.records / name).write_text('{"t":1}\n')
+    rig.clock.t = datetime(2030, 1, 1, 12, tzinfo=timezone.utc).timestamp()
+    rig.daemon.start()
+    try:
+        assert _wait(lambda: rig.daemon.retention_pending() > 0)
+        rig.daemon.tick()
+    finally:
+        rig.daemon.shutdown()
+    left = {p.name.split(".")[0] for p in rig.records.iterdir()}
+    for name in real:
+        assert name.split(".")[0] in left
+    rows = rig.rows("records_pruned")
+    assert rows
+    assert any("gap" in w for w in rows[-1]["warnings"])
