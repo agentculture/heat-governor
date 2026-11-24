@@ -98,8 +98,8 @@ Quoted verbatim from the `devague summary` skeleton:
   with 0 open issues on PR #23 — pass
 - evidence records `e1`-`e16` (one per obligation `o1`-`o16`, execution strength, run commit
   `398664a`), `e17` (live observation for `o17`, the `c18` after-state), `e18`-`e21`
-  (supplementary records backing deltas `b1`-`b4`) — all filed `proposed`
-- behavioral deltas `b1`-`b4` (`proposed`); obligation `o18` (`c19`, the seven-day bound) filed
+  (supplementary records backing deltas `b1`-`b4`) — all approved 2026-11-25
+- behavioral deltas `b1`-`b4` (approved); obligation `o18` (`c19`, the seven-day bound) filed
   with no evidence: not yet checkable
 - live: `docs/evidence/2026-11-24-record-retention-live.md`. The first passes freed 1.20, 3.34,
   3.32, 3.70 and 3.31 GB on the EliteMini, spark, spark2, thor and orin, with 0 errors. Every dry
@@ -110,35 +110,43 @@ Quoted verbatim from the `devague summary` skeleton:
 
 ## Delivery Claims
 
-Confidence below is the main agent's own reading of the evidence it ran. Every evidence record is
-still `proposed`, and lapses `l1`-`l8` are pending approval (not yet evidence). Where a pending
-lapse bears on a claim, the confidence is held at `medium` and the lapse is named, rather than
-defaulting to `high`.
+Evidence records `e1`-`e21`, deltas `b1`-`b4`, obligations `o17`-`o18` and lapses `l1`-`l8`
+were approved by the operator on 2026-11-25. Where an approved lapse bears on a claim, it caps
+that claim at `medium` (named in the row) rather than letting it default to `high`.
 
 | Claim | Confidence | Evidence |
 |-------|------------|----------|
 | `c2` — retention deletes day files past `keep_days` (today + 7 by default) | high | test `tests/test_retention.py::test_window_boundary_raw_and_gz` · `e1` · live passes in `docs/evidence/2026-11-24-record-retention-live.md` |
 | `c3` — completed days older than yesterday are gzip-compressed in place, byte-identical on decompression | high | test `tests/test_retention.py::test_compress_day_roundtrip_and_raw_removed` · `e2` · live: about 30x per day on the EliteMini |
-| `c5` — every record reader accepts `.jsonl.gz` | high | tests in `e3` and `e19` · live `/api/history?range=7d` on all six (pending lapse `l3` bears only on the `t1s` replay path) |
+| `c5` — every record reader accepts `.jsonl.gz` | high | tests in `e3` and `e19` · live `/api/history?range=7d` on all six (approved lapse `l3` bears only on the `t1s` replay path, not on the claim as a whole) |
 | `c6` — today and yesterday are never compressed or deleted | high | test `tests/test_retention.py::test_today_and_yesterday_never_touched_around_midnight` · `e4` |
 | `c7` — files beside `records/` (audit log, applied rules, ledger, spool, ssh) are never touched | high | test `tests/test_retention.py::test_data_dir_siblings_untouched` · `e5` |
 | `c10` — `keep_days` and `log_max_mib` are validated, documented and follow a live reload | high | tests in `e6` and `e20` (including `tests/test_governor_log_rotation.py::test_run_options_cap_follows_a_live_reload`) |
-| `c20` — `records overview` / `records prune` follow the CLI contract | high | tests in `e7` and `e18` · `teken cli doctor --strict` 26/26 (pending lapse `l6` bears on the per-file-error test only) |
+| `c20` — `records overview` / `records prune` follow the CLI contract | high | tests in `e7` and `e18` · `teken cli doctor --strict` 26/26 (approved lapse `l6` bears on the per-file-error test only) |
 | `c21` — `governor.log` stays bounded with one gzip generation | medium | tests in `e8` · not yet seen live (no log near 10 MiB) |
 | `c23` — a crash during compression leaves the raw day or a complete `.gz`; other files are never removed | high | tests in `e9` |
-| `c24` — pruning never runs on the tick loop and compresses in 1 MiB chunks | medium | tests in `e10` · pending lapse `l7` (loose tick bound) · cultureos compress timing not yet measured (h16) |
-| `c25` — the daemon's pass and `records prune` can run at the same time safely | medium | tests in `e11` · pending lapse `l5` (two passes in one process standing in for two processes) |
+| `c24` — pruning never runs on the tick loop and compresses in 1 MiB chunks | medium | tests in `e10` · approved lapse `l7` (loose tick bound) · cultureos compress timing not yet measured (h16) |
+| `c25` — the daemon's pass and `records prune` can run at the same time safely | medium | tests in `e11` · approved lapse `l5` (two passes in one process standing in for two processes) |
 | `c26` — expired days go first; a failed compress keeps the raw day and the pass continues | high | tests in `e12` |
 | `c27` — a pass writes one `records_pruned` row and log line and never raises into the daemon | high | tests in `e13`, `e21` · live: one `records_pruned` log line per box that changed |
 | `c28` — a pass deletes nothing when the clock looks wrong, including a forward jump seen through the daemon | high | tests in `e14` (including `tests/test_daemon_retention.py::test_a_forward_clock_jump_deletes_nothing_through_the_daemon`) · deviation `d1` |
 | `c29` — symlinks are never followed and subdirectories are never entered | high | tests in `e15` |
-| `c30` — the history stride uses the uncompressed size | medium | tests in `e16` · pending lapse `l2` (the script's own size value is checked only through the stride) |
+| `c30` — the history stride uses the uncompressed size | medium | tests in `e16` · approved lapse `l2` (the script's own size value is checked only through the stride) |
 | `c18` — the six live boxes hold today and yesterday raw and older days gzipped, and the readers work | medium | `e17` · `docs/evidence/2026-11-24-record-retention-live.md` (cultureos has not compressed yet) |
 | `c19` — after seven days: at most 8 day files, at most 2 raw, under 300 MB per box (under 600 MB on cultureos) | unverified | `o18` filed with no evidence — not claimed done |
 
 Lapse ledger evidence:
 
-pending approval (not yet evidence): `l1`, `l2`, `l3`, `l4`, `l5`, `l6`, `l7`, `l8`
+| Lapse | Code | What |
+|-------|------|------|
+| `l1` | `control-absent` | t2 implemented history.py before writing its tests (not test-first); afterwards it re-ran the new tests against the stashed old code: 2 of 3 failed as they should, the raw-wins-over-gz test passed on old code (guards, does not prove) |
+| `l2` | `grader-unverified` | t2's ISIZE test checks the trailer in the test itself; its second assert only greps `HISTORY_SCRIPT` for 'ISIZE' or 'little' and never reads the script's own size value; the script's ISIZE use is covered only indirectly by the stride-equality test |
+| `l3` | `grader-unverified` | t1's t1s-\*.log replay test replays an empty file, so it checks the format dispatch still runs, not t1s sample parsing through `open_day` |
+| `l4` | `control-absent` | t3 wrote retention.py before its tests (not test-first); mitigated afterwards by seven deliberate mutations (clock check off, tmp age gate off, symlinks followed, rename removed, compress-before-delete, compressing yesterday, whole-file reads), each caught by the suite |
+| `l5` | `assumption-for-measurement` | o11 (concurrent passes) is tested with two passes interleaved inside one process (pid= argument + monkeypatching), standing in for two real processes |
+| `l6` | `grader-unverified` | t8's per-file-error exit-2 test monkeypatches retention.`prune_pass` to append an error instead of injecting a real compress failure (`prune_pass` binds its compress default at definition time), so that path is checked at the CLI level only |
+| `l7` | `assumption-for-measurement` | t7's cadence test bounds each tick at < 0.5 s while the pass is blocked; the bound is loose and was not measured on a loaded CI runner, and cadence is shown by tick() returning promptly, not by the pragma-no-cover run() loop |
+| `l8` | `control-absent` | main agent opened PR 23 after running only harness-smoke --stage config and no Sonar check; CI's toolchain stage (steward doctor portability) failed twice on text the main agent wrote (a hard-coded home path in s7, per-user state-dir refs in the new records and CHANGELOG), and Sonar flagged 42 new issues |
 
 ## Remaining Work / Follow-up
 
@@ -157,6 +165,4 @@ pending approval (not yet evidence): `l1`, `l2`, `l3`, `l4`, `l5`, `l6`, `l7`, `
 - Parked in the frame: `v1` (history over gzipped days on slow boxes, unmeasured), `v2`
   (first-rollout burst, observed fine: 0 errors), `v3` (a downgrade hides `.gz` days), `v4`
   (backdated rows), `v5` (records disk usage in `mesh status` and the dashboard).
-- Adjudication (operator): evidence `e1`-`e21`, deltas `b1`-`b4`, obligations `o17`-`o18`,
-  lapses `l1`-`l8`.
 - PR #24 (0.20.1, live evidence and this summary): review and merge.

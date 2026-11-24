@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-24T19:10:39Z",
-  "updated": "2026-11-24T23:41:33Z",
+  "updated": "2026-11-24T23:53:31Z",
   "claims": [
     {
       "id": "c1",
@@ -823,7 +823,7 @@
         "t2"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l2",
@@ -835,7 +835,7 @@
         "o16"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l3",
@@ -846,7 +846,7 @@
         "t1"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l4",
@@ -857,7 +857,7 @@
         "t3"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l5",
@@ -869,7 +869,7 @@
         "o11"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l6",
@@ -881,7 +881,7 @@
         "o7"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l7",
@@ -893,7 +893,7 @@
         "o10"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l8",
@@ -905,7 +905,7 @@
         "PR23"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     }
   ],
   "obligations": [
@@ -1060,7 +1060,7 @@
       "behavior": "after the first pass each box holds today and yesterday raw and older days in the window as .jsonl.gz, every record reader still works on them, and records prune --dry-run matches what the daemon did",
       "source_text": "each box holds today's records plus keep_days (default 7) complete earlier days \u2014 today's and yesterday's raw, older days as .jsonl.gz \u2014 plus a size-bounded governor.log; every record reader works on both forms; 'records prune' does the same on demand",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o18",
@@ -1069,7 +1069,7 @@
       "behavior": "<= 8 day files, <= 2 raw, records/ < 300 MB on the 100 MB/day boxes and < 600 MB on cultureos, governor.log under its cap",
       "source_text": "on a box with keep_days = 7, records/ holds <= 8 day files (today + 7), at most 2 uncompressed; on the 100 MB/day boxes records/ stays < 300 MB and on cultureos < 600 MB; governor.log stays under its cap; report, postmortem, history and replay return the same rows on a gzipped day as on the raw file (test)",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     }
   ]
 }

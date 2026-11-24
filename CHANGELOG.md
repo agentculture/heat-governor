@@ -10,7 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - `docs/evidence/2026-11-24-record-retention-live.md`: 0.20.0 deployed to all six boxes; first retention passes freed 1.2-3.7 GB per box with no errors, every dry run matched the real pass, the dashboard 7d history reads the gzipped days. State rows in `CLAUDE.md`, the three other harness files, README and docs/integration.md updated.
-- `docs/deliveries/2026-11-24-record-retention.md`: delivery summary of the record-retention plan (run partial: t1-t9 delivered, t10 first pass live, the seven-day check pending), with devague evidence e1-e21, behavioral deltas b1-b4 and obligations o17-o18 (proposed).
+- `docs/deliveries/2026-11-24-record-retention.md`: delivery summary of the record-retention plan (run partial: t1-t9 delivered, t10 first pass live, the seven-day check pending), with devague evidence e1-e21, behavioral deltas b1-b4, obligations o17-o18 and lapses l1-l8, all approved 2026-11-25.
 
 ## [0.20.0] - 2026-11-25
 
