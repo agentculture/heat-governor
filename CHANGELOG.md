@@ -20,7 +20,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- explain records path names ~/.local/state/heat-governor/records
+- explain's records path names the XDG state dir (`$XDG_STATE_HOME/heat-governor/records`), not the data dir
 
 ## [0.19.2] - 2026-11-24
 
