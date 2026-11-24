@@ -57,6 +57,10 @@ Commands
                                    S3 shipping ([ship] config). test = PUT+GET a probe;
                                    fetch = a boot's events, postmortem and black box.
                                    Try: ship fetch --machine M.
+  heat-governor records <verb>     overview | prune [--keep-days N] [--dry-run]: the daily
+                                   records and their retention. prune gzips old days and
+                                   deletes days past [daemon] keep_days; --dry-run lists
+                                   what it would do. Try: records prune --dry-run.
   heat-governor mcp [--json]       read-only MCP server over stdio (JSON-RPC lines; tools
                                    mesh_status, machine_state, sense); --json has no effect.
   heat-governor whoami | learn | explain <path> | overview | doctor | cli overview
@@ -127,6 +131,9 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["boundaries", "rm"], "summary": "Remove a boundaries.toml rule."},
             {"path": ["boundaries", "apply"], "summary": "Apply a JSON request from stdin."},
             {"path": ["boundaries", "preview"], "summary": "Preview a draft rule from stdin."},
+            {"path": ["records"], "summary": "Daily records and their retention."},
+            {"path": ["records", "overview"], "summary": "Describe the records noun."},
+            {"path": ["records", "prune"], "summary": "Delete and compress old day files."},
             {"path": ["ship"], "summary": "Ship records to S3-compatible storage."},
             {"path": ["ship", "overview"], "summary": "Describe the ship noun."},
             {"path": ["ship", "test"], "summary": "PUT and GET a probe object."},
