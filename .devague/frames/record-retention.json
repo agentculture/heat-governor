@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-24T19:10:39Z",
-  "updated": "2026-11-24T21:49:50Z",
+  "updated": "2026-11-24T22:22:03Z",
   "claims": [
     {
       "id": "c1",
@@ -813,7 +813,89 @@
       "seeds": []
     }
   ],
-  "lapses": [],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "control-absent",
+      "what": "t2 implemented history.py before writing its tests (not test-first); afterwards it re-ran the new tests against the stashed old code: 2 of 3 failed as they should, the raw-wins-over-gz test passed on old code (guards, does not prove)",
+      "skipped_check": "write failing tests first",
+      "refs": [
+        "t2"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l2",
+      "code": "grader-unverified",
+      "what": "t2's ISIZE test checks the trailer in the test itself; its second assert only greps HISTORY_SCRIPT for 'ISIZE' or 'little' and never reads the script's own size value; the script's ISIZE use is covered only indirectly by the stride-equality test",
+      "skipped_check": "assert the script's computed uncompressed size",
+      "refs": [
+        "t2",
+        "o16"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l3",
+      "code": "grader-unverified",
+      "what": "t1's t1s-*.log replay test replays an empty file, so it checks the format dispatch still runs, not t1s sample parsing through open_day",
+      "skipped_check": "replay a non-empty t1s fixture",
+      "refs": [
+        "t1"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l4",
+      "code": "control-absent",
+      "what": "t3 wrote retention.py before its tests (not test-first); mitigated afterwards by seven deliberate mutations (clock check off, tmp age gate off, symlinks followed, rename removed, compress-before-delete, compressing yesterday, whole-file reads), each caught by the suite",
+      "skipped_check": "write failing tests first",
+      "refs": [
+        "t3"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l5",
+      "code": "assumption-for-measurement",
+      "what": "o11 (concurrent passes) is tested with two passes interleaved inside one process (pid= argument + monkeypatching), standing in for two real processes",
+      "skipped_check": "run two real processes against one tmp records dir",
+      "refs": [
+        "t3",
+        "o11"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l6",
+      "code": "grader-unverified",
+      "what": "t8's per-file-error exit-2 test monkeypatches retention.prune_pass to append an error instead of injecting a real compress failure (prune_pass binds its compress default at definition time), so that path is checked at the CLI level only",
+      "skipped_check": "inject a real compress OSError through prune_pass",
+      "refs": [
+        "t8",
+        "o7"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l7",
+      "code": "assumption-for-measurement",
+      "what": "t7's cadence test bounds each tick at < 0.5 s while the pass is blocked; the bound is loose and was not measured on a loaded CI runner, and cadence is shown by tick() returning promptly, not by the pragma-no-cover run() loop",
+      "skipped_check": "measure tick latency under load / exercise run()",
+      "refs": [
+        "t7",
+        "o10"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    }
+  ],
   "obligations": [
     {
       "id": "o1",
