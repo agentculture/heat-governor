@@ -24,6 +24,12 @@ box and (after an unclean boot) a postmortem go to S3 through a
 :class:`~heat_governor.ship.Shipper`. The thermal path never reads memory: level, admit and
 concurrency_factor are the same with or without the guard.
 
+With records on, a :class:`RetentionThread` runs :func:`heat_governor.retention.prune_pass`
+once at start (after today's start row and the postmortem scan) and again whenever the UTC
+date changes, with ``keep_days`` read from the current config. It never writes: the tick
+loop writes a ``records_pruned`` row and one log line for a pass that changed something,
+and logs a failed pass; neither ever delays a tick.
+
 Without ``apply`` the loop still senses, publishes the admission signal and
 records -- all harmless -- but changes no container (it logs what it would do).
 """
@@ -33,21 +39,25 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import signal
 import socket
 import threading
 import time
+import zlib
 from collections import deque
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from heat_governor import __version__, platforms
+from heat_governor import __version__, platforms, retention
 from heat_governor.actuators import CpuCapper, DutyCycler, Ledger
 from heat_governor.adaptive import AdaptiveLoop, ModelStore, Trend, UsageMeter
 from heat_governor.boundaries_file import rule_to_dict
 from heat_governor.config import (
     BOUNDARIES_FILE,
+    DEFAULT_KEEP_DAYS,
     PAIR_RESTART_ONLY,
     Config,
     ConfigError,
@@ -77,7 +87,14 @@ from heat_governor.pair import decide as pair_decide
 from heat_governor.pair import lost
 from heat_governor.platforms import Profile
 from heat_governor.policy import Controller, Decision, unit_cpus
-from heat_governor.recorder import MEMORY_EVENTS, Recorder, _reboot_entry, boot_id
+from heat_governor.recorder import (
+    MEMORY_EVENTS,
+    Recorder,
+    _day_files,
+    _reboot_entry,
+    boot_id,
+    open_day,
+)
 from heat_governor.sense import Reading, Sensor
 from heat_governor.ship import Shipper
 from heat_governor.state import SCHEMA, StateServer, write_state
@@ -123,6 +140,7 @@ SHIP_EVENTS = MEMORY_EVENTS
 EV_BOUNDARY_CHANGED = "memory_boundary_changed"
 BOUNDARIES_APPLIED = "boundaries-applied.json"  # in the data dir: the rules last applied
 POSTMORTEM_FILES = 2  # the newest day files read for the postmortem (never the whole archive)
+RETENTION_CHECK_S = 60.0  # how often the retention thread looks for a new UTC date
 
 
 def _file_rules(cfg: Config) -> tuple:
@@ -177,6 +195,8 @@ class Daemon:
         sys_root: Path = Path("/sys"),
         make_guard: Callable[..., MemGuard] | None = None,
         make_shipper: Callable[..., Shipper] | None = None,
+        prune: Callable[..., dict] | None = None,
+        retention_check_s: float = RETENTION_CHECK_S,
     ) -> None:
         self.profile = profile
         self.opts = opts
@@ -235,6 +255,9 @@ class Daemon:
             self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
             self._sync_adaptive(opts.units)
         self._init_memory(opts, proc_root, sys_root, make_guard, make_shipper)
+        self._prune = prune or retention.prune_pass
+        self._retention_check_s = retention_check_s
+        self.retention: RetentionThread | None = None
 
     def _init_pair(self, peer_link: PeerLink | None, opts: Options) -> None:
         """The tensor-parallel pair ([pair]): its peer link and server; None without one."""
@@ -1053,6 +1076,7 @@ class Daemon:
         admission signal clients depend on."""
         now = self.clock()
         self.maybe_reload(now)
+        self._drain_retention()
         self._poll_operator(now)
         reading = self.sensor.read()
         d = self.ctrl.step(reading.temp_c, now, reading.gpu_temp_c)
@@ -1209,6 +1233,60 @@ class Daemon:
             doc["samples"] = loop.model.samples
         return doc
 
+    # -- record retention: its own thread; its results are written here, on the tick side
+    @property
+    def retention_thread(self) -> threading.Thread | None:
+        return self.retention.thread if self.retention else None
+
+    def retention_pending(self) -> int:
+        """Results (or errors) of retention passes not yet written by the tick loop."""
+        return self.retention.results.qsize() if self.retention else 0
+
+    def _keep_days(self) -> int:
+        """``keep_days`` from the CURRENT config, so a live reload reaches the next pass."""
+        cfg = self.opts.config
+        return cfg.keep_days if cfg is not None else DEFAULT_KEEP_DAYS
+
+    def _start_retention(self) -> None:
+        if self.recorder is None or self.retention is not None:
+            return
+        self.retention = RetentionThread(
+            self.recorder.directory,
+            self._keep_days,
+            self.clock,
+            prune=self._prune,
+            check_s=self._retention_check_s,
+        )
+        self.retention.start()
+
+    def _stop_retention(self) -> None:
+        if self.retention is not None:
+            self._fenced("retention stop", self.retention.stop)
+            self._drain_retention()  # a result that arrived while stopping is still written
+
+    def _drain_retention(self) -> None:
+        """Write what the retention thread queued: a records_pruned row plus one log line."""
+        if self.retention is None:
+            return
+        while True:
+            try:
+                item = self.retention.results.get_nowait()
+            except queue.Empty:
+                return
+            self._fenced("retention", lambda item=item: self._note_retention(*item))
+
+    def _note_retention(self, now: float, result: dict | None, error: str | None) -> None:
+        if error is not None:
+            self._log(f"retention: pass failed: {error}")
+            return
+        if not _retention_changed(result):
+            return
+        row = {"t": now, "event": "records_pruned"}
+        row.update({k: result.get(k, 0 if k == "bytes_freed" else []) for k in _PRUNED_KEYS})
+        if self.recorder:
+            self.recorder.write(row)
+        self._log(_retention_line(row))
+
     # -- lifecycle
     def start(self) -> None:
         self._started_at = self.clock()
@@ -1248,6 +1326,7 @@ class Daemon:
         self._started = True
         self._start_guard()
         self._start_shipper()
+        self._start_retention()  # after today's start row and the postmortem scan
         cfg = self.opts.config
         if cfg is not None:
             self._fenced(
@@ -1276,6 +1355,7 @@ class Daemon:
 
     def shutdown(self) -> None:
         self._stop_guard()
+        self._stop_retention()
         if self.cycler:
             self.cycler.stop()
         if self.capper:
@@ -1346,7 +1426,7 @@ def previous_boot_postmortem(
     parse per line. When the previous run's start row is older than those files, its boot
     is "unknown" and the kernel boot time decides whether a reboot came in between."""
     scan = _PostmortemScan(this_boot, pid)
-    for path in sorted(Path(directory).glob("*.jsonl"))[-files:]:
+    for path in _newest_day_files(Path(directory), files):
         if scan.ours:
             break
         scan.scan_file(path)
@@ -1374,16 +1454,16 @@ class _PostmortemScan:
         self.ours = False
 
     def scan_file(self, path: Path) -> None:
-        """Feed one day file; stops (and sets ``ours``) at this run's own start row."""
+        """Feed one day file, raw or gzipped; stops (and sets ``ours``) at this run's own
+        start row. A truncated or corrupt ``.gz`` keeps what was read before the damage."""
         try:
-            fh = open(path, encoding="utf-8")
-        except OSError:
+            with open_day(path) as fh:
+                for line in fh:
+                    if self._feed(line):
+                        self.ours = True  # this run's own start: everything after is ours
+                        return
+        except (OSError, EOFError, zlib.error):
             return
-        with fh:
-            for line in fh:
-                if self._feed(line):
-                    self.ours = True  # this run's own start: everything after is ours
-                    return
 
     def _feed(self, line: str) -> bool:
         """Take one line; True at this run's own start row."""
@@ -1416,6 +1496,15 @@ class _PostmortemScan:
         return False
 
 
+def _newest_day_files(directory: Path, files: int) -> list[Path]:
+    """The newest ``files`` day files, raw or gzipped, ordered by date; one file per day
+    (the raw one when a crash left both, since the raw file is removed last)."""
+    by_day: dict[str, Path] = {}
+    for path in _day_files(directory):  # raw sorts before .gz within a day
+        by_day.setdefault(path.name.split(".", 1)[0], path)
+    return [by_day[day] for day in sorted(by_day)][-files:] if files > 0 else []
+
+
 def _tick_tail(ticks: deque) -> list[dict]:
     """The raw tick lines parsed: the dicts with a temperature and a numeric time."""
     tail = []
@@ -1442,3 +1531,88 @@ def _mhz(v: int | None) -> str:
 
 def _is_capped(c: Container) -> bool:
     return c.role == "batch" or c.cpu_cap
+
+
+# -- record retention ---------------------------------------------------------------------
+
+_PRUNED_KEYS = ("deleted", "compressed", "bytes_freed", "errors", "warnings")
+
+
+def _utc_date(t: float):
+    return datetime.fromtimestamp(t, timezone.utc).date()
+
+
+def _retention_changed(result: dict | None) -> bool:
+    """Whether a pass is worth a row: it removed or compressed something, or had a problem."""
+    return bool(result) and any(result.get(k) for k in _PRUNED_KEYS)
+
+
+def _retention_line(row: dict) -> str:
+    line = (
+        f"retention: records_pruned deleted={len(row['deleted'])} "
+        f"compressed={len(row['compressed'])} freed={row['bytes_freed']} bytes "
+        f"errors={len(row['errors'])}"
+    )
+    problems = [*row["warnings"], *row["errors"]]
+    return line + (f" ({'; '.join(str(p) for p in problems)})" if problems else "")
+
+
+class RetentionThread:
+    """Runs :func:`heat_governor.retention.prune_pass` on its own daemon thread: once when
+    started, then once each time the UTC date of ``clock()`` changes. Never writes records:
+    each pass's ``(now, result, error)`` goes on :attr:`results` for the tick loop to write.
+    ``keep_days`` is called at every pass, so a live reload applies to the next one."""
+
+    def __init__(
+        self,
+        records_dir: Path,
+        keep_days: Callable[[], int],
+        clock: Callable[[], float],
+        *,
+        prune: Callable[..., dict] = retention.prune_pass,
+        check_s: float = RETENTION_CHECK_S,
+    ) -> None:
+        self.records_dir = records_dir
+        self.keep_days = keep_days
+        self.clock = clock
+        self.prune = prune
+        self.check_s = check_s
+        self.results: queue.SimpleQueue = queue.SimpleQueue()
+        self.thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._day = None
+
+    def start(self) -> None:
+        self.thread = threading.Thread(
+            target=self._run, name="heat-governor-retention", daemon=True
+        )
+        self.thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self._stop.set()
+        if self.thread is not None:
+            self.thread.join(timeout)
+
+    def _run(self) -> None:
+        self._pass()
+        while not self._stop.wait(self.check_s):
+            if self._new_day():
+                self._pass()
+
+    def _new_day(self) -> bool:
+        try:
+            return _utc_date(self.clock()) != self._day
+        except Exception:  # noqa: BLE001 - a bad clock reading waits for the next look
+            return False
+
+    def _pass(self) -> None:
+        """One pass; every exception becomes an error item, the thread keeps running."""
+        now = None
+        try:
+            now = self.clock()
+            self._day = _utc_date(now)
+            result = self.prune(self.records_dir, now, self.keep_days())
+        except Exception as exc:  # noqa: BLE001 - retention must never stop the daemon
+            self.results.put((now if now is not None else time.time(), None, repr(exc)))
+            return
+        self.results.put((now, result, None))
