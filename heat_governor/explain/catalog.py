@@ -444,7 +444,8 @@ Sections: `platform`, `[profile]` (warm_c, hot_c, crit_c, hysteresis_c,
 dwell_s, lookahead_s, rate_window_s, duty_curve, duty_period_s,
 duty_decay_per_s, cpu_bands, ramp_s, gpu_clock_bands, concurrency, zones,
 gpu), `[daemon]` (apply, poll_s, listen, state, data_dir, use_labels,
-discover_every_s, record, fsync, reload, gpu_clock, gpu_ceiling_mhz), `[[containers]]`
+discover_every_s, record, fsync, reload, gpu_clock, gpu_ceiling_mhz, keep_days, log_max_mib),
+`[[containers]]`
 (name, role = batch|serving, cpu_cap) and `[[units]]` (name of a systemd
 user unit, plus optional warm / hot / critical CPU counts; without them the
 platform default: spark 8 / 4 / 2, declared, unmeasured; or `mode =
