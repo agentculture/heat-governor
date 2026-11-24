@@ -8,6 +8,8 @@ CPU caps on the containers it governs). Everything else is read-only.
 from __future__ import annotations
 
 import argparse
+import gzip
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -228,11 +230,42 @@ class _Pick:
         return self.dcfg.get(key, default)
 
 
-def _file_logger(log_path: Path):
+def _rotate_log(log_path: Path) -> None:
+    """Stream-gzip ``log_path`` to ``<log>.1.gz`` (replacing it), then remove the log."""
+    gz = log_path.with_name(log_path.name + ".1.gz")
+    tmp = gz.with_name(gz.name + ".tmp")
+    try:
+        with open(log_path, "rb") as src, gzip.open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst, 64 * 1024)
+        os.replace(tmp, gz)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    log_path.unlink()
+
+
+def _file_logger(log_path: Path, max_bytes=None):
+    """Return a ``log(line)`` that tees to stderr and appends to ``log_path``.
+
+    ``max_bytes`` is an int, or a zero-arg callable returning one (so the cap can follow a
+    config reload); ``None`` disables rotation. Before a line is appended, a log at or over
+    the cap is gzipped to ``<log>.1.gz`` (one generation, replaced on the next rotation) and
+    removed, so the file never exceeds the cap plus one line. A rotation failure is written
+    to stderr and the line is still appended.
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     def log(line: str) -> None:
         sys.stderr.write(line + "\n")
+        cap = max_bytes() if callable(max_bytes) else max_bytes
+        if cap is not None:
+            try:
+                if log_path.stat().st_size >= cap:
+                    _rotate_log(log_path)
+            except FileNotFoundError:
+                pass
+            except Exception as exc:  # noqa: BLE001 - logging must continue
+                sys.stderr.write(f"governor.log rotation failed: {exc}\n")
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
@@ -264,7 +297,10 @@ def _run_options(args: argparse.Namespace, cfg):
         pick.cli_set.add("apply")
     data_s = pick("data_dir", "data_dir", None)
     data = Path(data_s) if data_s else default_data_dir()
-    log = _file_logger(Path(args.log) if args.log else data / "governor.log")
+    log = _file_logger(
+        Path(args.log) if args.log else data / "governor.log",
+        lambda: int(cfg.log_max_mib * 1024 * 1024),
+    )
     state_s = pick("state", "state", None)
     gpu_clock = pick("gpu_clock", "gpu_clock", False)
     return Options(
