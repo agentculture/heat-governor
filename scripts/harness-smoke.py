@@ -154,6 +154,15 @@ STEWARD_WAIVED_PORTABILITY_PATHS = frozenset(
         # `devague summary` renders them (c29, c41). Same class, same no-hand-edit rule.
         ".devague/deliveries/boundaries-tab.json",
         "docs/deliveries/2026-11-15-boundaries-tab.md",
+        # Generated devague records of the 2026-11-24 record-retention frame and their exports:
+        # confirmed claims, honesty conditions, obligations and task instructions say tests
+        # must never touch the real per-user state dir, naming it. Rewording would reopen dozens
+        # of confirmed items and devague forbids hand-editing its state. Same class, same rule.
+        ".devague/frames/record-retention.json",
+        ".devague/plans/record-retention.json",
+        "docs/specs/2026-11-24-record-retention.md",
+        "docs/plans/2026-11-24-record-retention.md",
+        "docs/plans/2026-11-24-record-retention-split.md",
     }
 )
 

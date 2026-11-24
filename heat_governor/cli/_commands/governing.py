@@ -8,6 +8,8 @@ CPU caps on the containers it governs). Everything else is read-only.
 from __future__ import annotations
 
 import argparse
+import gzip
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -228,15 +230,51 @@ class _Pick:
         return self.dcfg.get(key, default)
 
 
-def _file_logger(log_path: Path):
+def _rotate_log(log_path: Path) -> None:
+    """Stream-gzip ``log_path`` to ``<log>.1.gz`` (replacing it), then remove the log."""
+    gz = log_path.with_name(log_path.name + ".1.gz")
+    tmp = gz.with_name(gz.name + ".tmp")
+    try:
+        with open(log_path, "rb") as src, gzip.open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst, 64 * 1024)
+        os.replace(tmp, gz)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    log_path.unlink()
+
+
+def _file_logger(log_path: Path, max_bytes=None):
+    """Return a ``log(line)`` that tees to stderr and appends to ``log_path``.
+
+    ``max_bytes`` is an int, or a zero-arg callable returning one (so the cap can follow a
+    config reload); ``None`` disables rotation. Before a line is appended, a log at or over
+    the cap is gzipped to ``<log>.1.gz`` (one generation, replaced on the next rotation) and
+    removed, so the file never exceeds the cap plus one line. A rotation failure is written
+    to stderr and the line is still appended.
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     def log(line: str) -> None:
         sys.stderr.write(line + "\n")
+        _maybe_rotate(log_path, max_bytes)
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
     return log
+
+
+def _maybe_rotate(log_path: Path, max_bytes) -> None:
+    """Rotate ``log_path`` when it is at or over the cap; never raises (reading the cap
+    included: a bad cap is reported on stderr and the line is still appended)."""
+    try:
+        cap = max_bytes() if callable(max_bytes) else max_bytes
+        if cap is not None and log_path.stat().st_size >= cap:
+            _rotate_log(log_path)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:  # noqa: BLE001 - logging must continue
+        sys.stderr.write(f"governor.log rotation failed: {exc}\n")
 
 
 def _docker(args: argparse.Namespace, cfg):
@@ -253,6 +291,17 @@ def _docker(args: argparse.Namespace, cfg):
     return docker
 
 
+def _log_cap_reader(built: list, cfg):
+    """The governor.log cap in bytes, read on every line from the live ``Options.config``
+    (``built`` holds the Options once made; a reload replaces its ``config``), else ``cfg``."""
+
+    def log_cap() -> int:
+        current = (built[0].config if built else None) or cfg
+        return int(current.log_max_mib * 1024 * 1024)
+
+    return log_cap
+
+
 def _run_options(args: argparse.Namespace, cfg):
     from heat_governor.daemon import Options, memory_rule, ship_rule
 
@@ -264,10 +313,13 @@ def _run_options(args: argparse.Namespace, cfg):
         pick.cli_set.add("apply")
     data_s = pick("data_dir", "data_dir", None)
     data = Path(data_s) if data_s else default_data_dir()
-    log = _file_logger(Path(args.log) if args.log else data / "governor.log")
+    built: list = []  # the Options below; a live reload replaces its .config
+    log = _file_logger(
+        Path(args.log) if args.log else data / "governor.log", _log_cap_reader(built, cfg)
+    )
     state_s = pick("state", "state", None)
     gpu_clock = pick("gpu_clock", "gpu_clock", False)
-    return Options(
+    opts = Options(
         apply=apply,
         poll_s=float(pick("poll", "poll_s", 1.0)),
         state_path=Path(state_s) if state_s else default_state_path(),
@@ -294,6 +346,8 @@ def _run_options(args: argparse.Namespace, cfg):
         fsync=bool(dcfg.get("fsync", True)),
         log=log,
     )
+    built.append(opts)
+    return opts
 
 
 def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:

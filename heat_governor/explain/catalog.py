@@ -37,6 +37,7 @@ declared from their trip points, unmeasured), and a generic fallback.
   `add`, `set`, `rm`, `apply`, `preview`).
 - `heat-governor ship ...` -- S3 shipping of events and black boxes (`overview`, `test`,
   `fetch`).
+- `heat-governor records ...` -- the daily records and their retention (`overview`, `prune`).
 
 ## Agent verbs
 
@@ -352,7 +353,7 @@ written once. Far over it (above `max_mib` x (1 + `act_over_pct`/100), default
     heat-governor memory status --json
     heat-governor memory top --n 5
     heat-governor memory replay tests/data/memory-2026-11-14.csv
-    heat-governor memory replay ~/.local/share/heat-governor/records/x.jsonl --total-mib 122000
+    heat-governor memory replay ~/.local/state/heat-governor/records/x.jsonl --total-mib 122000
 
 Exit codes: 0 ok, 1 bad flag or unreadable file, 2 no daemon state or /proc.
 """
@@ -391,6 +392,33 @@ three exit 1. Environment errors exit 2.
     heat-governor boundaries list --json
     heat-governor boundaries add --name hog --comm hog --max-mib 8192
     echo '{"rule": {"comm": ["x"], "name": "x", "max_mib": 99}}' | heat-governor boundaries preview
+"""
+
+_RECORDS = """\
+# heat-governor records
+
+The daemon writes one `YYYYMMDD.jsonl` per UTC day into `<data_dir>/records`
+(default `~/.local/state/heat-governor/records`). Retention keeps today plus
+`[daemon] keep_days` complete earlier days (default 7): raw days older than yesterday
+are gzipped to `.jsonl.gz`, days past the window are deleted. The daemon runs it daily.
+
+- `records overview [--config PATH] [--data-dir DIR]` -- what retention does, the
+  effective keep_days, the records directory and an inventory (raw and gz day files,
+  bytes). Read-only. The bare `records` prints the same.
+- `records prune [--keep-days N] [--dry-run] [--config PATH] [--data-dir DIR]` -- run
+  one pass now. Prints one line per file, then bytes freed. `--dry-run` changes nothing
+  and lists exactly what a real pass would do (its byte count is a lower bound). If the
+  clock looks wrong (newest day over a day old, or a future-dated file) nothing is
+  changed and a warning goes to stderr (and the `warnings` key under `--json`).
+
+    heat-governor records prune --dry-run
+    heat-governor records prune --keep-days 3 --json
+
+`--json` prints `deleted`, `compressed`, `bytes_freed`, `errors`, `warnings`, plus
+`dry_run`, `keep_days` and `records_dir`.
+
+Exit codes: 0 ok, 1 bad `--keep-days` (< 1) or config, 2 records directory missing or
+unreadable, or a file failed (the result is printed first).
 """
 
 _SHIP = """\
@@ -444,7 +472,8 @@ Sections: `platform`, `[profile]` (warm_c, hot_c, crit_c, hysteresis_c,
 dwell_s, lookahead_s, rate_window_s, duty_curve, duty_period_s,
 duty_decay_per_s, cpu_bands, ramp_s, gpu_clock_bands, concurrency, zones,
 gpu), `[daemon]` (apply, poll_s, listen, state, data_dir, use_labels,
-discover_every_s, record, fsync, reload, gpu_clock, gpu_ceiling_mhz), `[[containers]]`
+discover_every_s, record, fsync, reload, gpu_clock, gpu_ceiling_mhz, keep_days, log_max_mib),
+`[[containers]]`
 (name, role = batch|serving, cpu_cap) and `[[units]]` (name of a systemd
 user unit, plus optional warm / hot / critical CPU counts; without them the
 platform default: spark 8 / 4 / 2, declared, unmeasured; or `mode =
@@ -555,6 +584,9 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("boundaries", "rm"): _BOUNDARIES,
     ("boundaries", "apply"): _BOUNDARIES,
     ("boundaries", "preview"): _BOUNDARIES,
+    ("records",): _RECORDS,
+    ("records", "overview"): _RECORDS,
+    ("records", "prune"): _RECORDS,
     ("ship",): _SHIP,
     ("ship", "overview"): _SHIP,
     ("ship", "test"): _SHIP,

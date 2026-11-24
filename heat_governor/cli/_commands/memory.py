@@ -2,7 +2,7 @@
 
 ``status`` reads the running daemon's published state (``mem_guard``), ``top`` is a one-shot
 list of the biggest processes by anonymous memory, and ``replay`` runs the memory trigger over
-a recording (the fixture CSV or a records JSONL) to show when it would have fired.
+a recording (the fixture CSV or a records JSONL, raw or .jsonl.gz) to show when it would have fired.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from heat_governor.cli._commands.overview import emit_overview
 from heat_governor.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from heat_governor.cli._output import emit_result
 from heat_governor.config import MemoryRule
+from heat_governor.recorder import open_day
 
 _JSON_HELP = "Emit structured JSON."
 _NEEDLE = '"mem:avail_mib"'
@@ -172,7 +173,7 @@ def _header_total(line: str) -> float | None:
 
 
 def _jsonl_rows(path: Path) -> Iterator[tuple[float, float]]:
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    with open_day(path, errors="replace") as fh:
         for line in fh:
             if _NEEDLE not in line:  # cheap pre-filter: most lines are not memory ticks
                 continue
@@ -186,7 +187,9 @@ def _jsonl_rows(path: Path) -> Iterator[tuple[float, float]]:
 def _is_csv(path: Path) -> bool:
     if path.suffix.lower() == ".csv":
         return True
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    if path.suffix.lower() == ".gz":  # a compressed day is always records JSONL
+        return False
+    with open_day(path, errors="replace") as fh:
         first = fh.readline()
     return first.startswith(("#", "t,"))
 
@@ -327,7 +330,7 @@ def cmd_overview(args: argparse.Namespace) -> int:
                     "memory status [--source S] -- the running daemon's memory guard: action, "
                     "armed, MemAvailable, last kill, kills in the last hour",
                     "memory top [--n N] -- the biggest processes by anonymous memory, now",
-                    "memory replay <records.jsonl|csv> [--total-mib N] [--floor-pct P] "
+                    "memory replay <records.jsonl[.gz]|csv> [--total-mib N] [--floor-pct P] "
                     "[--horizon-s S] [--soft-pct P] [--window-s S] -- when the trigger would "
                     "have fired over a recording",
                 ],
@@ -378,7 +381,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     tp.set_defaults(func=cmd_top)
 
     rp = noun.add_parser("replay", help="When the memory trigger would have fired.")
-    rp.add_argument("path", help="records .jsonl (system['mem:avail_mib']) or a t,avail CSV.")
+    rp.add_argument(
+        "path",
+        help="records .jsonl or .jsonl.gz (system['mem:avail_mib']) or a t,avail CSV.",
+    )
     rp.add_argument("--total-mib", type=float, help="MemTotal in MiB (records do not carry it).")
     rp.add_argument("--floor-pct", type=float, help="Floor as %% of RAM (default 5).")
     rp.add_argument("--horizon-s", type=float, help="Act if the floor is this close (default 10).")

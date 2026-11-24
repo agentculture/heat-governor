@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import gzip
 import json
 import math
 import subprocess  # nosec B404
@@ -253,7 +254,8 @@ def test_script_is_plain_stdlib_and_has_no_single_quotes():
     imports = [ln for ln in HISTORY_SCRIPT.splitlines() if ln.startswith(("import", "from"))]
     assert imports
     assert all(
-        set(ln.replace(",", " ").split()[1:]) <= {"json", "os", "sys", "time", "datetime"}
+        set(ln.replace(",", " ").split()[1:])
+        <= {"json", "os", "sys", "time", "datetime", "gzip", "zlib"}
         or ln.startswith("from datetime import")
         for ln in imports
     )
@@ -265,3 +267,65 @@ def test_run_local_uses_the_same_script(home, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(home))
     out = history.run_local(T0, T0 + 100, 10)
     assert [x["temp_c"] for x in out["samples"]] == [66.0]
+
+
+def _long_fixture(rd: Path) -> int:
+    span = 3 * DAY
+    write(
+        rd,
+        [rec(T0 + i * 2.0, 40.0 + (i % 50) * 0.1, "cool", mem=50.0) for i in range(int(span / 2))],
+    )
+    return span
+
+
+def test_gzipped_day_gives_the_same_samples_and_stride(home, tmp_path):
+    raw_home = home
+    gz_home = tmp_path / "xdg_gz"
+    span = _long_fixture(records(raw_home))
+    gz_rd = records(gz_home)
+    gz_rd.mkdir(parents=True)
+    for f in records(raw_home).glob("*.jsonl"):
+        (gz_rd / (f.name + ".gz")).write_bytes(gzip.compress(f.read_bytes()))
+    raw = run(raw_home, T0, T0 + span, 300)
+    gz = run(gz_home, T0, T0 + span, 300)
+    assert raw["stride"] > 1
+    assert gz["stride"] == raw["stride"]
+    assert gz["samples"] == raw["samples"]
+    assert gz["lines_read"] == raw["lines_read"]
+    assert gz["parsed"] == raw["parsed"]
+    assert gz["files"] == [n + ".gz" for n in raw["files"]]
+    # short window too
+    assert run(gz_home, T0, T0 + 3600, 50)["samples"] == run(raw_home, T0, T0 + 3600, 50)["samples"]
+
+
+def test_isize_trailer_equals_the_raw_size(home, tmp_path):
+    _long_fixture(records(home))
+    biggest = max(records(home).glob("*.jsonl"), key=lambda f: f.stat().st_size)
+    gz = tmp_path / "big.jsonl.gz"
+    gz.write_bytes(gzip.compress(biggest.read_bytes()))
+    assert int.from_bytes(gz.read_bytes()[-4:], "little") == biggest.stat().st_size
+    assert "ISIZE" in HISTORY_SCRIPT or "little" in HISTORY_SCRIPT
+
+
+def test_raw_day_wins_over_a_gzipped_twin_and_bad_gz_is_skipped(home):
+    rd = records(home)
+    write(rd, [rec(T0 + 10, 66.0, "warm")])
+    (rd / (day_file(T0) + ".gz")).write_bytes(gzip.compress(b'{"t":11,"temp_c":1}\n'))
+    nxt = day_file(T0 + DAY) + ".gz"
+    (rd / nxt).write_bytes(b"not gzip at all")
+    out = run(home, T0, T0 + DAY + 100, 10)
+    assert [x["temp_c"] for x in out["samples"]] == [66.0]
+    assert out["files"][0] == day_file(T0)
+
+
+def test_a_gz_with_a_corrupt_deflate_body_does_not_fail_the_window(home):
+    """Review of PR 23, S2: zlib.error from a corrupt deflate body skips that day."""
+    rd = records(home)
+    write(rd, [rec(T0 + 10, 66.0, "warm")])
+    good = gzip.compress(
+        ("".join(json.dumps(rec(T0 + DAY + i, 50.0, "cool")) + "\n" for i in range(200))).encode()
+    )
+    corrupt = good[:10] + bytes(b ^ 0x55 for b in good[10:60]) + good[60:]
+    (rd / (day_file(T0 + DAY) + ".gz")).write_bytes(corrupt)
+    out = run(home, T0, T0 + 2 * DAY, 10)
+    assert 66.0 in [x["temp_c"] for x in out["samples"]]
