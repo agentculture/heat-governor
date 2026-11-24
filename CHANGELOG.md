@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-11-25
+
+### Added
+
+- Record retention (spec docs/specs/2026-11-24-record-retention.md): a daemon thread at start and each UTC date change keeps today plus [daemon] keep_days (default 7) complete earlier days, gzips days older than yesterday to YYYYMMDD.jsonl.gz, deletes older days and writes a records_pruned event; unit-tested, not yet run on a live box (planned)
+- heat-governor records overview|prune [--dry-run] [--keep-days N]
+- [daemon] log_max_mib (default 10): governor.log rotates to governor.log.1.gz, following a live reload
+
+### Changed
+
+- report, sensors, replay, memory replay, the postmortem and the dashboard trend history read .jsonl and .jsonl.gz day files alike
+- docs and harness files (CLAUDE.md, AGENTS.override.md, AGENTS.colleague.md, QWEN.md, README.md, docs/integration.md) describe retention
+
+### Fixed
+
+- explain records path names ~/.local/state/heat-governor/records
+
 ## [0.19.2] - 2026-11-24
 
 ### Added
