@@ -72,6 +72,7 @@ def _build_parser() -> argparse.ArgumentParser:
     from heat_governor.cli._commands import memory as _memory
     from heat_governor.cli._commands import mesh as _mesh
     from heat_governor.cli._commands import overview as _overview_cmd
+    from heat_governor.cli._commands import records as _records
     from heat_governor.cli._commands import ship as _ship
     from heat_governor.cli._commands import tuning as _tuning
     from heat_governor.cli._commands import whoami as _whoami_cmd
@@ -101,6 +102,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _memory.register(sub)
     _boundaries.register(sub)
     _ship.register(sub)
+    _records.register(sub)
     _mcp.register(sub)
     # Register your own noun groups here:
     #   from heat_governor.cli._commands import my_noun as _my_noun_group
