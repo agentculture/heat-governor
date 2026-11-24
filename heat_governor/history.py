@@ -57,7 +57,7 @@ LEVELS = ("cool", "warm", "hot", "critical")
 CONCURRENCY = (1.0, 0.5, 0.0, 0.0)
 PYTHON = sys.executable
 
-HISTORY_SCRIPT = """import json, os, sys, time
+HISTORY_SCRIPT = """import gzip, json, os, sys, time
 from datetime import datetime, timedelta, timezone
 LEVELS = %s
 CF = %r
@@ -80,62 +80,68 @@ def main(argv):
         p = os.path.join(rdir, day.strftime("%%Y%%m%%d") + ".jsonl")
         if os.path.isfile(p):
             paths.append(p)
+        elif os.path.isfile(p + ".gz"):
+            paths.append(p + ".gz")
         day += timedelta(days=1)
     stride = 1
     if span > LONG and paths:
-        size = sum(os.path.getsize(p) for p in paths)
-        with open(paths[0], "rb") as fh:
-            head = fh.read(65536)
+        size = 0
+        for p in paths:
+            size += usize(p)
+        try:
+            with opener(paths[0]) as fh:
+                head = fh.read(65536)
+        except (OSError, EOFError):
+            head = b""
         avg = len(head) / max(1, head.count(b"\\n"))
         stride = max(1, -(-int(size / max(avg, 1.0)) // MAX_PARSED))
     width = span / n
     buckets = {}
     lines = parsed = ticks = 0
     for p in paths:
-        with open(p, "r", encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                lines += 1
-                if lines %% 4096 == 0 and time.monotonic() - start > DEADLINE:
-                    raise SystemExit(3)
-                if "\\"temp_c\\"" not in line:
-                    continue
-                if line.startswith("{\\"t\\":"):
-                    end = line.find(",", 5)
-                    try:
-                        t = float(line[5:end])
-                    except ValueError:
-                        t = None
-                    if t is not None and not since <= t <= until:
-                        continue
-                ticks += 1
-                if (ticks - 1) %% stride:
-                    continue
+        for line in rows(p):
+            lines += 1
+            if lines %% 4096 == 0 and time.monotonic() - start > DEADLINE:
+                raise SystemExit(3)
+            if "\\"temp_c\\"" not in line:
+                continue
+            if line.startswith("{\\"t\\":"):
+                end = line.find(",", 5)
                 try:
-                    r = json.loads(line)
+                    t = float(line[5:end])
                 except ValueError:
+                    t = None
+                if t is not None and not since <= t <= until:
                     continue
-                parsed += 1
-                if not isinstance(r, dict) or "event" in r:
-                    continue
-                t = r.get("t")
-                if not isinstance(t, (int, float)) or not since <= t <= until:
-                    continue
-                k = min(n - 1, int((t - since) / width))
-                temp = num(r.get("temp_c"))
-                gpu = r.get("gpu")
-                gpu = num(gpu.get("temp_c")) if isinstance(gpu, dict) else None
-                system = r.get("system")
-                mem = num(system.get("mem:used_pct")) if isinstance(system, dict) else None
-                lvl = LEVELS.index(r["level"]) if r.get("level") in LEVELS else None
-                b = buckets.get(k)
-                if b is None:
-                    buckets[k] = [t, temp, gpu, lvl, mem]
-                    continue
-                b[0] = max(b[0], t)
-                b[1] = top(b[1], temp)
-                b[2] = top(b[2], gpu)
-                b[3] = top(b[3], lvl)
-                b[4] = top(b[4], mem)
+            ticks += 1
+            if (ticks - 1) %% stride:
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            parsed += 1
+            if not isinstance(r, dict) or "event" in r:
+                continue
+            t = r.get("t")
+            if not isinstance(t, (int, float)) or not since <= t <= until:
+                continue
+            k = min(n - 1, int((t - since) / width))
+            temp = num(r.get("temp_c"))
+            gpu = r.get("gpu")
+            gpu = num(gpu.get("temp_c")) if isinstance(gpu, dict) else None
+            system = r.get("system")
+            mem = num(system.get("mem:used_pct")) if isinstance(system, dict) else None
+            lvl = LEVELS.index(r["level"]) if r.get("level") in LEVELS else None
+            b = buckets.get(k)
+            if b is None:
+                buckets[k] = [t, temp, gpu, lvl, mem]
+                continue
+            b[0] = max(b[0], t)
+            b[1] = top(b[1], temp)
+            b[2] = top(b[2], gpu)
+            b[3] = top(b[3], lvl)
+            b[4] = top(b[4], mem)
     samples = []
     for k in sorted(buckets):
         t, temp, gpu, lvl, mem = buckets[k]
@@ -146,6 +152,29 @@ def main(argv):
     doc = {"schema": 1, "samples": samples, "lines_read": lines, "parsed": parsed,
            "stride": stride, "files": [os.path.basename(p) for p in paths]}
     sys.stdout.write(json.dumps(doc, separators=(",", ":")))
+def opener(p, text=False):
+    if text:
+        kw = {"encoding": "utf-8", "errors": "replace"}
+        return (gzip.open if p.endswith(".gz") else open)(p, "rt", **kw)
+    return (gzip.open if p.endswith(".gz") else open)(p, "rb")
+def rows(p):
+    try:
+        with opener(p, True) as fh:
+            for line in fh:
+                yield line
+    except (OSError, EOFError):
+        return
+def usize(p):
+    try:
+        if p.endswith(".gz"):
+            with open(p, "rb") as fh:
+                if os.path.getsize(p) < 4:
+                    return 0
+                fh.seek(-4, 2)
+                return int.from_bytes(fh.read(4), "little")
+        return os.path.getsize(p)
+    except OSError:
+        return 0
 def num(v):
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
