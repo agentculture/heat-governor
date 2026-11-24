@@ -148,6 +148,12 @@ STEWARD_WAIVED_PORTABILITY_PATHS = frozenset(
         "docs/specs/2026-11-15-boundaries-tab.md",
         "docs/plans/2026-11-15-boundaries-tab.md",
         "docs/plans/2026-11-15-boundaries-tab-split.md",
+        # Its delivery ledger and delivery summary (validate-delivery and summarize-delivery,
+        # 2026-11-17): evidence records copy the claims' text verbatim as their contract
+        # (c29 names the per-user binary directory) and the summary quotes the claims as
+        # `devague summary` renders them (c29, c41). Same class, same no-hand-edit rule.
+        ".devague/deliveries/boundaries-tab.json",
+        "docs/deliveries/2026-11-15-boundaries-tab.md",
     }
 )
 
