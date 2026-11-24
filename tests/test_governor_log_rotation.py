@@ -72,7 +72,8 @@ def test_rotation_failure_goes_to_stderr_and_logging_continues(tmp_path, capsys,
     monkeypatch.setattr(os, "replace", boom)
     log("b" * 29)
     err = capsys.readouterr().err
-    assert "rotat" in err and "disk says no" in err
+    assert "rotat" in err
+    assert "disk says no" in err
     assert log_path.read_text().endswith("b" * 29 + "\n")
     assert not (tmp_path / "governor.log.1.gz.tmp").exists()
     log("c" * 29)

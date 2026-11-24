@@ -30,7 +30,8 @@ def test_replay_gz_matches_raw(tmp_path, capsys):
     rc_raw, out_raw = _replay(capsys, raw)
     rc_gz, out_gz = _replay(capsys, gz)
 
-    assert rc_raw == 0 and rc_gz == 0
+    assert rc_raw == 0
+    assert rc_gz == 0
     d_raw, d_gz = json.loads(out_raw), json.loads(out_gz)
     for d in (d_raw, d_gz):
         d.pop("file")

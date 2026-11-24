@@ -540,11 +540,16 @@ def _validate_daemon(dmn: dict, problems: list[str]) -> None:
     ceiling = dmn.get("gpu_ceiling_mhz")
     if _is_num(ceiling) and not 100 <= ceiling <= 5000:
         problems.append("daemon.gpu_ceiling_mhz must be > 0, a whole MHz within 100-5000")
+    _validate_retention(dmn, problems)
+
+
+def _validate_retention(dmn: dict, problems: list[str]) -> None:
+    """``[daemon] keep_days`` and ``log_max_mib`` ranges (their types are checked above)."""
     keep = dmn.get("keep_days")
     if isinstance(keep, int) and not isinstance(keep, bool) and keep < 1:
         problems.append("daemon.keep_days must be a whole number of days, at least 1")
     log_max = dmn.get("log_max_mib")
-    if _is_num(log_max) and not log_max > 0:
+    if _is_num(log_max) and log_max <= 0:
         problems.append("daemon.log_max_mib must be greater than 0")
 
 

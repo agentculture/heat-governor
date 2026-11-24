@@ -101,5 +101,6 @@ def test_truncated_gz_keeps_earlier_rows(tmp_path):
     _store(tmp_path, {"20261112": DAYS["20261112"]}, set())
     rows = list(recorder.iter_records(tmp_path))
     ids = [r["boot_id"] for r in rows if "boot_id" in r]
-    assert ids[0] == "boot-a" and ids[-1] == "boot-c"
+    assert ids[0] == "boot-a"
+    assert ids[-1] == "boot-c"
     assert len(rows) >= 60

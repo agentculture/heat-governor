@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -53,7 +52,8 @@ def test_dry_run_changes_nothing_and_matches_real(capsys, data):
     assert rc == 0
     dry = json.loads(out)
     assert _listing(data) == before
-    assert dry["deleted"] and dry["compressed"]
+    assert dry["deleted"]
+    assert dry["compressed"]
     rc, out, _ = run(capsys, "records", "prune", "--data-dir", str(data), "--json")
     assert rc == 0
     real = json.loads(out)
@@ -62,7 +62,8 @@ def test_dry_run_changes_nothing_and_matches_real(capsys, data):
     names = {n for n, _ in _listing(data)}
     assert not names & set(real["deleted"])
     for raw in real["compressed"]:
-        assert raw not in names and raw + ".gz" in names
+        assert raw not in names
+        assert raw + ".gz" in names
 
 
 def test_json_matches_prune_pass(capsys, data):
@@ -72,7 +73,8 @@ def test_json_matches_prune_pass(capsys, data):
     got = json.loads(out)
     for key in ("deleted", "compressed", "bytes_freed", "errors", "warnings"):
         assert got[key] == expect[key]
-    assert got["dry_run"] is True and got["keep_days"] == 7
+    assert got["dry_run"] is True
+    assert got["keep_days"] == 7
 
 
 def test_text_output_dry_run(capsys, data):
@@ -91,7 +93,8 @@ def test_keep_days_from_config_and_override(capsys, data, tmp_path):
         "--data-dir", str(data),
     )  # fmt: skip
     got = json.loads(out)
-    assert got["keep_days"] == 40 and got["deleted"] == []
+    assert got["keep_days"] == 40
+    assert got["deleted"] == []
     rc, out, _ = run(
         capsys, "records", "prune", "--dry-run", "--json", "--config", str(cfg),
         "--keep-days", "5", "--data-dir", str(data),
@@ -107,7 +110,9 @@ def test_bad_keep_days_exit_1(capsys, data, bad):
 
 def test_missing_records_dir_exit_2(capsys, tmp_path):
     rc, out, err = run(capsys, "records", "prune", "--data-dir", str(tmp_path / "nope"))
-    assert rc == 2 and out == "" and "error:" in err
+    assert rc == 2
+    assert out == ""
+    assert "error:" in err
 
 
 def test_records_dir_is_a_file_exit_2(capsys, tmp_path):
@@ -122,7 +127,8 @@ def test_stale_clock_warning_on_stderr(capsys, tmp_path):
     rec.mkdir(parents=True)
     (rec / f"{_day(40)}.jsonl").write_text("x\n")
     rc, out, err = run(capsys, "records", "prune", "--data-dir", str(tmp_path / "d"))
-    assert rc == 0 and (rec / f"{_day(40)}.jsonl").exists()
+    assert rc == 0
+    assert (rec / f"{_day(40)}.jsonl").exists()
     assert "warning" in err
     rc, out, _ = run(capsys, "records", "prune", "--json", "--data-dir", str(tmp_path / "d"))
     assert json.loads(out)["warnings"]
@@ -142,17 +148,21 @@ def test_per_file_error_exit_2_after_result(capsys, data, monkeypatch):
     assert json.loads(out)["errors"]
 
 
-def test_overview_and_bare_noun(capsys, data):
-    os.environ["XDG_STATE_HOME"] = str(data.parent / "xdg")
+def test_overview_and_bare_noun(capsys, data, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(data.parent / "xdg"))
     for argv in (["records"], ["records", "overview"]):
         rc, out, _ = run(capsys, *argv)
-        assert rc == 0 and "prune" in out and "keep" in out
+        assert rc == 0
+        assert "prune" in out
+        assert "keep" in out
     rc, out, _ = run(capsys, "records", "overview", "--data-dir", str(data), "--json")
     assert rc == 0
     doc = json.loads(out)
     assert json.dumps(doc).count("records") >= 1
     text = json.dumps(doc)
-    assert "6 raw" in text and "1 gz" in text and str(data / "records") in text
+    assert "6 raw" in text
+    assert "1 gz" in text
+    assert str(data / "records") in text
 
 
 def test_overview_read_only(capsys, data):
@@ -165,8 +175,10 @@ def test_explain_and_learn(capsys):
     for p in (("records",), ("records", "overview"), ("records", "prune")):
         assert p in known_paths()
         rc, out, _ = run(capsys, "explain", *p)
-        assert rc == 0 and "records" in out
+        assert rc == 0
+        assert "records" in out
     rc, out, _ = run(capsys, "learn")
-    assert rc == 0 and "records" in out
+    assert rc == 0
+    assert "records" in out
     rc, out, _ = run(capsys, "explain", "memory")
     assert ".local/share" not in out

@@ -18,11 +18,11 @@ def _no_prune(records_dir, now, keep_days, **_kw) -> dict:
 
 @pytest.fixture(autouse=True)
 def _no_background_retention(monkeypatch):
-    """A Daemon built without ``prune=`` gets a no-op retention pass in tests.
+    """A Daemon whose Options carry no ``prune`` gets a no-op retention pass in tests.
 
     Many daemon tests call ``start()`` without ``shutdown()``; with the real pass their
     background retention thread would delete the fixtures' old-dated day files while the
-    test still reads them. Tests about retention pass ``prune=`` explicitly (their own
+    test still reads them. Tests about retention set ``Options.prune`` explicitly (their own
     ``heat_governor.retention`` import is untouched)."""
     import types
 

@@ -290,7 +290,8 @@ def test_gzipped_day_gives_the_same_samples_and_stride(home, tmp_path):
     assert raw["stride"] > 1
     assert gz["stride"] == raw["stride"]
     assert gz["samples"] == raw["samples"]
-    assert gz["lines_read"] == raw["lines_read"] and gz["parsed"] == raw["parsed"]
+    assert gz["lines_read"] == raw["lines_read"]
+    assert gz["parsed"] == raw["parsed"]
     assert gz["files"] == [n + ".gz" for n in raw["files"]]
     # short window too
     assert run(gz_home, T0, T0 + 3600, 50)["samples"] == run(raw_home, T0, T0 + 3600, 50)["samples"]

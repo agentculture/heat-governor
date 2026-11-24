@@ -100,6 +100,8 @@ from heat_governor.ship import Shipper
 from heat_governor.state import SCHEMA, StateServer, write_state
 from heat_governor.units import Systemctl, SystemctlLike, UnitCapper, containing
 
+RETENTION_CHECK_S = 60.0  # how often the retention thread looks for a new UTC date
+
 
 @dataclass
 class Options:
@@ -129,6 +131,10 @@ class Options:
     fsync: bool = True
     log: Callable[[str], None] = print
     extra: dict = field(default_factory=dict)
+    # record retention: the pass to run (None: retention.prune_pass) and how often the
+    # thread looks for a new UTC date
+    prune: Callable[..., dict] | None = None
+    retention_check_s: float = RETENTION_CHECK_S
 
 
 def utc() -> str:
@@ -140,7 +146,6 @@ SHIP_EVENTS = MEMORY_EVENTS
 EV_BOUNDARY_CHANGED = "memory_boundary_changed"
 BOUNDARIES_APPLIED = "boundaries-applied.json"  # in the data dir: the rules last applied
 POSTMORTEM_FILES = 2  # the newest day files read for the postmortem (never the whole archive)
-RETENTION_CHECK_S = 60.0  # how often the retention thread looks for a new UTC date
 
 
 def _file_rules(cfg: Config) -> tuple:
@@ -195,8 +200,6 @@ class Daemon:
         sys_root: Path = Path("/sys"),
         make_guard: Callable[..., MemGuard] | None = None,
         make_shipper: Callable[..., Shipper] | None = None,
-        prune: Callable[..., dict] | None = None,
-        retention_check_s: float = RETENTION_CHECK_S,
     ) -> None:
         self.profile = profile
         self.opts = opts
@@ -255,8 +258,8 @@ class Daemon:
             self._ensure_unit_capper().set_dry({u.name for u in opts.units if u.dry_run})
             self._sync_adaptive(opts.units)
         self._init_memory(opts, proc_root, sys_root, make_guard, make_shipper)
-        self._prune = prune or retention.prune_pass
-        self._retention_check_s = retention_check_s
+        self._prune = opts.prune or retention.prune_pass
+        self._retention_check_s = opts.retention_check_s
         self.retention: RetentionThread | None = None
 
     def _init_pair(self, peer_link: PeerLink | None, opts: Options) -> None:

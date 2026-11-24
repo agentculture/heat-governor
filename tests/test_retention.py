@@ -79,7 +79,8 @@ def test_ten_days_keep_seven_leaves_eight_files(records):
     result = prune_pass(records, NOW, 7)
 
     assert set(result) == RESULT_KEYS
-    assert result["errors"] == [] and result["warnings"] == []
+    assert result["errors"] == []
+    assert result["warnings"] == []
     left = names(records)
     assert len(left) == 8
     assert {"20261125.jsonl", "20261124.jsonl"} <= left
@@ -237,7 +238,8 @@ def test_today_and_yesterday_never_touched_around_midnight(records, keep_days, o
     result = prune_pass(records, now, keep_days)
     for name, data in protected.items():
         assert (records / name).read_bytes() == data
-        assert name not in result["deleted"] and name not in result["compressed"]
+        assert name not in result["deleted"]
+        assert name not in result["compressed"]
 
 
 @pytest.mark.parametrize("bad", [0, -1, -7, True, 1.5, "7"])
@@ -282,7 +284,8 @@ def test_data_dir_siblings_untouched(tmp_path):
 
     result = prune_pass(rec, NOW, 7)
 
-    assert result["deleted"] and result["compressed"]
+    assert result["deleted"]
+    assert result["compressed"]
     after = {k: v for k, v in snapshot(data).items() if "/records" not in k}
     assert after == before
 
@@ -424,7 +427,8 @@ def test_compress_streams_in_one_mib_chunks(records, monkeypatch):
     finally:
         tracemalloc.stop()
 
-    assert reads and all(0 < n <= CHUNK for n in reads)
+    assert reads
+    assert all(0 < n <= CHUNK for n in reads)
     assert peak < 4 * CHUNK  # a 12 MiB file, a few MiB at most in flight
     del original
 
@@ -456,7 +460,8 @@ def test_concurrent_pass_runs_before_each_compress(records):
     result = prune_pass(records, NOW, 7, compress=interleaved)
 
     _assert_one_gz_per_day(records)
-    assert result["errors"] == [] and all(r["errors"] == [] for r in other_results)
+    assert result["errors"] == []
+    assert all(r["errors"] == [] for r in other_results)
 
 
 def test_concurrent_pass_runs_between_rename_and_unlink(records, monkeypatch):
@@ -497,7 +502,8 @@ def test_concurrent_pass_keeps_the_other_pass_in_progress_tmp(records):
         return compress_day(path)
 
     prune_pass(records, NOW, 7, compress=compress_while_other_writes)
-    assert seen and all(seen)
+    assert seen
+    assert all(seen)
     _assert_one_gz_per_day(records)
 
 
@@ -515,7 +521,8 @@ def test_expired_days_deleted_before_any_compression(records):
         return compress_day(path)
 
     prune_pass(records, NOW, 7, compress=compress)
-    assert checked and all(checked)
+    assert checked
+    assert all(checked)
 
 
 def test_enospc_keeps_raw_records_error_and_continues(records):
@@ -532,7 +539,8 @@ def test_enospc_keeps_raw_records_error_and_continues(records):
     result = prune_pass(records, NOW, 7, compress=compress)
 
     assert victim_path.read_bytes() == original
-    assert len(result["errors"]) == 1 and victim_path.name in result["errors"][0]
+    assert len(result["errors"]) == 1
+    assert victim_path.name in result["errors"][0]
     assert "No space left" in result["errors"][0]
     assert victim_path.name not in result["compressed"]
     for back in (2, 4, 5):
@@ -592,7 +600,8 @@ def test_clock_a_year_ahead_deletes_nothing(records):
     result = prune_pass(records, NOW + 365 * 86_400, 7)
 
     assert snapshot(records) == before
-    assert result["deleted"] == [] and result["compressed"] == []
+    assert result["deleted"] == []
+    assert result["compressed"] == []
     assert any("clock" in w for w in result["warnings"])
 
 
@@ -605,7 +614,8 @@ def test_future_dated_day_file_deletes_nothing(records):
     result = prune_pass(records, NOW, 7)
 
     assert snapshot(records) == before
-    assert result["deleted"] == [] and result["compressed"] == []
+    assert result["deleted"] == []
+    assert result["compressed"] == []
     assert any("clock" in w and "after today" in w for w in result["warnings"])
 
 
@@ -657,7 +667,9 @@ def test_symlinks_not_followed_and_subdirs_not_entered(tmp_path, records):
 
     assert snapshot(outside) == before_outside
     assert snapshot(sub) == before_sub
-    assert expired_link.is_symlink() and compressible_link.is_symlink() and gz_link.is_symlink()
+    assert expired_link.is_symlink()
+    assert compressible_link.is_symlink()
+    assert gz_link.is_symlink()
     assert dir_named_like_day.is_dir()
     touched = result["deleted"] + result["compressed"]
     for p in (expired_link, compressible_link, gz_link, dir_named_like_day):
@@ -711,7 +723,8 @@ def test_dry_run_changes_nothing_and_matches_real_pass(tmp_path, records):
     assert snapshot(records) == before
     assert set(planned) == RESULT_KEYS
     done = prune_pass(twin, NOW, 7)
-    assert done["errors"] == [] and planned["errors"] == []
+    assert done["errors"] == []
+    assert planned["errors"] == []
     assert planned["deleted"] == done["deleted"]
     assert planned["compressed"] == done["compressed"]
     assert planned["warnings"] == done["warnings"]

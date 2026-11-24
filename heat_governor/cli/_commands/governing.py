@@ -286,6 +286,17 @@ def _docker(args: argparse.Namespace, cfg):
     return docker
 
 
+def _log_cap_reader(built: list, cfg):
+    """The governor.log cap in bytes, read on every line from the live ``Options.config``
+    (``built`` holds the Options once made; a reload replaces its ``config``), else ``cfg``."""
+
+    def log_cap() -> int:
+        current = (built[0].config if built else None) or cfg
+        return int(current.log_max_mib * 1024 * 1024)
+
+    return log_cap
+
+
 def _run_options(args: argparse.Namespace, cfg):
     from heat_governor.daemon import Options, memory_rule, ship_rule
 
@@ -298,12 +309,9 @@ def _run_options(args: argparse.Namespace, cfg):
     data_s = pick("data_dir", "data_dir", None)
     data = Path(data_s) if data_s else default_data_dir()
     built: list = []  # the Options below; a live reload replaces its .config
-
-    def log_cap() -> int:
-        current = (built[0].config if built else None) or cfg
-        return int(current.log_max_mib * 1024 * 1024)
-
-    log = _file_logger(Path(args.log) if args.log else data / "governor.log", log_cap)
+    log = _file_logger(
+        Path(args.log) if args.log else data / "governor.log", _log_cap_reader(built, cfg)
+    )
     state_s = pick("state", "state", None)
     gpu_clock = pick("gpu_clock", "gpu_clock", False)
     opts = Options(

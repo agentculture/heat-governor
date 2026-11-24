@@ -75,6 +75,8 @@ class Rig:
             listeners=False,
             fsync=False,
             record=record,
+            prune=prune,
+            retention_check_s=CHECK_S,
         )
         self.daemon = Daemon(
             SPARK,
@@ -84,8 +86,6 @@ class Rig:
             clock=self.clock,
             proc_root=tmp_path / "proc",
             sys_root=tmp_path / "cgsys",
-            prune=prune,
-            retention_check_s=CHECK_S,
         )
 
     def rewrite(self, text: str) -> None:
@@ -148,7 +148,8 @@ def test_a_pass_runs_once_at_start_and_once_per_utc_rollover_on_its_own_thread(t
     finally:
         rig.daemon.shutdown()
     thread = rig.daemon.retention_thread
-    assert thread is not None and not thread.is_alive(), "stopped with the daemon"
+    assert thread is not None, "a retention thread was started"
+    assert not thread.is_alive(), "stopped with the daemon"
 
 
 def test_the_start_pass_runs_after_todays_start_row(tmp_path):
@@ -200,7 +201,8 @@ def test_ticks_keep_their_cadence_while_a_slow_fake_compressor_runs(tmp_path):
             t0 = time.monotonic()
             rig.daemon.tick()
             durations.append(time.monotonic() - t0)
-        assert not release.is_set() and rig.daemon.retention_thread.is_alive()
+        assert not release.is_set()
+        assert rig.daemon.retention_thread.is_alive()
         assert max(durations) < 0.5, durations
         ticks = [r for r in iter_records(rig.records) if "temp_c" in r and "event" not in r]
         assert len([r for r in ticks if r["t"] >= T0]) == 10
@@ -235,11 +237,13 @@ def test_a_pass_that_changed_something_writes_one_row_and_one_log_line(tmp_path)
     assert row["deleted"] == [expired.name]
     assert row["compressed"] == [old.name]
     assert row["bytes_freed"] >= size
-    assert row["errors"] == [] and row["warnings"] == []
+    assert row["errors"] == []
+    assert row["warnings"] == []
     assert row["t"] == T0
     logs = rig.retention_logs()
     assert len(logs) == 1, logs
-    assert "deleted=1" in logs[0] and "compressed=1" in logs[0]
+    assert "deleted=1" in logs[0]
+    assert "compressed=1" in logs[0]
 
 
 def test_a_pass_that_changed_nothing_writes_no_row(tmp_path):
@@ -282,7 +286,8 @@ def test_an_exception_inside_the_pass_is_logged_and_the_daemon_keeps_ticking(tmp
             rig.clock.t = T0 + i
             rig.daemon.tick()
         logs = rig.retention_logs()
-        assert len(logs) == 1 and "disk on fire" in logs[0], logs
+        assert len(logs) == 1, logs
+        assert "disk on fire" in logs[0], logs
         assert rig.rows("records_pruned") == []
         rig.clock.t = T0 + DAY  # the thread survived: the next day runs a pass again
         assert _wait(lambda: len(prune.calls) == 2)
@@ -370,4 +375,5 @@ def test_the_postmortem_reads_a_day_once_when_both_suffixes_exist(tmp_path):
     shutil.copy(raw / newer.name, newer)  # a crash between rename and unlink: both remain
     a = previous_boot_postmortem(raw, "boot-new", T0, T0 - 60, pid=2)
     b = previous_boot_postmortem(both, "boot-new", T0, T0 - 60, pid=2)
-    assert a is not None and b == a
+    assert a is not None
+    assert b == a
