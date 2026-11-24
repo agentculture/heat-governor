@@ -77,3 +77,27 @@ def test_rotation_failure_goes_to_stderr_and_logging_continues(tmp_path, capsys,
     assert not (tmp_path / "governor.log.1.gz.tmp").exists()
     log("c" * 29)
     assert log_path.read_text().endswith("c" * 29 + "\n")
+
+
+def test_run_options_cap_follows_a_live_reload(tmp_path, capsys):
+    """h7: a reload that changes log_max_mib applies without a restart (Daemon.apply_config
+    replaces opts.config; the logger reads the cap from it on every line)."""
+    from heat_governor import config as cfgmod
+    from heat_governor.cli import _build_parser
+    from heat_governor.cli._commands.governing import _run_options
+
+    path = tmp_path / "config.toml"
+    path.write_text("[daemon]\nlog_max_mib = 10\n")
+    data = tmp_path / "data"
+    args = _build_parser().parse_args(["run", "--config", str(path), "--data-dir", str(data)])
+    opts = _run_options(args, cfgmod.load(path, required=True))
+    for _ in range(5):
+        opts.log("x" * 29)
+    assert not (data / "governor.log.1.gz").exists()  # 150 bytes, far under 10 MiB
+
+    path.write_text("[daemon]\nlog_max_mib = 0.00005\n")  # ~52 bytes
+    opts.config = cfgmod.load(path, required=True)  # what Daemon.apply_config does
+    opts.log("y" * 29)
+    assert (data / "governor.log.1.gz").exists()
+    assert (data / "governor.log").read_text() == "y" * 29 + "\n"
+    capsys.readouterr()

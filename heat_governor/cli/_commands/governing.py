@@ -297,13 +297,16 @@ def _run_options(args: argparse.Namespace, cfg):
         pick.cli_set.add("apply")
     data_s = pick("data_dir", "data_dir", None)
     data = Path(data_s) if data_s else default_data_dir()
-    log = _file_logger(
-        Path(args.log) if args.log else data / "governor.log",
-        lambda: int(cfg.log_max_mib * 1024 * 1024),
-    )
+    built: list = []  # the Options below; a live reload replaces its .config
+
+    def log_cap() -> int:
+        current = (built[0].config if built else None) or cfg
+        return int(current.log_max_mib * 1024 * 1024)
+
+    log = _file_logger(Path(args.log) if args.log else data / "governor.log", log_cap)
     state_s = pick("state", "state", None)
     gpu_clock = pick("gpu_clock", "gpu_clock", False)
-    return Options(
+    opts = Options(
         apply=apply,
         poll_s=float(pick("poll", "poll_s", 1.0)),
         state_path=Path(state_s) if state_s else default_state_path(),
@@ -330,6 +333,8 @@ def _run_options(args: argparse.Namespace, cfg):
         fsync=bool(dcfg.get("fsync", True)),
         log=log,
     )
+    built.append(opts)
+    return opts
 
 
 def _run_once(d, opts, cfg, args: argparse.Namespace) -> None:
