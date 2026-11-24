@@ -14,11 +14,13 @@ against the traces of real resets before it governs anything.
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import re
 import threading
 import time
+import zlib
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -152,14 +154,34 @@ def _row_in_window(raw: bytes, since: float, now: float) -> dict | None:
     return rec if isinstance(t, (int, float)) and since <= t <= now else None
 
 
+def open_day(path: Path, *, errors: str = "strict"):
+    """Open one day's records (or a trace) as a utf-8 text file.
+
+    ``<day>.jsonl.gz`` is read through gzip; anything else is opened as plain text. Read-only.
+    """
+    path = Path(path)
+    if path.suffix == ".gz":
+        return gzip.open(path, "rt", encoding="utf-8", errors=errors)
+    return open(path, encoding="utf-8", errors=errors)
+
+
+def _day_files(directory: Path) -> list[Path]:
+    """Record files, raw and compressed, ordered by the YYYYMMDD stem."""
+    files = [*directory.glob("*.jsonl"), *directory.glob("*.jsonl.gz")]
+    return sorted(files, key=lambda p: (p.name.split(".", 1)[0], p.name))
+
+
 def iter_records(directory: Path) -> Iterator[dict]:
-    for path in sorted(directory.glob("*.jsonl")):
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    yield json.loads(line)
-                except ValueError:
-                    continue  # a torn last line after a power loss
+    for path in _day_files(directory):
+        try:
+            with open_day(path) as fh:
+                for line in fh:
+                    try:
+                        yield json.loads(line)
+                    except ValueError:
+                        continue  # a torn last line after a power loss
+        except (EOFError, zlib.error):
+            continue  # a truncated gzip stream: keep the rows read so far, go on to the next day
 
 
 MEMORY_EVENTS = (
@@ -342,7 +364,7 @@ class _Tally:
 
 def replay(path: Path, profile: Profile) -> dict:
     """Run the controller over a trace; what would it have decided?"""
-    with open(path, encoding="utf-8") as fh:
+    with open_day(path) as fh:
         lines = fh.readlines()
     first = next((ln for ln in lines if ln.strip()), "")
     samples = _jsonl_samples(lines) if first.lstrip().startswith("{") else _t1s_samples(lines)
