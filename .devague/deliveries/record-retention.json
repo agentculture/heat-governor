@@ -2,7 +2,7 @@
   "plan_slug": "record-retention",
   "schema_version": 2,
   "created": "2026-11-24T23:04:19Z",
-  "updated": "2026-11-24T23:11:23Z",
+  "updated": "2026-11-24T23:53:19Z",
   "deviations": [
     {
       "id": "d1",
@@ -35,7 +35,467 @@
       "seq": 2
     }
   ],
-  "evidence": [],
-  "deltas": [],
+  "evidence": [
+    {
+      "id": "e1",
+      "obligation_ref": "o1",
+      "test_ref": "tests/test_retention.py::test_window_boundary_raw_and_gz; tests/test_retention.py::test_ten_days_keep_seven_leaves_eight_files",
+      "behavior_text": "parametrised over keep_days 1, 7, 30 with raw and .gz days on both sides of today minus keep_days: the expired ones are deleted, the ones inside survive; 10 days at keep_days 7 leave 8 files, today and yesterday raw",
+      "contract_text": "every YYYYMMDD.jsonl or .jsonl.gz dated before today minus keep_days (UTC) is deleted; every day inside the window survives, for keep_days 1, 7 and 30",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 3
+    },
+    {
+      "id": "e2",
+      "obligation_ref": "o2",
+      "test_ref": "tests/test_retention.py::test_compress_day_roundtrip_and_raw_removed; tests/test_retention.py::test_compress_day_order_fsync_then_rename_then_unlink; tests/test_retention.py::test_compress_day_failure_before_rename_keeps_raw",
+      "behavior_text": "gunzip of the produced .gz equals the raw bytes; the recorded call order is fsync, rename, then unlink; a failure injected at write, fsync or rename leaves the raw file byte-identical",
+      "contract_text": "gunzip of the produced YYYYMMDD.jsonl.gz equals the original bytes; the raw file is unlinked only after the .gz was fsync'd and renamed; a failure before the rename leaves the raw file byte-identical",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 4
+    },
+    {
+      "id": "e3",
+      "obligation_ref": "o3",
+      "test_ref": "tests/test_recorder_gz.py::test_iter_records_identical; tests/test_recorder_gz.py::test_report_and_stats_identical; tests/test_recorder_gz.py::test_replay_identical; tests/test_memory_replay_gz.py::test_replay_gz_matches_raw; tests/test_daemon_retention.py::test_the_postmortem_reads_the_newest_days_raw_or_gzipped; tests/test_history.py::test_gzipped_day_gives_the_same_samples_and_stride",
+      "behavior_text": "the same fixture stored raw and gzipped gives identical iter_records rows, report entries, sensor stats, replay summaries, memory replay JSON, postmortem reboot entries and history samples",
+      "contract_text": "the same fixture stored raw and stored as .jsonl.gz yields identical rows, reboot entries, stats, replay summaries and history samples; replay and memory replay accept a .jsonl.gz path",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 5
+    },
+    {
+      "id": "e4",
+      "obligation_ref": "o4",
+      "test_ref": "tests/test_retention.py::test_today_and_yesterday_never_touched_around_midnight; tests/test_retention.py::test_keep_days_below_one_is_refused; tests/test_config_retention.py::test_load_raises_config_error_for_zero_keep_days; tests/test_config_retention.py::test_keep_days_refused",
+      "behavior_text": "keep_days 1 and 7 at midnight minus 1 s, at, and plus 1 s: today's and yesterday's files are never compressed or deleted; keep_days 0 or negative raises ValueError in prune_pass and ConfigError at load",
+      "contract_text": "today's and yesterday's UTC files are never compressed or deleted for any keep_days >= 1, across a fake midnight; keep_days = 0 or negative raises ConfigError",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 6
+    },
+    {
+      "id": "e5",
+      "obligation_ref": "o5",
+      "test_ref": "tests/test_retention.py::test_data_dir_siblings_untouched",
+      "behavior_text": "the audit log, boundaries-applied.json, adaptive.json, ledger.json, spool/ and ssh/ (and a day-named file outside records/) keep identical bytes and mtime_ns after a pass",
+      "contract_text": "boundaries-audit.jsonl, boundaries-applied.json, adaptive.json, ledger.json, spool/ and ssh/ keep identical bytes and mtimes after a pass",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 7
+    },
+    {
+      "id": "e6",
+      "obligation_ref": "o6",
+      "test_ref": "tests/test_config_retention.py::test_defaults; tests/test_config_retention.py::test_keep_days_refused; tests/test_config_retention.py::test_log_max_mib_refused; tests/test_config_retention.py::test_template_has_commented_lines_in_daemon_table; tests/test_config_retention.py::test_not_restart_only; tests/test_daemon_retention.py::test_a_reload_that_changes_keep_days_is_used_by_the_next_pass; tests/test_governor_log_rotation.py::test_run_options_cap_follows_a_live_reload",
+      "behavior_text": "defaults 7 and 10; wrong types and out-of-range values refused; both keys commented in the generated [daemon] table; neither in Daemon.RESTART_ONLY; a reload changing keep_days is used by the next pass and one changing log_max_mib moves the log cap",
+      "contract_text": "keep_days (int >= 1, default 7) and log_max_mib (number > 0, default 10) in [daemon] are validated strictly, appear commented in the generated config, are not in Daemon.RESTART_ONLY, and a reload changes the value the next pass uses",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 8
+    },
+    {
+      "id": "e7",
+      "obligation_ref": "o7",
+      "test_ref": "tests/test_cli_records.py::test_dry_run_changes_nothing_and_matches_real; tests/test_cli_records.py::test_bad_keep_days_exit_1; tests/test_cli_records.py::test_missing_records_dir_exit_2; tests/test_cli_records.py::test_overview_and_bare_noun; tests/test_cli_records.py::test_explain_and_learn; uv run teken cli doctor . --strict",
+      "behavior_text": "--dry-run leaves the listing unchanged and a following real prune changes exactly the listed files; bad --keep-days exits 1 with nothing on stdout; a missing records dir exits 2; the bare noun prints the overview; explain resolves records, records overview and records prune; teken cli doctor --strict 26/26",
+      "contract_text": "--dry-run changes no file and lists exactly the files a real pass then changes; results on stdout, errors on stderr, exit 0/1/2; the bare noun prints the overview; explain resolves records, records overview and records prune",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 9
+    },
+    {
+      "id": "e8",
+      "obligation_ref": "o8",
+      "test_ref": "tests/test_governor_log_rotation.py::test_log_never_exceeds_cap_plus_one_line; tests/test_governor_log_rotation.py::test_rotation_keeps_previous_contents; tests/test_governor_log_rotation.py::test_second_rotation_replaces_first",
+      "behavior_text": "with a 100-byte cap the log never exceeds cap plus one line; the previous contents land in governor.log.1.gz and the next line starts a fresh governor.log; a second rotation replaces the first with no .2.gz",
+      "contract_text": "the log never exceeds the cap plus one line; on rotation the old contents land in governor.log.1.gz (one generation, replaced on the next rotation) and the next line starts a fresh governor.log",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 10
+    },
+    {
+      "id": "e9",
+      "obligation_ref": "o9",
+      "test_ref": "tests/test_retention.py::test_compress_day_failure_before_rename_keeps_raw; tests/test_retention.py::test_crash_leftover_tmp_removed_only_after_an_hour; tests/test_retention.py::test_crash_between_rename_and_unlink_is_finished_by_next_pass; tests/test_retention.py::test_other_names_never_removed_even_when_old",
+      "behavior_text": "a failure injected at write, fsync or rename leaves the raw day and no temp; a leftover .tmp is removed only once older than 1 hour; a crash between rename and unlink is finished by the next pass; files not named like day files are never removed even when old",
+      "contract_text": "a crash injected between write, fsync and rename leaves the raw day or a complete .gz plus at most one .tmp; a later pass removes only a .tmp older than 1 hour; files not named YYYYMMDD.jsonl(.gz) are never removed",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 11
+    },
+    {
+      "id": "e10",
+      "obligation_ref": "o10",
+      "test_ref": "tests/test_retention.py::test_compress_streams_in_one_mib_chunks; tests/test_daemon_retention.py::test_ticks_keep_their_cadence_while_a_slow_fake_compressor_runs",
+      "behavior_text": "every read during compression is at most 1 MiB and tracemalloc peak stays under 4 MiB for a 12 MiB incompressible file; ten ticks each return in under 0.5 s while a fake compressor blocks the pass (loose bound, see lapse l7)",
+      "contract_text": "ticks keep their cadence while a slow fake compressor runs; compression reads and writes in 1 MiB chunks so peak extra memory does not grow with file size",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 12
+    },
+    {
+      "id": "e11",
+      "obligation_ref": "o11",
+      "test_ref": "tests/test_retention.py::test_concurrent_pass_runs_before_each_compress; tests/test_retention.py::test_concurrent_pass_runs_between_rename_and_unlink; tests/test_retention.py::test_concurrent_pass_keeps_the_other_pass_in_progress_tmp; tests/test_retention.py::test_compress_day_never_overwrites_an_existing_tmp",
+      "behavior_text": "two passes interleaved in one process (pid= and monkeypatching, see lapse l5) end with one complete .gz per day, no raw copy, no exception from a missing raw file, and neither removes the other's in-progress .tmp",
+      "contract_text": "interleaved passes end with one complete .gz per day, no raw copy, no exception from a missing raw file, and no removal of the other pass's in-progress .tmp",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 13
+    },
+    {
+      "id": "e12",
+      "obligation_ref": "o12",
+      "test_ref": "tests/test_retention.py::test_expired_days_deleted_before_any_compression; tests/test_retention.py::test_enospc_keeps_raw_records_error_and_continues; tests/test_retention.py::test_enospc_inside_the_real_compressor",
+      "behavior_text": "expired days are deleted before the compressor is first called; OSError(ENOSPC) from the hook or inside the real compressor leaves that raw day intact, records the error and the other days are still processed",
+      "contract_text": "expired days are deleted before any compression starts; a compressor raising OSError(ENOSPC) leaves that raw day intact, records the error in the pass result and still processes the other days",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 14
+    },
+    {
+      "id": "e13",
+      "obligation_ref": "o13",
+      "test_ref": "tests/test_daemon_retention.py::test_a_pass_that_changed_something_writes_one_row_and_one_log_line; tests/test_daemon_retention.py::test_an_exception_inside_the_pass_is_logged_and_the_daemon_keeps_ticking; tests/test_daemon_retention.py::test_a_pass_that_changed_nothing_writes_no_row",
+      "behavior_text": "a real deletion and compression produce exactly one records_pruned row returned by iter_records (deleted, compressed, bytes_freed, errors, warnings) and one retention log line; an exception in the pass is logged once and ticks continue; a pass that changed nothing writes no row",
+      "contract_text": "a pass that changed something writes one records_pruned row (deleted, compressed, bytes_freed, errors) that iter_records returns, plus one log line; an exception inside the pass is caught and logged and the daemon keeps ticking",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 15
+    },
+    {
+      "id": "e14",
+      "obligation_ref": "o14",
+      "test_ref": "tests/test_retention.py::test_clock_a_year_ahead_deletes_nothing; tests/test_retention.py::test_future_dated_day_file_deletes_nothing; tests/test_retention.py::test_days_before_a_hole_longer_than_keep_days_are_never_deleted; tests/test_daemon_retention.py::test_a_forward_clock_jump_deletes_nothing_through_the_daemon",
+      "behavior_text": "a clock a year ahead with no file for today, a future-dated day file, and (deviation d1) a jump after which the daemon has written today's file: nothing before the hole is deleted and a clock or gap warning is recorded, through prune_pass and through the daemon",
+      "contract_text": "with a fake clock a year ahead of the newest day file, or with a day file dated after today, nothing is deleted and the pass result carries a clock warning",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 16
+    },
+    {
+      "id": "e15",
+      "obligation_ref": "o15",
+      "test_ref": "tests/test_retention.py::test_symlinks_not_followed_and_subdirs_not_entered; tests/test_retention.py::test_compress_day_refuses_a_symlink",
+      "behavior_text": "a symlink named like a day file pointing outside the records dir is not followed and its target survives; subdirectories are not entered; compress_day refuses a symlink",
+      "contract_text": "a symlink named like a day file pointing outside the records dir is not followed and its target survives; subdirectories are not entered",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 17
+    },
+    {
+      "id": "e16",
+      "obligation_ref": "o16",
+      "test_ref": "tests/test_history.py::test_gzipped_day_gives_the_same_samples_and_stride; tests/test_history.py::test_isize_trailer_equals_the_raw_size",
+      "behavior_text": "for a 3-day fixture with stride > 1 the gzipped copy gives the same stride, samples, lines_read and parsed as the raw one; the ISIZE trailer equals the raw size (the script's own size value is checked only through the stride, see lapse l2)",
+      "contract_text": "the stride computed for a gzipped day equals the stride for the same raw day, using the gzip ISIZE trailer as the uncompressed size",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 18
+    },
+    {
+      "id": "e17",
+      "obligation_ref": "o17",
+      "test_ref": "docs/evidence/2026-11-24-record-retention-live.md (deploy of 0.20.0 to all six boxes, 2026-11-24 23:20-23:30 UTC)",
+      "behavior_text": "every dry run listed exactly what the real first pass did; spark, spark2, thor, orin and the EliteMini end with 8 files, 2 raw and 6 .jsonl.gz, 220-279 MB; the dashboard 7d history answers from the records through the gzipped days on all six machines; mesh status shows all six on 0.20.0, cool, not failing, guard armed",
+      "contract_text": "after the first pass each box holds today and yesterday raw and older days in the window as .jsonl.gz, every record reader still works on them, and records prune --dry-run matches what the daemon did",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed live on the deployed 0.20.0 daemons (records_pruned log lines, ls/du of records/, /api/history?range=7d, mesh status); cultureos had nothing to compress yet, so its compress path is not observed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:30:00Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 19
+    },
+    {
+      "id": "e18",
+      "obligation_ref": "o7",
+      "test_ref": "tests/test_cli_records.py::test_noun_level_options_reach_the_verb; tests/test_cli_records.py::test_verb_level_option_still_wins_over_the_noun; tests/test_cli_records.py::test_allow_gap_flag_reaches_prune_pass; tests/test_cli_records.py::test_per_file_error_exit_2_after_result; tests/test_cli_records.py::test_stale_clock_warning_on_stderr",
+      "behavior_text": "records --data-dir/--config/--json before the verb reach prune (keep_days 30 from the noun-level config deletes nothing); a verb-level option still wins; --allow-gap reaches prune_pass; a per-file error exits 2 after printing the result; a stale-clock refusal exits 0 with the warning on stderr and in the JSON",
+      "contract_text": "--dry-run changes no file and lists exactly the files a real pass then changes; results on stdout, errors on stderr, exit 0/1/2; the bare noun prints the overview; explain resolves records, records overview and records prune",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 20
+    },
+    {
+      "id": "e19",
+      "obligation_ref": "o3",
+      "test_ref": "tests/test_recorder_gz.py::test_a_corrupt_gz_day_is_skipped_not_fatal; tests/test_recorder_gz.py::test_truncated_gz_keeps_earlier_rows; tests/test_history.py::test_a_gz_with_a_corrupt_deflate_body_does_not_fail_the_window; tests/test_history.py::test_raw_day_wins_over_a_gzipped_twin_and_bad_gz_is_skipped",
+      "behavior_text": "a .gz with a bad magic number or a CRC mismatch, or a truncated one, loses only that day's unread rows in iter_records; a .gz with a corrupt deflate body or a non-gzip .gz does not fail the history window",
+      "contract_text": "the same fixture stored raw and stored as .jsonl.gz yields identical rows, reboot entries, stats, replay summaries and history samples; replay and memory replay accept a .jsonl.gz path",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 21
+    },
+    {
+      "id": "e20",
+      "obligation_ref": "o6",
+      "test_ref": "tests/test_config_retention.py::test_log_max_mib_must_be_finite; tests/test_config_retention.py::test_keep_days_has_an_upper_bound; tests/test_governor_log_rotation.py::test_a_cap_that_cannot_be_read_never_stops_logging",
+      "behavior_text": "log_max_mib inf, nan and -inf raise ConfigError; keep_days 1000000 raises ConfigError (cap 3650); a cap callable that raises is reported on stderr and the line is still written",
+      "contract_text": "keep_days (int >= 1, default 7) and log_max_mib (number > 0, default 10) in [daemon] are validated strictly, appear commented in the generated config, are not in Daemon.RESTART_ONLY, and a reload changes the value the next pass uses",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 22
+    },
+    {
+      "id": "e21",
+      "obligation_ref": "o13",
+      "test_ref": "tests/test_daemon_retention.py::test_a_warning_alone_is_recorded; tests/test_daemon_retention.py::test_a_result_still_queued_at_shutdown_is_written",
+      "behavior_text": "a pass that changed nothing but returned a warning still writes a records_pruned row; a result still queued at shutdown is written before the recorder closes",
+      "contract_text": "a pass that changed something writes one records_pruned row (deleted, compressed, bytes_freed, errors) that iter_records returns, plus one log line; an exception inside the pass is caught and logged and the daemon keeps ticking",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "ran green with the full set of obligation tests (156 passed) at main 398664a, 2026-11-24T23:40:10Z",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-24T23:40:10Z",
+        "commit": "398664a"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 23
+    }
+  ],
+  "deltas": [
+    {
+      "id": "b1",
+      "kind": "added",
+      "behavior_text": "a pass never deletes day files before a hole longer than keep_days (they are still gzipped and a 'gap check' warning is recorded each pass); records prune --allow-gap deletes across the hole. After a real downtime longer than the window, the old days stay until the operator runs it",
+      "caused_by": [
+        "d1"
+      ],
+      "evidence_refs": [
+        "e14",
+        "e18"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    },
+    {
+      "id": "b2",
+      "kind": "amended",
+      "behavior_text": "records options given before the verb (records --config X prune) reach it; keep_days is capped at 3650 and log_max_mib must be finite (config and prune_pass); a corrupt .gz day is skipped by report / sensors and the history script instead of failing the whole read; an unreadable log cap never stops logging",
+      "caused_by": [
+        "d2"
+      ],
+      "evidence_refs": [
+        "e18",
+        "e19",
+        "e20"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    },
+    {
+      "id": "b3",
+      "kind": "amended",
+      "behavior_text": "a records_pruned row is also written for a pass that changed nothing but returned warnings or errors (c27 named only passes that changed something), so a clock or gap refusal is visible in the records",
+      "caused_by": [
+        "c27"
+      ],
+      "evidence_refs": [
+        "e21"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    },
+    {
+      "id": "b4",
+      "kind": "added",
+      "behavior_text": "records prune exits 2 when any file failed during the pass, after printing the result; a pass refused by the clock check exits 0 with the warning on stderr and in the JSON (c20 named exit codes 0/1/2 without saying which applies to these two cases)",
+      "caused_by": [
+        "c20"
+      ],
+      "evidence_refs": [
+        "e18"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    }
+  ],
   "supersessions": []
 }
